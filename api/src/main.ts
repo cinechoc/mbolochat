@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import express from 'express';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -24,7 +23,7 @@ async function bootstrap() {
 
   const uploadsDir = join(process.cwd(), 'uploads');
   if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
-  app.use('/uploads', express.static(uploadsDir));
+  app.useStaticAssets(uploadsDir, { prefix: '/uploads' });
 
   const webDist = join(process.cwd(), '..', 'mobile', 'dist');
   if (existsSync(webDist)) {

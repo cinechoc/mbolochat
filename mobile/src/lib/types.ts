@@ -2,6 +2,7 @@ export interface SenderInfo {
   id: string;
   username: string;
   displayName: string;
+  avatarUrl: string | null;
 }
 
 export type Gender = 'FEMALE' | 'MALE' | 'CUSTOM';

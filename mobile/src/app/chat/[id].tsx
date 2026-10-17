@@ -27,10 +27,10 @@ type ListRow =
   | { key: string; type: 'date'; label: string }
   | { key: string; type: 'message'; message: Message };
 
-function ChatHeaderTitle({ title, subtitle }: { title: string; subtitle: string }) {
+function ChatHeaderTitle({ title, subtitle, uri }: { title: string; subtitle: string; uri?: string | null }) {
   return (
     <View style={styles.headerTitle}>
-      <Avatar name={title} size={36} />
+      <Avatar name={title} uri={uri} size={36} />
       <View style={styles.headerTitleBody}>
         <ThemedText numberOfLines={1} style={styles.headerName}>
           {title}
@@ -237,7 +237,13 @@ export default function ChatScreen() {
     <ThemedView style={styles.container}>
       <Stack.Screen
         options={{
-          headerTitle: () => <ChatHeaderTitle title={title} subtitle={subtitle} />,
+          headerTitle: () => (
+            <ChatHeaderTitle
+              title={title}
+              subtitle={subtitle}
+              uri={conversation?.type === 'DIRECT' ? other?.avatarUrl : null}
+            />
+          ),
           headerRight: () =>
             conversation?.type === 'GROUP' ? (
               <Pressable onPress={() => router.push({ pathname: '/conversation-settings/[id]', params: { id } })}>

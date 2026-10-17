@@ -9,6 +9,7 @@ export interface SenderInfo {
   id: string;
   username: string;
   displayName: string;
+  avatarUrl: string | null;
 }
 
 export interface MessageDto {
@@ -122,6 +123,7 @@ export class ConversationsService {
         id: users.id,
         username: users.username,
         displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
       })
       .from(conversationMembers)
       .innerJoin(users, eq(users.id, conversationMembers.userId))
@@ -156,7 +158,7 @@ export class ConversationsService {
       createdAt: conversation.createdAt,
       members: memberRows
         .filter((member) => member.conversationId === conversation.id)
-        .map(({ id, username, displayName }) => ({ id, username, displayName })),
+        .map(({ id, username, displayName, avatarUrl }) => ({ id, username, displayName, avatarUrl })),
       lastMessage: lastMessages.get(conversation.id) ?? null,
       unreadCount: unreadMap.get(conversation.id) ?? 0,
     }));
@@ -238,6 +240,7 @@ export class ConversationsService {
         senderId: users.id,
         senderUsername: users.username,
         senderDisplayName: users.displayName,
+        senderAvatarUrl: users.avatarUrl,
       })
       .from(messages)
       .innerJoin(users, eq(users.id, messages.senderId))
@@ -259,6 +262,7 @@ export class ConversationsService {
         id: row.senderId,
         username: row.senderUsername,
         displayName: row.senderDisplayName,
+        avatarUrl: row.senderAvatarUrl,
       },
     }));
   }
@@ -292,7 +296,12 @@ export class ConversationsService {
       conversationId: message.conversationId,
       content: message.content,
       createdAt: message.createdAt,
-      sender: { id: sender.id, username: sender.username, displayName: sender.displayName },
+      sender: {
+        id: sender.id,
+        username: sender.username,
+        displayName: sender.displayName,
+        avatarUrl: sender.avatarUrl,
+      },
     };
   }
 
@@ -322,6 +331,7 @@ export class ConversationsService {
       senderId: string;
       senderUsername: string;
       senderDisplayName: string;
+      senderAvatarUrl: string | null;
     }>(sql`
       select distinct on (m.conversation_id)
         m.id,
@@ -330,7 +340,8 @@ export class ConversationsService {
         m.created_at as "createdAt",
         u.id as "senderId",
         u.username as "senderUsername",
-        u.display_name as "senderDisplayName"
+        u.display_name as "senderDisplayName",
+        u.avatar_url as "senderAvatarUrl"
       from messages m
       inner join users u on u.id = m.sender_id
       where m.conversation_id in (${inList})
@@ -348,6 +359,7 @@ export class ConversationsService {
           id: row.senderId,
           username: row.senderUsername,
           displayName: row.senderDisplayName,
+          avatarUrl: row.senderAvatarUrl ?? null,
         },
       });
     }

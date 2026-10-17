@@ -130,6 +130,8 @@ export default function ChatsScreen() {
             }
             renderItem={({ item }) => {
               const title = conversationTitle(item, user.id);
+              const rowAvatarUri =
+                item.type === 'DIRECT' ? (item.members.find((member) => member.id !== user.id)?.avatarUrl ?? null) : null;
               return (
                 <Pressable
                   onPress={() => router.push({ pathname: '/chat/[id]', params: { id: item.id } })}
@@ -137,7 +139,7 @@ export default function ChatsScreen() {
                     styles.row,
                     { backgroundColor: pressed ? theme.backgroundSelected : theme.background },
                   ]}>
-                  <Avatar name={title} size={52} />
+                  <Avatar name={title} uri={rowAvatarUri} size={52} />
                   <ThemedView style={styles.rowBody}>
                     <ThemedText numberOfLines={1} style={styles.rowTitle}>
                       {title}

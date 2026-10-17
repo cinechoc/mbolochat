@@ -141,7 +141,7 @@ export default function ConversationSettingsScreen() {
           keyExtractor={(m) => m.id}
           renderItem={({ item: m }) => (
             <ThemedView style={styles.memberRow}>
-              <Avatar name={m.displayName} uri={null} size={40} />
+              <Avatar name={m.displayName} uri={m.avatarUrl} size={40} />
               <ThemedView style={styles.memberBody}>
                 <ThemedText style={styles.memberName}>{m.displayName}</ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
