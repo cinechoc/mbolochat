@@ -41,12 +41,12 @@ const bob = await register('Bob', 'Smoke');
 
 const conversation = await api('/conversations', {
   method: 'POST',
-  headers: { Authorization: `Bearer ${alice.token}` },
+  headers: { Authorization: `Bearer ${alice.accessToken}` },
   body: JSON.stringify({ memberIds: [bob.user.id] }),
 });
 
-const aliceSocket = await connect(alice.token);
-const bobSocket = await connect(bob.token);
+const aliceSocket = await connect(alice.accessToken);
+const bobSocket = await connect(bob.accessToken);
 
 aliceSocket.emit('conversation:join', { conversationId: conversation.id });
 bobSocket.emit('conversation:join', { conversationId: conversation.id });
@@ -72,14 +72,60 @@ if (message.content !== 'Bonjour Bob !' || message.sender.username !== alice.use
 }
 
 const history = await api(`/conversations/${conversation.id}/messages`, {
-  headers: { Authorization: `Bearer ${bob.token}` },
+  headers: { Authorization: `Bearer ${bob.accessToken}` },
 });
 if (history.length < 1) {
   throw new Error('Message was not persisted');
 }
 
+// typing indicator
+const typingReceived = new Promise((resolve, reject) => {
+  const timeout = setTimeout(() => reject(new Error('timeout waiting for typing')), 5000);
+  bobSocket.on('typing', (payload) => {
+    clearTimeout(timeout);
+    resolve(payload);
+  });
+});
+aliceSocket.emit('typing', { conversationId: conversation.id });
+const typing = await typingReceived;
+if (typing.userId !== alice.user.id) {
+  throw new Error(`Unexpected typing payload: ${JSON.stringify(typing)}`);
+}
+
+// read receipts
+const readReceived = new Promise((resolve, reject) => {
+  const timeout = setTimeout(() => reject(new Error('timeout waiting for read')), 5000);
+  aliceSocket.on('read', (payload) => {
+    clearTimeout(timeout);
+    resolve(payload);
+  });
+});
+bobSocket.emit('message:read', { conversationId: conversation.id });
+const read = await readReceived;
+if (read.userId !== bob.user.id) {
+  throw new Error(`Unexpected read payload: ${JSON.stringify(read)}`);
+}
+
+// refresh token rotation
+const refreshed = await api('/auth/refresh', {
+  method: 'POST',
+  body: JSON.stringify({ refreshToken: alice.refreshToken }),
+});
+if (!refreshed.accessToken || !refreshed.refreshToken) {
+  throw new Error('Refresh did not return new tokens');
+}
+const reuse = await fetch(`${API}/auth/refresh`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ refreshToken: alice.refreshToken }),
+});
+if (reuse.ok) {
+  throw new Error('Rotated refresh token should be rejected');
+}
+
 aliceSocket.disconnect();
 bobSocket.disconnect();
 console.log('sent:', sent.id, 'received by bob:', message.content);
+console.log('typing ok, read ok, refresh rotation ok');
 console.log('SMOKE TEST OK');
 process.exit(0);
