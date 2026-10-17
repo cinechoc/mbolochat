@@ -54,6 +54,8 @@ export default function ChatScreen() {
 
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -69,11 +71,12 @@ export default function ChatScreen() {
       try {
         const [summary, history] = await Promise.all([
           api.getConversation(token, id),
-          api.listMessages(token, id),
+          api.listMessages(token, id, undefined, 30),
         ]);
         if (active) {
           setConversation(summary);
           setMessages(history);
+          setHasMore(history.length >= 30);
           setError(null);
         }
       } catch (err) {
@@ -197,6 +200,20 @@ export default function ChatScreen() {
             data={rows}
             inverted
             keyExtractor={(item) => item.key}
+            onEndReached={() => {
+              if (!hasMore || loadingMore || messages.length === 0) return;
+              const oldest = messages[0];
+              setLoadingMore(true);
+              api
+                .listMessages(token!, id!, oldest.createdAt, 30)
+                .then((older) => {
+                  setMessages((prev) => [...older, ...prev]);
+                  setHasMore(older.length >= 30);
+                })
+                .catch(() => undefined)
+                .finally(() => setLoadingMore(false));
+            }}
+            onEndReachedThreshold={0.3}
             contentContainerStyle={styles.listContent}
             onContentSizeChange={() => listRef.current?.scrollToOffset({ offset: 0, animated: false })}
             ListEmptyComponent={
