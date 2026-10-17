@@ -1,5 +1,5 @@
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,8 +11,9 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { conversationTitle, formatTime } from '@/lib/format';
-import type { ConversationSummary } from '@/lib/types';
+import { conversationTitle, formatListTimestamp } from '@/lib/format';
+import { connectSocket } from '@/lib/socket';
+import type { ConversationSummary, Message } from '@/lib/types';
 
 export default function ChatsScreen() {
   const { token, user, signOut } = useAuth();
@@ -21,9 +22,11 @@ export default function ChatsScreen() {
   const router = useRouter();
   const [menuView, setMenuView] = useState<'menu' | 'profile' | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [typingMap, setTypingMap] = useState<Record<string, { name: string }>>({});
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const typingTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const refresh = useCallback(async () => {
     if (!token) {
@@ -44,6 +47,100 @@ export default function ChatsScreen() {
       refresh();
     }, [refresh]),
   );
+
+  useEffect(() => {
+    if (!token || conversations.length === 0) {
+      return;
+    }
+    const socket = connectSocket(token);
+    const joinAll = () => {
+      for (const conversation of conversations) {
+        socket.emit('conversation:join', { conversationId: conversation.id });
+      }
+    };
+    if (socket.connected) {
+      joinAll();
+    } else {
+      socket.on('connect', joinAll);
+    }
+
+    const clearTyping = (conversationId: string) => {
+      setTypingMap((previous) => {
+        if (!(conversationId in previous)) {
+          return previous;
+        }
+        const next = { ...previous };
+        delete next[conversationId];
+        return next;
+      });
+      const timer = typingTimersRef.current.get(conversationId);
+      if (timer) {
+        clearTimeout(timer);
+        typingTimersRef.current.delete(conversationId);
+      }
+    };
+
+    const onMessage = (message: Message) => {
+      if (!conversations.some((item) => item.id === message.conversationId)) {
+        return;
+      }
+      clearTyping(message.conversationId);
+      setConversations((previous) => {
+        const index = previous.findIndex((item) => item.id === message.conversationId);
+        if (index < 0) {
+          return previous;
+        }
+        const existing = previous[index];
+        const updated: ConversationSummary = {
+          ...existing,
+          lastMessage: message,
+          unreadCount: message.sender.id === user?.id ? existing.unreadCount : existing.unreadCount + 1,
+        };
+        return [updated, ...previous.filter((_, position) => position !== index)];
+      });
+    };
+
+    const onTyping = (payload: { conversationId: string; userId: string }) => {
+      if (payload.userId === user?.id) {
+        return;
+      }
+      const conversation = conversations.find((item) => item.id === payload.conversationId);
+      if (!conversation) {
+        return;
+      }
+      const name =
+        conversation.members.find((member) => member.id === payload.userId)?.displayName ??
+        'Quelqu\u2019un';
+      setTypingMap((previous) => ({ ...previous, [payload.conversationId]: { name } }));
+      const previousTimer = typingTimersRef.current.get(payload.conversationId);
+      if (previousTimer) {
+        clearTimeout(previousTimer);
+      }
+      typingTimersRef.current.set(
+        payload.conversationId,
+        setTimeout(() => {
+          typingTimersRef.current.delete(payload.conversationId);
+          setTypingMap((previous) => {
+            if (!(payload.conversationId in previous)) {
+              return previous;
+            }
+            const next = { ...previous };
+            delete next[payload.conversationId];
+            return next;
+          });
+        }, 3000),
+      );
+    };
+
+    socket.on('message:new', onMessage);
+    socket.on('typing', onTyping);
+
+    return () => {
+      socket.off('message:new', onMessage);
+      socket.off('typing', onTyping);
+      socket.off('connect', joinAll);
+    };
+  }, [token, conversations, user?.id]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -66,7 +163,11 @@ export default function ChatsScreen() {
     if (!last) {
       return 'Nouvelle conversation';
     }
-    return `${last.sender.id === user.id ? 'Vous' : last.sender.displayName} : ${last.content}`;
+    const mine = last.sender.id === user.id;
+    if (mine) {
+      return `${item.type === 'GROUP' ? '\u2713\u2713 Vous : ' : '\u2713\u2713 '}${last.content}`;
+    }
+    return item.type === 'GROUP' ? `${last.sender.displayName} : ${last.content}` : last.content;
   };
 
   const memberSince = new Date(user.createdAt).toLocaleDateString('fr-FR', {
@@ -131,7 +232,11 @@ export default function ChatsScreen() {
             renderItem={({ item }) => {
               const title = conversationTitle(item, user.id);
               const rowAvatarUri =
-                item.type === 'DIRECT' ? (item.members.find((member) => member.id !== user.id)?.avatarUrl ?? null) : null;
+                item.type === 'DIRECT'
+                  ? (item.members.find((member) => member.id !== user.id)?.avatarUrl ?? null)
+                  : null;
+              const unread = item.unreadCount > 0;
+              const typingEntry = typingMap[item.id];
               return (
                 <Pressable
                   onPress={() => router.push({ pathname: '/chat/[id]', params: { id: item.id } })}
@@ -141,24 +246,38 @@ export default function ChatsScreen() {
                   ]}>
                   <Avatar name={title} uri={rowAvatarUri} size={52} />
                   <ThemedView style={styles.rowBody}>
-                    <ThemedText numberOfLines={1} style={styles.rowTitle}>
+                    <ThemedText
+                      numberOfLines={1}
+                      style={[styles.rowTitle, unread && styles.rowUnread]}>
                       {title}
                     </ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                      {previewOf(item)}
+                    <ThemedText
+                      type="small"
+                      themeColor="textSecondary"
+                      numberOfLines={1}
+                      style={[
+                        unread && styles.rowUnread,
+                        typingEntry && styles.rowPreviewTyping,
+                      ]}>
+                      {typingEntry
+                        ? `${typingEntry.name} \u00e9crit\u2026`
+                        : previewOf(item)}
                     </ThemedText>
                   </ThemedView>
                   <ThemedView style={styles.rowMeta}>
-                    {item.unreadCount > 0 ? (
+                    <ThemedText
+                      type="small"
+                      themeColor="textSecondary"
+                      style={unread ? styles.rowTimeUnread : undefined}>
+                      {formatListTimestamp(item.lastMessage?.createdAt ?? item.createdAt)}
+                    </ThemedText>
+                    {unread ? (
                       <ThemedView style={styles.badge}>
                         <ThemedText style={styles.badgeText}>
                           {item.unreadCount > 99 ? '99+' : item.unreadCount}
                         </ThemedText>
                       </ThemedView>
                     ) : null}
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {formatTime(item.lastMessage?.createdAt ?? item.createdAt)}
-                    </ThemedText>
                   </ThemedView>
                 </Pressable>
               );
@@ -319,7 +438,7 @@ const styles = StyleSheet.create({
   },
   rowMeta: {
     alignItems: 'flex-end',
-    gap: Spacing.half,
+    gap: Spacing.one,
   },
   badge: {
     minWidth: 22,
@@ -337,6 +456,18 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     fontWeight: '600',
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  rowUnread: {
+    fontWeight: '700',
+  },
+  rowPreviewTyping: {
+    fontStyle: 'italic',
+  },
+  rowTimeUnread: {
+    color: accentColor,
+    fontWeight: '700',
   },
   separator: {
     height: StyleSheet.hairlineWidth,

@@ -25,6 +25,22 @@ export function formatTime(iso: string): string {
   return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 }
 
+export function formatListTimestamp(iso: string): string {
+  const date = new Date(iso);
+  const now = new Date();
+  const startOfDay = (value: Date) =>
+    new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+  const days = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
+
+  if (days <= 0) {
+    return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+  if (days === 1) {
+    return 'Hier';
+  }
+  return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+}
+
 export function formatDateLabel(iso: string): string {
   const date = new Date(iso);
   const now = new Date();
