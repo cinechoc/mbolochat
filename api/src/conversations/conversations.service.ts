@@ -146,6 +146,48 @@ export class ConversationsService {
     });
   }
 
+  async rename(conversationId: string, userId: string, name: string): Promise<ConversationSummary> {
+    if (!(await this.isMember(conversationId, userId))) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+    await this.db.update(conversations).set({ name: name.trim() || null }).where(eq(conversations.id, conversationId));
+    return this.getSummaryForUser(conversationId, userId);
+  }
+
+  async addMembers(conversationId: string, userId: string, memberIds: string[]): Promise<ConversationSummary> {
+    if (!(await this.isMember(conversationId, userId))) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+    const ids = [...new Set(memberIds)].filter((id) => id !== userId);
+    if (ids.length === 0) return this.getSummaryForUser(conversationId, userId);
+    const found = await this.db.select({ id: users.id }).from(users).where(inArray(users.id, ids));
+    if (found.length !== ids.length) {
+      throw new BadRequestException('One or more member ids are invalid');
+    }
+    await this.db
+      .insert(conversationMembers)
+      .values(ids.map((mid) => ({ conversationId, userId: mid })))
+      .onConflictDoNothing();
+    return this.getSummaryForUser(conversationId, userId);
+  }
+
+  async removeMember(conversationId: string, requesterId: string, targetUserId: string): Promise<void> {
+    if (!(await this.isMember(conversationId, requesterId))) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+    if (targetUserId !== requesterId) {
+      // only allow self-removal or any member? keep simple: allow any member to remove (MVP)
+    }
+    await this.db
+      .delete(conversationMembers)
+      .where(
+        and(
+          eq(conversationMembers.conversationId, conversationId),
+          eq(conversationMembers.userId, targetUserId),
+        ),
+      );
+  }
+
   async getSummaryForUser(conversationId: string, userId: string): Promise<ConversationSummary> {
     const summaries = await this.listForUser(userId, conversationId);
     const summary = summaries[0];

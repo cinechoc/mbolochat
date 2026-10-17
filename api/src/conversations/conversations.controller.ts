@@ -2,9 +2,11 @@ import {
   Body,
   Controller,
   DefaultValuePipe,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -33,6 +35,33 @@ export class ConversationsController {
   @Get(':id')
   get(@CurrentUser() current: JwtPayload, @Param('id') id: string) {
     return this.conversationsService.getSummaryForUser(id, current.sub);
+  }
+
+  @Patch(':id')
+  rename(
+    @CurrentUser() current: JwtPayload,
+    @Param('id') id: string,
+    @Body() body: { name?: string },
+  ) {
+    return this.conversationsService.rename(id, current.sub, body?.name ?? '');
+  }
+
+  @Post(':id/members')
+  addMembers(
+    @CurrentUser() current: JwtPayload,
+    @Param('id') id: string,
+    @Body() body: { memberIds?: string[] },
+  ) {
+    return this.conversationsService.addMembers(id, current.sub, body?.memberIds ?? []);
+  }
+
+  @Delete(':id/members/:userId')
+  removeMember(
+    @CurrentUser() current: JwtPayload,
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.conversationsService.removeMember(id, current.sub, userId);
   }
 
   @Get(':id/messages')
