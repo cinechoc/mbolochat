@@ -18,7 +18,11 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Missing bearer token');
     }
     try {
-      request.user = await this.jwtService.verifyAsync<JwtPayload>(token);
+      const payload = await this.jwtService.verifyAsync<JwtPayload>(token);
+      if (payload.type && payload.type !== 'access') {
+        throw new UnauthorizedException('Invalid token type');
+      }
+      request.user = payload;
     } catch {
       throw new UnauthorizedException('Invalid or expired token');
     }

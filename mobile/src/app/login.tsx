@@ -32,7 +32,7 @@ export default function LoginScreen() {
     setError(null);
     try {
       const result = await api.login({ emailOrUsername: identifier.trim(), password });
-      await signIn(result.token, result.user);
+      await signIn(result.accessToken, result.refreshToken, result.user);
       router.replace('/chats');
     } catch (err) {
       setError(

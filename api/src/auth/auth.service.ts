@@ -1,4 +1,4 @@
-import { createHash, randomInt } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -11,7 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import bcrypt from 'bcryptjs';
 import { desc, eq } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../db/db.module.js';
-import { passwordResetTokens } from '../db/schema.js';
+import { passwordResetTokens, refreshTokens } from '../db/schema.js';
 import { toPublicUser, UsersService, type PublicUser } from '../users/users.service.js';
 import type { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import type { LoginDto } from './dto/login.dto.js';
@@ -20,7 +20,8 @@ import type { ResetPasswordDto } from './dto/reset-password.dto.js';
 import type { JwtPayload } from './jwt-payload.js';
 
 export interface AuthResult {
-  token: string;
+  accessToken: string;
+  refreshToken: string;
   user: PublicUser;
 }
 
@@ -32,6 +33,7 @@ export interface ForgotPasswordResult {
 const MINIMUM_AGE = 13;
 const RESET_CODE_TTL_MS = 15 * 60 * 1000;
 const MAX_RESET_ATTEMPTS = 5;
+const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const GENERIC_RESET_MESSAGE = 'Si ce compte existe, un code de réinitialisation a été envoyé.';
 
 function usernamePart(value: string): string {
@@ -184,8 +186,54 @@ export class AuthService {
     username: string,
     user: PublicUser,
   ): Promise<AuthResult> {
-    const payload: JwtPayload = { sub: userId, username };
-    const token = await this.jwtService.signAsync(payload);
-    return { token, user };
+    const payload: JwtPayload = { sub: userId, username, type: 'access' };
+    const accessToken = await this.jwtService.signAsync(payload);
+    const rawRefresh = randomBytes(32).toString('hex');
+    const tokenHash = this.hashRefreshToken(rawRefresh);
+    await this.db.insert(refreshTokens).values({
+      userId,
+      tokenHash,
+      expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
+    });
+    return { accessToken, refreshToken: rawRefresh, user };
+  }
+
+  async refresh(rawRefreshToken: string): Promise<AuthResult> {
+    if (!rawRefreshToken) {
+      throw new UnauthorizedException('Missing refresh token');
+    }
+    const tokenHash = this.hashRefreshToken(rawRefreshToken);
+    const [stored] = await this.db
+      .select()
+      .from(refreshTokens)
+      .where(eq(refreshTokens.tokenHash, tokenHash))
+      .limit(1);
+
+    if (!stored || stored.revokedAt || stored.expiresAt.getTime() < Date.now()) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    // rotation : revoke the old one
+    await this.db
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(eq(refreshTokens.id, stored.id));
+
+    const user = await this.usersService.getByIdOrThrow(stored.userId);
+    const publicUser = toPublicUser(user);
+    return this.buildAuthResult(user.id, user.username, publicUser);
+  }
+
+  async logout(rawRefreshToken?: string): Promise<void> {
+    if (!rawRefreshToken) return;
+    const tokenHash = this.hashRefreshToken(rawRefreshToken);
+    await this.db
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(eq(refreshTokens.tokenHash, tokenHash));
+  }
+
+  private hashRefreshToken(raw: string): string {
+    return createHash('sha256').update(raw).digest('hex');
   }
 }

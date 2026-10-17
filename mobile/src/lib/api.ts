@@ -23,9 +23,45 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   token?: string;
   body?: unknown;
+  _retried?: boolean;
 }
 
 const REQUEST_TIMEOUT_MS = 15000;
+
+let refreshInFlight: Promise<string> | null = null;
+
+async function doRefresh(refreshToken: string): Promise<string> {
+  const response = await fetch(`${API_URL}/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    throw new ApiError(response.status, 'Refresh failed');
+  }
+  const data = (await response.json()) as { accessToken: string; refreshToken?: string };
+  // update stored refresh if rotated
+  const { getStoredRefreshToken, storeTokens } = await import('./token-storage');
+  const currentRefresh = (await getStoredRefreshToken()) ?? refreshToken;
+  await storeTokens(data.accessToken, data.refreshToken ?? currentRefresh);
+  return data.accessToken;
+}
+
+export async function refreshAccessToken(): Promise<string> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    try {
+      const { getStoredRefreshToken } = await import('./token-storage');
+      const rt = await getStoredRefreshToken();
+      if (!rt) throw new ApiError(401, 'No refresh token');
+      return await doRefresh(rt);
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const controller = new AbortController();
@@ -44,12 +80,22 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       signal: controller.signal,
     });
   } catch {
+    clearTimeout(timeout);
     throw new ApiError(
       0,
       `Impossible de contacter le serveur (${API_URL || 'même origine'}). Vérifie ta connexion et que l'API est démarrée.`,
     );
   } finally {
     clearTimeout(timeout);
+  }
+
+  if (response.status === 401 && !options._retried && path !== '/auth/refresh' && path !== '/auth/login' && path !== '/auth/register') {
+    try {
+      const newToken = await refreshAccessToken();
+      return request<T>(path, { ...options, token: newToken, _retried: true });
+    } catch {
+      // fall through to throw original
+    }
   }
 
   if (!response.ok) {
@@ -98,6 +144,17 @@ export const api = {
     return request<AuthResult>('/auth/login', { method: 'POST', body });
   },
 
+  refresh(refreshToken: string) {
+    return request<{ accessToken: string; refreshToken?: string }>('/auth/refresh', {
+      method: 'POST',
+      body: { refreshToken },
+    });
+  },
+
+  logout(refreshToken: string | undefined, token?: string) {
+    return request<void>('/auth/logout', { method: 'POST', token, body: { refreshToken } });
+  },
+
   me(token: string) {
     return request<User>('/auth/me', { token });
   },
@@ -122,12 +179,15 @@ export const api = {
     return request<ConversationSummary>(`/conversations/${id}`, { token });
   },
 
-  createConversation(token: string, body: { memberIds: string[]; name?: string }) {
+  createConversation(token: string, body: { memberIds: string[]; name?: string; type?: 'DIRECT' | 'GROUP' }) {
     return request<ConversationSummary>('/conversations', { method: 'POST', token, body });
   },
 
-  listMessages(token: string, conversationId: string, before?: string) {
-    const query = before ? `?before=${encodeURIComponent(before)}` : '';
+  listMessages(token: string, conversationId: string, before?: string, limit?: number) {
+    const params = new URLSearchParams();
+    if (before) params.set('before', before);
+    if (limit) params.set('limit', String(limit));
+    const query = params.toString() ? `?${params.toString()}` : '';
     return request<Message[]>(`/conversations/${conversationId}/messages${query}`, { token });
   },
 };

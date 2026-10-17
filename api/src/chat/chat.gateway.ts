@@ -28,6 +28,9 @@ export class ChatGateway implements OnGatewayConnection {
     const token = (client.handshake.auth as { token?: string } | undefined)?.token;
     try {
       const payload = await this.jwtService.verifyAsync<JwtPayload>(token ?? '');
+      if (payload.type && payload.type !== 'access') {
+        throw new Error('invalid type');
+      }
       client.data.userId = payload.sub;
     } catch {
       client.disconnect(true);

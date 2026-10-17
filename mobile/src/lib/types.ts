@@ -31,7 +31,8 @@ export interface ConversationSummary {
 }
 
 export interface AuthResult {
-  token: string;
+  accessToken: string;
+  refreshToken: string;
   user: User;
 }
 

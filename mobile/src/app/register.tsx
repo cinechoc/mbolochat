@@ -123,7 +123,7 @@ export default function RegisterScreen() {
         birthday,
         gender,
       });
-      await signIn(result.token, result.user);
+      await signIn(result.accessToken, result.refreshToken, result.user);
       router.replace('/chats');
     } catch (err) {
       setError(

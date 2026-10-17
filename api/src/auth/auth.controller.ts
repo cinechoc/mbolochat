@@ -27,6 +27,19 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  refresh(@Body() body: { refreshToken?: string }) {
+    return this.authService.refresh(body?.refreshToken ?? '');
+  }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(JwtAuthGuard)
+  async logout(@Body() body: { refreshToken?: string }) {
+    await this.authService.logout(body?.refreshToken);
+  }
+
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   forgotPassword(@Body() dto: ForgotPasswordDto) {

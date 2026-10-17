@@ -13,7 +13,7 @@ import { AuthService } from './auth.service.js';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: config.getOrThrow<string>('JWT_SECRET'),
-        signOptions: { expiresIn: '30d' },
+        signOptions: { expiresIn: '15m' },
       }),
     }),
   ],

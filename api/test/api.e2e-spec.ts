@@ -45,6 +45,8 @@ describe('MboloChat API (e2e)', () => {
   it('supports the full messaging flow', async () => {
     const alice = (await register('Alice', 'Martin')).body;
     const bob = (await register('Bob', 'Durand')).body;
+    alice.token = alice.accessToken;
+    bob.token = bob.accessToken;
 
     expect(alice.user.username).toMatch(/^alice\.martin/);
     expect(alice.user.displayName).toBe('Alice Martin');
@@ -53,7 +55,7 @@ describe('MboloChat API (e2e)', () => {
       .post('/auth/login')
       .send({ emailOrUsername: bob.user.username, password: 'password123' })
       .expect(200);
-    expect(login.body.token).toBeTruthy();
+    expect(login.body.accessToken).toBeTruthy();
 
     const search = await request(app.getHttpServer())
       .get('/users/search')

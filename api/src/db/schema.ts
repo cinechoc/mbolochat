@@ -73,7 +73,25 @@ export const passwordResetTokens = pgTable(
   (table) => [index('password_reset_tokens_user_idx').on(table.userId)],
 );
 
+export const refreshTokens = pgTable(
+  'refresh_tokens',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('refresh_tokens_user_idx').on(table.userId)],
+);
+
 export type User = typeof users.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type RefreshToken = typeof refreshTokens.$inferSelect;
