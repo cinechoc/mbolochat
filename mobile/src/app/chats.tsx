@@ -146,9 +146,18 @@ export default function ChatsScreen() {
                       {previewOf(item)}
                     </ThemedText>
                   </ThemedView>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    {formatTime(item.lastMessage?.createdAt ?? item.createdAt)}
-                  </ThemedText>
+                  <ThemedView style={styles.rowMeta}>
+                    {item.unreadCount > 0 ? (
+                      <ThemedView style={styles.badge}>
+                        <ThemedText style={styles.badgeText}>
+                          {item.unreadCount > 99 ? '99+' : item.unreadCount}
+                        </ThemedText>
+                      </ThemedView>
+                    ) : null}
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {formatTime(item.lastMessage?.createdAt ?? item.createdAt)}
+                    </ThemedText>
+                  </ThemedView>
                 </Pressable>
               );
             }}
@@ -305,6 +314,24 @@ const styles = StyleSheet.create({
   rowBody: {
     flex: 1,
     gap: Spacing.half,
+  },
+  rowMeta: {
+    alignItems: 'flex-end',
+    gap: Spacing.half,
+  },
+  badge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    backgroundColor: accentColor,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
   },
   rowTitle: {
     fontWeight: '600',

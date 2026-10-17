@@ -29,6 +29,7 @@ export interface ConversationSummary {
   createdAt: string;
   members: SenderInfo[];
   lastMessage: Message | null;
+  unreadCount: number;
 }
 
 export interface AuthResult {

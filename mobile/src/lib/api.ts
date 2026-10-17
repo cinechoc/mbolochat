@@ -210,4 +210,8 @@ export const api = {
     const query = params.toString() ? `?${params.toString()}` : '';
     return request<Message[]>(`/conversations/${conversationId}/messages${query}`, { token });
   },
+
+  markRead(token: string, conversationId: string) {
+    return request<void>(`/conversations/${conversationId}/read`, { method: 'POST', token });
+  },
 };

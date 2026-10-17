@@ -57,6 +57,8 @@ export default function ChatScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [input, setInput] = useState('');
+  const [typingUser, setTypingUser] = useState<string | null>(null);
+  const [readBy, setReadBy] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +104,7 @@ export default function ChatScreen() {
 
     const join = () => {
       socket.emit('conversation:join', { conversationId: id });
+      socket.emit('message:read', { conversationId: id });
     };
     const onMessage = (message: Message) => {
       if (message.conversationId !== id) {
@@ -112,9 +115,21 @@ export default function ChatScreen() {
           ? previous
           : [...previous, message],
       );
+      socket.emit('message:read', { conversationId: id });
+    };
+    const onTyping = (payload: { conversationId: string; userId: string }) => {
+      if (payload.conversationId !== id || payload.userId === user?.id) return;
+      setTypingUser(payload.userId);
+      setTimeout(() => setTypingUser((cur) => (cur === payload.userId ? null : cur)), 2000);
+    };
+    const onRead = (payload: { conversationId: string; userId: string; at: string }) => {
+      if (payload.conversationId !== id) return;
+      setReadBy((prev) => ({ ...prev, [payload.userId]: payload.at }));
     };
 
     socket.on('message:new', onMessage);
+    socket.on('typing', onTyping);
+    socket.on('read', onRead);
     if (socket.connected) {
       join();
     } else {
@@ -123,10 +138,12 @@ export default function ChatScreen() {
 
     return () => {
       socket.off('message:new', onMessage);
+      socket.off('typing', onTyping);
+      socket.off('read', onRead);
       socket.off('connect', join);
       disconnectSocket();
     };
-  }, [token, id]);
+  }, [token, id, user?.id]);
 
   const rows = useMemo(() => {
     const chronological: ListRow[] = [];
@@ -170,6 +187,14 @@ export default function ChatScreen() {
       setError(err instanceof ApiError ? err.message : "L'envoi a échoué. Réessaie.");
     } finally {
       setSending(false);
+    }
+  };
+
+  const onInputChange = (value: string) => {
+    setInput(value);
+    if (value.trim().length > 0 && token && id) {
+      const socket = connectSocket(token);
+      socket.emit('typing', { conversationId: id });
     }
   };
 
@@ -266,7 +291,13 @@ export default function ChatScreen() {
                         ]}>
                         {formatTime(message.createdAt)}
                       </ThemedText>
-                      {mine ? <ThemedText style={[styles.metaText, styles.metaTextMine]}>✓✓</ThemedText> : null}
+                      {mine ? (
+                        <ThemedText style={[styles.metaText, styles.metaTextMine]}>
+                          {Object.values(readBy).some((at) => new Date(at).getTime() >= new Date(message.createdAt).getTime())
+                            ? '✓✓'
+                            : '✓'}
+                        </ThemedText>
+                      ) : null}
                     </View>
                   </View>
                 </View>
@@ -278,6 +309,12 @@ export default function ChatScreen() {
         {error ? (
           <ThemedText type="small" style={styles.error}>
             {error}
+          </ThemedText>
+        ) : null}
+
+        {typingUser ? (
+          <ThemedText type="small" themeColor="textSecondary" style={styles.typing}>
+            écrit…
           </ThemedText>
         ) : null}
 
@@ -294,7 +331,7 @@ export default function ChatScreen() {
             placeholder="Écrire un message..."
             value={input}
             multiline
-            onChangeText={setInput}
+            onChangeText={onInputChange}
             onSubmitEditing={send}
           />
           <Pressable
@@ -412,6 +449,11 @@ const styles = StyleSheet.create({
     color: '#e5484d',
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.one,
+  },
+  typing: {
+    paddingHorizontal: Spacing.three,
+    paddingBottom: Spacing.half,
+    fontStyle: 'italic',
   },
   inputRow: {
     flexDirection: 'row',

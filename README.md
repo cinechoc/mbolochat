@@ -80,23 +80,34 @@ Scannez le QR code avec Expo Go sur Android. L'app détecte automatiquement l'IP
 REST (Bearer token) :
 
 - `POST /auth/register`, `POST /auth/login`, `GET /auth/me`
-- `GET /users/search?q=`, `GET /users/me`
-- `POST /conversations` (`memberIds`, `name?`), `GET /conversations`
+- `POST /auth/refresh` (`refreshToken`, rotation), `POST /auth/logout` (`refreshToken`)
+- `GET /users/search?q=`, `GET /users/me`, `PATCH /users/me` (`displayName`), `POST /users/me/avatar` (`data` base64, `mimeType`)
+- `POST /conversations` (`memberIds`, `name?`, `type?` DIRECT|GROUP), `GET /conversations` (incl. `unreadCount`)
 - `GET /conversations/:id`, `GET /conversations/:id/messages?before=&limit=`
+- `PATCH /conversations/:id` (`name`), `POST /conversations/:id/members` (`memberIds`), `DELETE /conversations/:id/members/:userId`
+- `POST /conversations/:id/read` — marque la conversation comme lue
 
-WebSocket (Socket.IO, auth par `auth.token`) :
+WebSocket (Socket.IO, auth par `auth.token` avec access token 15 min) :
 
 - `conversation:join` `{ conversationId }` — rejoindre un salon
 - `message:send` `{ conversationId, content }` — envoyer (ack = message créé)
 - `message:new` — message reçu dans un salon rejoint
+- `typing` `{ conversationId }` — émis par le client ; rebroadcast `typing` `{ conversationId, userId }`
+- `message:read` `{ conversationId }` — marque lu ; broadcast `read` `{ conversationId, userId, at }`
+
+## Fonctionnalités livrées au-delà du MVP initial
+
+- Refresh tokens (access 15 min + refresh 30 j avec rotation, `POST /auth/refresh`, `POST /auth/logout`)
+- Profil : avatar uploadé sur disque (`api/uploads/`, servi en `/uploads`), édition du nom affiché
+- Groupes : création côté UI (multi-sélection + nom), renommage, ajout/retrait de membres
+- Pagination inversée de l'historique (`before`/`limit` au scroll vers le haut)
+- Indicateur de frappe (`typing`) et accusés de lecture (`message:read` → ✓✓) + badge non-lus
 
 ## Limites du MVP / prochaines étapes
 
-- Refresh tokens (le JWT actuel expire en 30 jours)
-- Création de groupes côté UI (l'API le supporte déjà), avatars, images
-- Indicateurs de frappe, accusés de lecture, notifications push
 - Chiffrement de bout en bout
-- Pagination inversée des messages dans l'UI, recherche dans les messages
+- Recherche dans les messages, notifications push
 - Build iOS (EAS, même code), CI/CD, déploiement API (Docker)
+- Avatars servis depuis le disque local (à migrer vers S3/CDN en prod)
 
 > Note technique : l'ORM est **Drizzle** (TypeScript pur) plutôt que Prisma, dont les moteurs binaires étaient bloqués dans l'environnement de développement initial ; Drizzle reste un choix moderne et léger pour ce projet.
