@@ -86,9 +86,9 @@ const typingReceived = new Promise((resolve, reject) => {
     resolve(payload);
   });
 });
-aliceSocket.emit('typing', { conversationId: conversation.id });
+aliceSocket.emit('typing', { conversationId: conversation.id, text: 'Salut' });
 const typing = await typingReceived;
-if (typing.userId !== alice.user.id) {
+if (typing.userId !== alice.user.id || typing.text !== 'Salut') {
   throw new Error(`Unexpected typing payload: ${JSON.stringify(typing)}`);
 }
 

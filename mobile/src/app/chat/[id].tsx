@@ -57,7 +57,11 @@ export default function ChatScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [input, setInput] = useState('');
-  const [typingUser, setTypingUser] = useState<string | null>(null);
+  const [typing, setTyping] = useState<{ userId: string; text: string } | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingEmitRef = useRef(0);
+  const pendingTypingRef = useRef<string | null>(null);
   const [readBy, setReadBy] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -115,12 +119,19 @@ export default function ChatScreen() {
           ? previous
           : [...previous, message],
       );
+      setTyping((cur) => (cur && cur.userId === message.sender.id ? null : cur));
       socket.emit('message:read', { conversationId: id });
     };
-    const onTyping = (payload: { conversationId: string; userId: string }) => {
+    const onTyping = (payload: { conversationId: string; userId: string; text?: string }) => {
       if (payload.conversationId !== id || payload.userId === user?.id) return;
-      setTypingUser(payload.userId);
-      setTimeout(() => setTypingUser((cur) => (cur === payload.userId ? null : cur)), 2000);
+      const text = (payload.text ?? '').slice(0, 300);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (!text) {
+        setTyping((cur) => (cur && cur.userId === payload.userId ? null : cur));
+        return;
+      }
+      setTyping({ userId: payload.userId, text });
+      typingTimeoutRef.current = setTimeout(() => setTyping(null), 2500);
     };
     const onRead = (payload: { conversationId: string; userId: string; at: string }) => {
       if (payload.conversationId !== id) return;
@@ -141,6 +152,8 @@ export default function ChatScreen() {
       socket.off('typing', onTyping);
       socket.off('read', onRead);
       socket.off('connect', join);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (typingFlushRef.current) clearTimeout(typingFlushRef.current);
       disconnectSocket();
     };
   }, [token, id, user?.id]);
@@ -182,6 +195,7 @@ export default function ChatScreen() {
     try {
       const socket = connectSocket(token);
       await socket.emitWithAck('message:send', { conversationId: id, content });
+      socket.emit('typing', { conversationId: id, text: '' });
       setInput('');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "L'envoi a échoué. Réessaie.");
@@ -190,12 +204,33 @@ export default function ChatScreen() {
     }
   };
 
+  const emitTyping = (value: string) => {
+    if (!token || !id) return;
+    lastTypingEmitRef.current = Date.now();
+    connectSocket(token).emit('typing', { conversationId: id, text: value.slice(0, 300) });
+  };
+
   const onInputChange = (value: string) => {
     setInput(value);
-    if (value.trim().length > 0 && token && id) {
-      const socket = connectSocket(token);
-      socket.emit('typing', { conversationId: id });
+    if (!token || !id) return;
+    const wait = 150 - (Date.now() - lastTypingEmitRef.current);
+    if (wait <= 0) {
+      if (typingFlushRef.current) {
+        clearTimeout(typingFlushRef.current);
+        typingFlushRef.current = null;
+      }
+      pendingTypingRef.current = null;
+      emitTyping(value);
+      return;
     }
+    pendingTypingRef.current = value;
+    if (typingFlushRef.current) return;
+    typingFlushRef.current = setTimeout(() => {
+      typingFlushRef.current = null;
+      const pending = pendingTypingRef.current;
+      pendingTypingRef.current = null;
+      if (pending !== null) emitTyping(pending);
+    }, wait);
   };
 
   return (
@@ -312,9 +347,11 @@ export default function ChatScreen() {
           </ThemedText>
         ) : null}
 
-        {typingUser ? (
-          <ThemedText type="small" themeColor="textSecondary" style={styles.typing}>
-            écrit…
+        {typing ? (
+          <ThemedText type="small" themeColor="textSecondary" style={styles.typing} numberOfLines={1}>
+            {(conversation?.members.find((member) => member.id === typing.userId)?.displayName ??
+              'Quelqu’un')}{' '}
+            : {typing.text}
           </ThemedText>
         ) : null}
 

@@ -74,13 +74,14 @@ export class ChatGateway implements OnGatewayConnection {
   @SubscribeMessage('typing')
   async typing(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { conversationId?: string },
+    @MessageBody() body: { conversationId?: string; text?: string },
   ) {
     const userId = client.data.userId as string | undefined;
     const conversationId = body?.conversationId;
     if (!userId || !conversationId) return;
     if (!(await this.conversationsService.isMember(conversationId, userId))) return;
-    client.to(roomOf(conversationId)).emit('typing', { conversationId, userId });
+    const text = typeof body?.text === 'string' ? body.text.slice(0, 300) : '';
+    client.to(roomOf(conversationId)).emit('typing', { conversationId, userId, text });
   }
 
   @SubscribeMessage('message:read')

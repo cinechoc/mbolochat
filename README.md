@@ -92,7 +92,7 @@ WebSocket (Socket.IO, auth par `auth.token` avec access token 15 min) :
 - `conversation:join` `{ conversationId }` — rejoindre un salon
 - `message:send` `{ conversationId, content }` — envoyer (ack = message créé)
 - `message:new` — message reçu dans un salon rejoint
-- `typing` `{ conversationId }` — émis par le client ; rebroadcast `typing` `{ conversationId, userId }`
+- `typing` `{ conversationId, text }` — émis par le client pendant la saisie (throttle 150 ms, `text: ''` = arrêt) ; rebroadcast `typing` `{ conversationId, userId, text }` pour afficher le texte en direct
 - `message:read` `{ conversationId }` — marque lu ; broadcast `read` `{ conversationId, userId, at }`
 
 ## Fonctionnalités livrées au-delà du MVP initial
