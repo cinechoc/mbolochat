@@ -70,4 +70,29 @@ export class ChatGateway implements OnGatewayConnection {
     this.server.to(roomOf(conversationId)).emit('message:new', message);
     return message;
   }
+
+  @SubscribeMessage('typing')
+  async typing(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { conversationId?: string },
+  ) {
+    const userId = client.data.userId as string | undefined;
+    const conversationId = body?.conversationId;
+    if (!userId || !conversationId) return;
+    if (!(await this.conversationsService.isMember(conversationId, userId))) return;
+    client.to(roomOf(conversationId)).emit('typing', { conversationId, userId });
+  }
+
+  @SubscribeMessage('message:read')
+  async read(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { conversationId?: string },
+  ) {
+    const userId = client.data.userId as string | undefined;
+    const conversationId = body?.conversationId;
+    if (!userId || !conversationId) return;
+    if (!(await this.conversationsService.isMember(conversationId, userId))) return;
+    await this.conversationsService.markRead(conversationId, userId);
+    this.server.to(roomOf(conversationId)).emit('read', { conversationId, userId, at: new Date().toISOString() });
+  }
 }

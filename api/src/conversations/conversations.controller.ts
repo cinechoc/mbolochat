@@ -4,6 +4,8 @@ import {
   DefaultValuePipe,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseIntPipe,
   Patch,
@@ -76,5 +78,11 @@ export class ConversationsController {
       before: beforeDate && !Number.isNaN(beforeDate.getTime()) ? beforeDate : undefined,
       limit,
     });
+  }
+
+  @Post(':id/read')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async markRead(@CurrentUser() current: JwtPayload, @Param('id') id: string) {
+    await this.conversationsService.markRead(id, current.sub);
   }
 }

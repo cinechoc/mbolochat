@@ -26,6 +26,7 @@ export interface ConversationSummary {
   createdAt: Date;
   members: SenderInfo[];
   lastMessage: (Omit<MessageDto, 'conversationId'> & { conversationId: string }) | null;
+  unreadCount: number;
 }
 
 export interface ListMessagesOptions {
@@ -128,6 +129,26 @@ export class ConversationsService {
 
     const lastMessages = await this.lastMessagesFor(ids);
 
+    // unread counts per conversation for this user
+    const unreadRows = await this.db
+      .select({
+        conversationId: messages.conversationId,
+        cnt: sql<number>`count(*)::int`,
+      })
+      .from(messages)
+      .innerJoin(
+        conversationMembers,
+        and(
+          eq(conversationMembers.conversationId, messages.conversationId),
+          eq(conversationMembers.userId, userId),
+        ),
+      )
+      .where(
+        sql`${messages.senderId} <> ${userId} AND (${conversationMembers.lastReadAt} IS NULL OR ${messages.createdAt} > ${conversationMembers.lastReadAt})`,
+      )
+      .groupBy(messages.conversationId);
+    const unreadMap = new Map(unreadRows.map((r) => [r.conversationId, Number(r.cnt)]));
+
     const summaries = conversationRows.map((conversation) => ({
       id: conversation.id,
       type: conversation.type,
@@ -137,6 +158,7 @@ export class ConversationsService {
         .filter((member) => member.conversationId === conversation.id)
         .map(({ id, username, displayName }) => ({ id, username, displayName })),
       lastMessage: lastMessages.get(conversation.id) ?? null,
+      unreadCount: unreadMap.get(conversation.id) ?? 0,
     }));
 
     return summaries.sort((a, b) => {
@@ -239,6 +261,19 @@ export class ConversationsService {
         displayName: row.senderDisplayName,
       },
     }));
+  }
+
+  async markRead(conversationId: string, userId: string): Promise<void> {
+    if (!(await this.isMember(conversationId, userId))) return;
+    await this.db
+      .update(conversationMembers)
+      .set({ lastReadAt: new Date() })
+      .where(
+        and(
+          eq(conversationMembers.conversationId, conversationId),
+          eq(conversationMembers.userId, userId),
+        ),
+      );
   }
 
   async createMessage(conversationId: string, senderId: string, content: string): Promise<MessageDto> {

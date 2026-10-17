@@ -35,6 +35,7 @@ export const conversationMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+    lastReadAt: timestamp('last_read_at', { withTimezone: true }),
   },
   (table) => [primaryKey({ columns: [table.conversationId, table.userId] })],
 );
