@@ -22,7 +22,7 @@ export default function ChatsScreen() {
   const router = useRouter();
   const [menuView, setMenuView] = useState<'menu' | 'profile' | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [typingMap, setTypingMap] = useState<Record<string, { name: string }>>({});
+  const [typingMap, setTypingMap] = useState<Record<string, { name: string; text: string }>>({});
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -100,7 +100,7 @@ export default function ChatsScreen() {
       });
     };
 
-    const onTyping = (payload: { conversationId: string; userId: string }) => {
+    const onTyping = (payload: { conversationId: string; userId: string; text?: string }) => {
       if (payload.userId === user?.id) {
         return;
       }
@@ -108,10 +108,15 @@ export default function ChatsScreen() {
       if (!conversation) {
         return;
       }
+      const text = (payload.text ?? '').slice(0, 300);
+      if (!text) {
+        clearTyping(payload.conversationId);
+        return;
+      }
       const name =
         conversation.members.find((member) => member.id === payload.userId)?.displayName ??
         'Quelqu\u2019un';
-      setTypingMap((previous) => ({ ...previous, [payload.conversationId]: { name } }));
+      setTypingMap((previous) => ({ ...previous, [payload.conversationId]: { name, text } }));
       const previousTimer = typingTimersRef.current.get(payload.conversationId);
       if (previousTimer) {
         clearTimeout(previousTimer);
@@ -260,7 +265,7 @@ export default function ChatsScreen() {
                         typingEntry && styles.rowPreviewTyping,
                       ]}>
                       {typingEntry
-                        ? `${typingEntry.name} \u00e9crit\u2026`
+                        ? `${typingEntry.name} : ${typingEntry.text}`
                         : previewOf(item)}
                     </ThemedText>
                   </ThemedView>
