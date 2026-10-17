@@ -2,6 +2,7 @@ import { Redirect, Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -26,6 +27,64 @@ import type { ConversationSummary, Message } from '@/lib/types';
 type ListRow =
   | { key: string; type: 'date'; label: string }
   | { key: string; type: 'message'; message: Message };
+
+const TYPING_STEP_MS = 170;
+
+function TypingDots({ color }: { color: string }) {
+  const [dots] = useState(() => [
+    new Animated.Value(0.25),
+    new Animated.Value(0.25),
+    new Animated.Value(0.25),
+  ]);
+
+  useEffect(() => {
+    const animations = dots.map((value, index) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(index * TYPING_STEP_MS),
+          Animated.timing(value, { toValue: 1, duration: 250, useNativeDriver: true, isInteraction: false }),
+          Animated.timing(value, { toValue: 0.25, duration: 250, useNativeDriver: true, isInteraction: false }),
+          Animated.delay(TYPING_STEP_MS * (2 - index)),
+        ]),
+      ),
+    );
+    animations.forEach((animation) => animation.start());
+    return () => {
+      animations.forEach((animation) => animation.stop());
+    };
+  }, [dots]);
+
+  return (
+    <View style={styles.dotsRow}>
+      {dots.map((value, index) => (
+        <Animated.View key={index} style={[styles.dot, { backgroundColor: color, opacity: value }]} />
+      ))}
+    </View>
+  );
+}
+
+function TypingLine({ name, text }: { name: string; text: string }) {
+  const [opacity] = useState(() => new Animated.Value(0));
+  const [translateY] = useState(() => new Animated.Value(4));
+
+  useEffect(() => {
+    const animation = Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true, isInteraction: false }),
+      Animated.timing(translateY, { toValue: 0, duration: 200, useNativeDriver: true, isInteraction: false }),
+    ]);
+    animation.start();
+    return () => animation.stop();
+  }, [opacity, translateY]);
+
+  return (
+    <Animated.View style={[styles.typingRow, { opacity, transform: [{ translateY }] }]}>
+      <ThemedText type="small" themeColor="textSecondary" style={styles.typing} numberOfLines={1}>
+        {name} : {text}
+      </ThemedText>
+      <TypingDots color={accentColor} />
+    </Animated.View>
+  );
+}
 
 function ChatHeaderTitle({ title, subtitle, uri }: { title: string; subtitle: string; uri?: string | null }) {
   return (
@@ -354,11 +413,14 @@ export default function ChatScreen() {
         ) : null}
 
         {typing ? (
-          <ThemedText type="small" themeColor="textSecondary" style={styles.typing} numberOfLines={1}>
-            {(conversation?.members.find((member) => member.id === typing.userId)?.displayName ??
-              'Quelqu’un')}{' '}
-            : {typing.text}
-          </ThemedText>
+          <TypingLine
+            key={typing.userId}
+            name={
+              conversation?.members.find((member) => member.id === typing.userId)?.displayName ??
+              'Quelqu’un'
+            }
+            text={typing.text}
+          />
         ) : null}
 
         <ThemedView
@@ -493,10 +555,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.one,
   },
-  typing: {
+  typingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.half,
+  },
+  typing: {
     fontStyle: 'italic',
+    flexShrink: 1,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  dot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
   },
   inputRow: {
     flexDirection: 'row',
