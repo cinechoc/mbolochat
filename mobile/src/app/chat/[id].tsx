@@ -1,4 +1,4 @@
-import { Redirect, Stack, useLocalSearchParams } from 'expo-router';
+import { Redirect, Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -47,6 +47,7 @@ function ChatHeaderTitle({ title, subtitle }: { title: string; subtitle: string 
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const { token, user } = useAuth();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -172,7 +173,15 @@ export default function ChatScreen() {
   return (
     <ThemedView style={styles.container}>
       <Stack.Screen
-        options={{ headerTitle: () => <ChatHeaderTitle title={title} subtitle={subtitle} /> }}
+        options={{
+          headerTitle: () => <ChatHeaderTitle title={title} subtitle={subtitle} />,
+          headerRight: () =>
+            conversation?.type === 'GROUP' ? (
+              <Pressable onPress={() => router.push({ pathname: '/conversation-settings/[id]', params: { id } })}>
+                <ThemedText style={{ color: accentColor, fontWeight: '600' }}>Infos</ThemedText>
+              </Pressable>
+            ) : null,
+        }}
       />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}

@@ -191,6 +191,18 @@ export const api = {
     return request<ConversationSummary>('/conversations', { method: 'POST', token, body });
   },
 
+  renameConversation(token: string, id: string, name: string) {
+    return request<ConversationSummary>(`/conversations/${id}`, { method: 'PATCH', token, body: { name } });
+  },
+
+  addConversationMembers(token: string, id: string, memberIds: string[]) {
+    return request<ConversationSummary>(`/conversations/${id}/members`, { method: 'POST', token, body: { memberIds } });
+  },
+
+  removeConversationMember(token: string, id: string, userId: string) {
+    return request<void>(`/conversations/${id}/members/${userId}`, { method: 'DELETE', token });
+  },
+
   listMessages(token: string, conversationId: string, before?: string, limit?: number) {
     const params = new URLSearchParams();
     if (before) params.set('before', before);
