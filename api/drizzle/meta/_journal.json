@@ -29,6 +29,13 @@
       "when": 1792251313437,
       "tag": "0003_wonderful_princess_powerful",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792251369920,
+      "tag": "0004_bent_sumo",
+      "breakpoints": true
     }
   ]
 }

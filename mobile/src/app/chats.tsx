@@ -84,7 +84,7 @@ export default function ChatsScreen() {
             onPress={() => setMenuView('menu')}
             hitSlop={8}
             style={({ pressed }) => pressed && styles.pressed}>
-            <Avatar name={user.displayName} size={36} />
+            <Avatar name={user.displayName} uri={user.avatarUrl} size={36} />
           </Pressable>
         </ThemedView>
 
@@ -175,7 +175,7 @@ export default function ChatsScreen() {
                   },
                 ]}>
                 <ThemedView style={styles.menuHeader}>
-                  <Avatar name={user.displayName} size={48} />
+                  <Avatar name={user.displayName} uri={user.avatarUrl} size={48} />
                   <ThemedView style={styles.menuHeaderBody}>
                     <ThemedText numberOfLines={1} style={styles.menuName}>
                       {user.displayName}
@@ -187,7 +187,7 @@ export default function ChatsScreen() {
                 </ThemedView>
                 <View style={[styles.menuDivider, { backgroundColor: theme.backgroundElement }]} />
                 <Pressable
-                  onPress={() => setMenuView('profile')}
+                  onPress={() => { setMenuView(null); router.push('/profile'); }}
                   style={({ pressed }) => [
                     styles.menuItem,
                     pressed && { backgroundColor: theme.backgroundSelected },
@@ -222,7 +222,7 @@ export default function ChatsScreen() {
               <Pressable onPress={() => undefined} style={styles.profileWrapper}>
                 <ThemedView
                   style={[styles.profileCard, { borderColor: theme.backgroundElement }]}>
-                  <Avatar name={user.displayName} size={72} />
+                  <Avatar name={user.displayName} uri={user.avatarUrl} size={72} />
                   <ThemedText type="subtitle">{user.displayName}</ThemedText>
                   <ThemedText themeColor="textSecondary">@{user.username}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">

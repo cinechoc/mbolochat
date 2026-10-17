@@ -7,6 +7,7 @@ export interface PublicUser {
   id: string;
   username: string;
   displayName: string;
+  avatarUrl: string | null;
   createdAt: Date;
 }
 
@@ -15,6 +16,7 @@ export function toPublicUser(user: User): PublicUser {
     id: user.id,
     username: user.username,
     displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
     createdAt: user.createdAt,
   };
 }
@@ -69,6 +71,15 @@ export class UsersService {
 
   async updatePassword(userId: string, passwordHash: string): Promise<void> {
     await this.db.update(users).set({ passwordHash }).where(eq(users.id, userId));
+  }
+
+  async updateProfile(userId: string, data: { displayName?: string; avatarUrl?: string | null }): Promise<User> {
+    const patch: Partial<typeof users.$inferInsert> = {};
+    if (data.displayName !== undefined) patch.displayName = data.displayName;
+    if (data.avatarUrl !== undefined) patch.avatarUrl = data.avatarUrl;
+    const [user] = await this.db.update(users).set(patch).where(eq(users.id, userId)).returning();
+    if (!user) throw new NotFoundException('User not found');
+    return user;
   }
 
   async search(query: string, excludeUserId: string): Promise<PublicUser[]> {

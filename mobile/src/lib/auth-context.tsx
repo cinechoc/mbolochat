@@ -13,6 +13,7 @@ interface AuthState {
   user: User | null;
   loading: boolean;
   signIn: (accessToken: string, refreshToken: string, user: User) => Promise<void>;
+  setUser: (user: User) => void;
   signOut: () => Promise<void>;
 }
 
@@ -73,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setToken(newToken);
         setUser(newUser);
       },
+      setUser: (u: User) => setUser(u),
       signOut: async () => {
         const rt = await getStoredRefreshToken();
         try {

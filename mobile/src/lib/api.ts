@@ -159,6 +159,14 @@ export const api = {
     return request<User>('/auth/me', { token });
   },
 
+  updateProfile(token: string, body: { displayName?: string }) {
+    return request<User>('/users/me', { method: 'PATCH', token, body });
+  },
+
+  uploadAvatar(token: string, data: string, mimeType: string) {
+    return request<User>('/users/me/avatar', { method: 'POST', token, body: { data, mimeType } });
+  },
+
   forgotPassword(body: { emailOrUsername: string }) {
     return request<ForgotPasswordResult>('/auth/forgot-password', { method: 'POST', body });
   },
