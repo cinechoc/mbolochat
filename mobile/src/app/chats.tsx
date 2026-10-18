@@ -265,7 +265,7 @@ export default function ChatsScreen() {
                         typingEntry && styles.rowPreviewTyping,
                       ]}>
                       {typingEntry
-                        ? `${typingEntry.name} : ${typingEntry.text}`
+                        ? `${item.type === 'GROUP' ? `${typingEntry.name} · ` : ''}en train d'écrire : ${typingEntry.text}`
                         : previewOf(item)}
                     </ThemedText>
                   </ThemedView>
