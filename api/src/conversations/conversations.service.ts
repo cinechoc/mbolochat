@@ -44,6 +44,11 @@ export interface ListMessagesOptions {
   limit?: number;
 }
 
+/** Convertit un timestamp (Date ou chaîne SQL) en millisecondes. */
+function timestampOf(value: Date | string): number {
+  return value instanceof Date ? value.getTime() : new Date(value).getTime();
+}
+
 @Injectable()
 export class ConversationsService {
   constructor(
@@ -207,9 +212,7 @@ export class ConversationsService {
       if (a.pinned !== b.pinned) {
         return a.pinned ? -1 : 1;
       }
-      const aDate = (a.lastMessage?.createdAt ?? a.createdAt).getTime();
-      const bDate = (b.lastMessage?.createdAt ?? b.createdAt).getTime();
-      return bDate - aDate;
+      return timestampOf(b.lastMessage?.createdAt ?? b.createdAt) - timestampOf(a.lastMessage?.createdAt ?? a.createdAt);
     });
   }
 
@@ -435,7 +438,8 @@ export class ConversationsService {
         id: row.id,
         conversationId: row.conversationId,
         content: row.content,
-        createdAt: row.createdAt,
+        // Les requêtes brutes renvoient les timestamps en chaîne : on normalise en Date.
+        createdAt: new Date(row.createdAt),
         sender: {
           id: row.senderId,
           username: row.senderUsername,

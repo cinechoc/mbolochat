@@ -164,6 +164,8 @@ describe('MboloChat API (e2e)', () => {
       .expect(200);
     expect(list.body[0].id).toBe(first.body.id);
     expect(list.body[0].pinned).toBe(true);
+    // Le timestamp du dernier message doit être sérialisable en ISO.
+    expect(list.body[0].lastMessage.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
     // Bob n'a pas encore lu : son lastReadAt est null.
     const aliceView = await request(app.getHttpServer())
@@ -188,6 +190,23 @@ describe('MboloChat API (e2e)', () => {
       (member: { id: string }) => member.id === bob.user.id,
     );
     expect(bobAfterRead.lastReadAt).toBeTruthy();
+
+    // Avec plusieurs discussions, la liste doit rester triée sans erreur.
+    const second = await request(app.getHttpServer())
+      .post('/conversations')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ memberIds: [bob.user.id], name: 'Autre groupe', type: 'GROUP' })
+      .expect(201);
+    await conversationsService.createMessage(second.body.id, bob.user.id, 'Dans le second groupe');
+
+    const multi = await request(app.getHttpServer())
+      .get('/conversations')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .expect(200);
+    expect(multi.body).toHaveLength(2);
+    // La discussion épinglée reste en tête, puis la plus récente.
+    expect(multi.body[0].id).toBe(first.body.id);
+    expect(multi.body[1].id).toBe(second.body.id);
   });
 
   it('rejects unauthenticated requests', async () => {
