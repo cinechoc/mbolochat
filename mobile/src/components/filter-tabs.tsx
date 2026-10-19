@@ -26,6 +26,7 @@ export function FilterTabs({ options, value, onChange }: FilterTabsProps) {
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      style={styles.scroll}
       contentContainerStyle={styles.container}
       keyboardShouldPersistTaps="handled">
       {options.map((option) => {
@@ -68,6 +69,10 @@ export function FilterTabs({ options, value, onChange }: FilterTabsProps) {
 }
 
 const styles = StyleSheet.create({
+  scroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
   container: {
     flexDirection: 'row',
     alignItems: 'center',
