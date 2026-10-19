@@ -353,6 +353,14 @@ export class ConversationsService {
       );
   }
 
+  /** Marque comme lues toutes les conversations de l'utilisateur. */
+  async markAllRead(userId: string): Promise<void> {
+    await this.db
+      .update(conversationMembers)
+      .set({ lastReadAt: new Date() })
+      .where(eq(conversationMembers.userId, userId));
+  }
+
   async createMessage(conversationId: string, senderId: string, content: string): Promise<MessageDto> {
     if (!(await this.isMember(conversationId, senderId))) {
       throw new ForbiddenException('You are not a member of this conversation');

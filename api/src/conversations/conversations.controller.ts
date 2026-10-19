@@ -93,6 +93,12 @@ export class ConversationsController {
     });
   }
 
+  @Post('read-all')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async markAllRead(@CurrentUser() current: JwtPayload) {
+    await this.conversationsService.markAllRead(current.sub);
+  }
+
   @Post(':id/read')
   @HttpCode(HttpStatus.NO_CONTENT)
   async markRead(@CurrentUser() current: JwtPayload, @Param('id') id: string) {

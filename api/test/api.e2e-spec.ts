@@ -92,6 +92,104 @@ describe('MboloChat API (e2e)', () => {
     expect(messages.body[0].sender.id).toBe(alice.user.id);
   });
 
+  it('pins, mutes and unpins a conversation for the current user only', async () => {
+    const alice = (await register('Lucie', 'Perez')).body;
+    const bob = (await register('Marc', 'Petit')).body;
+    alice.token = alice.accessToken;
+    bob.token = bob.accessToken;
+
+    const conversation = await request(app.getHttpServer())
+      .post('/conversations')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ memberIds: [bob.user.id] })
+      .expect(201);
+    const conversationId = conversation.body.id;
+
+    const pinned = await request(app.getHttpServer())
+      .patch(`/conversations/${conversationId}/preferences`)
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ pinned: true, muted: true })
+      .expect(200);
+    expect(pinned.body.pinned).toBe(true);
+    expect(pinned.body.muted).toBe(true);
+
+    // Les préférences sont propres à chaque membre.
+    const bobView = await request(app.getHttpServer())
+      .get(`/conversations/${conversationId}`)
+      .set('Authorization', `Bearer ${bob.token}`)
+      .expect(200);
+    expect(bobView.body.pinned).toBe(false);
+    expect(bobView.body.muted).toBe(false);
+
+    const aliceView = await request(app.getHttpServer())
+      .get('/conversations')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .expect(200);
+    const aliceConversation = aliceView.body.find((item: { id: string }) => item.id === conversationId);
+    expect(aliceConversation.pinned).toBe(true);
+
+    const unpinned = await request(app.getHttpServer())
+      .patch(`/conversations/${conversationId}/preferences`)
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ pinned: false })
+      .expect(200);
+    expect(unpinned.body.pinned).toBe(false);
+    expect(unpinned.body.muted).toBe(true);
+  });
+
+  it('sorts pinned conversations first and exposes the read state of members', async () => {
+    const alice = (await register('Sara', 'Diallo')).body;
+    const bob = (await register('Tom', 'Roy')).body;
+    alice.token = alice.accessToken;
+    bob.token = bob.accessToken;
+
+    const first = await request(app.getHttpServer())
+      .post('/conversations')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ memberIds: [bob.user.id] })
+      .expect(201);
+
+    const conversationsService = app.get(ConversationsService);
+    await conversationsService.createMessage(first.body.id, bob.user.id, 'Coucou');
+
+    await request(app.getHttpServer())
+      .patch(`/conversations/${first.body.id}/preferences`)
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ pinned: true })
+      .expect(200);
+
+    const list = await request(app.getHttpServer())
+      .get('/conversations')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .expect(200);
+    expect(list.body[0].id).toBe(first.body.id);
+    expect(list.body[0].pinned).toBe(true);
+
+    // Bob n'a pas encore lu : son lastReadAt est null.
+    const aliceView = await request(app.getHttpServer())
+      .get('/conversations')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .expect(200);
+    const bobMember = aliceView.body[0].members.find(
+      (member: { id: string }) => member.id === bob.user.id,
+    );
+    expect(bobMember.lastReadAt).toBeNull();
+
+    await request(app.getHttpServer())
+      .post(`/conversations/${first.body.id}/read`)
+      .set('Authorization', `Bearer ${bob.token}`)
+      .expect(204);
+
+    const afterRead = await request(app.getHttpServer())
+      .get('/conversations')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .expect(200);
+    const bobAfterRead = afterRead.body[0].members.find(
+      (member: { id: string }) => member.id === bob.user.id,
+    );
+    expect(bobAfterRead.lastReadAt).toBeTruthy();
+  });
+
   it('rejects unauthenticated requests', async () => {
     await request(app.getHttpServer()).get('/conversations').expect(401);
   });

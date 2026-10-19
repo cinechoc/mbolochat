@@ -3,7 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ActionSheet, type SheetAction } from '@/components/action-sheet';
 import { Avatar } from '@/components/avatar';
+import { ConversationRow, type TypingEntry } from '@/components/conversation-row';
+import { FilterTabs } from '@/components/filter-tabs';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, TextField, accentColor } from '@/components/ui';
@@ -11,9 +14,29 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { conversationTitle, formatListTimestamp } from '@/lib/format';
+import {
+  conversationSectionLabel,
+  conversationTitle,
+  type ConversationFilter,
+} from '@/lib/format';
 import { connectSocket } from '@/lib/socket';
 import type { ConversationSummary, Message } from '@/lib/types';
+
+type ListRow =
+  | { key: string; type: 'section'; label: string }
+  | { key: string; type: 'conversation'; conversation: ConversationSummary };
+
+/** Épinglées d'abord, puis discussions les plus récentes en tête. */
+function sortConversations(list: ConversationSummary[]): ConversationSummary[] {
+  return [...list].sort((a, b) => {
+    if (a.pinned !== b.pinned) {
+      return a.pinned ? -1 : 1;
+    }
+    const aDate = new Date(a.lastMessage?.createdAt ?? a.createdAt).getTime();
+    const bDate = new Date(b.lastMessage?.createdAt ?? b.createdAt).getTime();
+    return bDate - aDate;
+  });
+}
 
 export default function ChatsScreen() {
   const { token, user, signOut } = useAuth();
@@ -22,23 +45,34 @@ export default function ChatsScreen() {
   const router = useRouter();
   const [menuView, setMenuView] = useState<'menu' | 'profile' | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [typingMap, setTypingMap] = useState<Record<string, { name: string; text: string }>>({});
+  const [typingMap, setTypingMap] = useState<Record<string, TypingEntry>>({});
+  const [filter, setFilter] = useState<ConversationFilter>('all');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionTarget, setActionTarget] = useState<ConversationSummary | null>(null);
+  const [leaveTarget, setLeaveTarget] = useState<ConversationSummary | null>(null);
   const typingTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const conversationsRef = useRef<ConversationSummary[]>([]);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   const refresh = useCallback(async () => {
     if (!token) {
       return;
     }
     try {
-      setConversations(await api.listConversations(token));
+      const list = await api.listConversations(token);
+      setConversations(sortConversations(list));
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Impossible de charger les discussions.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [token]);
 
@@ -48,21 +82,22 @@ export default function ChatsScreen() {
     }, [refresh]),
   );
 
+  // Rejoint les salons de toutes les discussions affichées (temps réel).
   useEffect(() => {
     if (!token || conversations.length === 0) {
       return;
     }
     const socket = connectSocket(token);
-    const joinAll = () => {
-      for (const conversation of conversations) {
-        socket.emit('conversation:join', { conversationId: conversation.id });
-      }
-    };
-    if (socket.connected) {
-      joinAll();
-    } else {
-      socket.on('connect', joinAll);
+    for (const conversation of conversations) {
+      socket.emit('conversation:join', { conversationId: conversation.id });
     }
+  }, [token, conversations]);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    const socket = connectSocket(token);
 
     const clearTyping = (conversationId: string) => {
       setTypingMap((previous) => {
@@ -81,7 +116,7 @@ export default function ChatsScreen() {
     };
 
     const onMessage = (message: Message) => {
-      if (!conversations.some((item) => item.id === message.conversationId)) {
+      if (!conversationsRef.current.some((item) => item.id === message.conversationId)) {
         return;
       }
       clearTyping(message.conversationId);
@@ -94,9 +129,11 @@ export default function ChatsScreen() {
         const updated: ConversationSummary = {
           ...existing,
           lastMessage: message,
-          unreadCount: message.sender.id === user?.id ? existing.unreadCount : existing.unreadCount + 1,
+          unreadCount:
+            message.sender.id === user?.id ? existing.unreadCount : existing.unreadCount + 1,
         };
-        return [updated, ...previous.filter((_, position) => position !== index)];
+        const next = previous.filter((_, position) => position !== index);
+        return sortConversations([updated, ...next]);
       });
     };
 
@@ -104,7 +141,9 @@ export default function ChatsScreen() {
       if (payload.userId === user?.id) {
         return;
       }
-      const conversation = conversations.find((item) => item.id === payload.conversationId);
+      const conversation = conversationsRef.current.find(
+        (item) => item.id === payload.conversationId,
+      );
       if (!conversation) {
         return;
       }
@@ -137,43 +176,167 @@ export default function ChatsScreen() {
       );
     };
 
+    const onRead = (payload: { conversationId: string; userId: string; at: string }) => {
+      setConversations((previous) =>
+        previous.map((conversation) => {
+          if (conversation.id !== payload.conversationId) {
+            return conversation;
+          }
+          return {
+            ...conversation,
+            members: conversation.members.map((member) =>
+              member.id === payload.userId ? { ...member, lastReadAt: payload.at } : member,
+            ),
+          };
+        }),
+      );
+    };
+
     socket.on('message:new', onMessage);
     socket.on('typing', onTyping);
+    socket.on('read', onRead);
 
     return () => {
       socket.off('message:new', onMessage);
       socket.off('typing', onTyping);
-      socket.off('connect', joinAll);
+      socket.off('read', onRead);
     };
-  }, [token, conversations, user?.id]);
+  }, [token, user?.id]);
 
-  const filtered = useMemo(() => {
+  const filteredRows = useMemo<ListRow[]>(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle || !user) {
-      return conversations;
-    }
-    return conversations.filter((item) => {
-      const title = conversationTitle(item, user.id).toLowerCase();
+    const matching = conversations.filter((item) => {
+      if (filter === 'unread' && item.unreadCount === 0) {
+        return false;
+      }
+      if (filter === 'groups' && item.type !== 'GROUP') {
+        return false;
+      }
+      if (!needle) {
+        return true;
+      }
+      const title = conversationTitle(item, user?.id ?? '').toLowerCase();
       const preview = (item.lastMessage?.content ?? '').toLowerCase();
       return title.includes(needle) || preview.includes(needle);
     });
-  }, [conversations, query, user]);
+
+    const rows: ListRow[] = [];
+    const pinned = matching.filter((item) => item.pinned);
+    if (pinned.length > 0) {
+      rows.push({ key: 'section-pinned', type: 'section', label: 'Épinglées' });
+      for (const conversation of pinned) {
+        rows.push({ key: conversation.id, type: 'conversation', conversation });
+      }
+    }
+
+    let currentLabel = '';
+    for (const conversation of matching.filter((item) => !item.pinned)) {
+      const label = conversationSectionLabel(
+        conversation.lastMessage?.createdAt ?? conversation.createdAt,
+      );
+      if (label !== currentLabel) {
+        currentLabel = label;
+        rows.push({ key: `section-${label}`, type: 'section', label });
+      }
+      rows.push({ key: conversation.id, type: 'conversation', conversation });
+    }
+    return rows;
+  }, [conversations, filter, query, user?.id]);
+
+  const filterOptions = useMemo(
+    () => [
+      { key: 'all' as const, label: 'Toutes', count: conversations.length },
+      {
+        key: 'unread' as const,
+        label: 'Non lus',
+        count: conversations.filter((item) => item.unreadCount > 0).length,
+      },
+      {
+        key: 'groups' as const,
+        label: 'Groupes',
+        count: conversations.filter((item) => item.type === 'GROUP').length,
+      },
+    ],
+    [conversations],
+  );
+
+  const totalUnread = useMemo(
+    () =>
+      conversations
+        .filter((item) => !item.muted)
+        .reduce((total, item) => total + item.unreadCount, 0),
+    [conversations],
+  );
+
+  const applyPreferences = useCallback(
+    async (
+      conversation: ConversationSummary,
+      body: { pinned?: boolean; muted?: boolean },
+    ) => {
+      if (!token) {
+        return;
+      }
+      try {
+        const updated = await api.setConversationPreferences(token, conversation.id, body);
+        setConversations((previous) =>
+          sortConversations(previous.map((item) => (item.id === updated.id ? updated : item))),
+        );
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Action impossible.');
+      }
+    },
+    [token],
+  );
+
+  const markConversationRead = useCallback(
+    async (conversation: ConversationSummary) => {
+      if (!token) {
+        return;
+      }
+      try {
+        await api.markRead(token, conversation.id);
+        setConversations((previous) =>
+          previous.map((item) =>
+            item.id === conversation.id ? { ...item, unreadCount: 0 } : item,
+          ),
+        );
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Impossible de marquer comme lu.');
+      }
+    },
+    [token],
+  );
+
+  const markAllRead = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+    try {
+      await api.markAllRead(token);
+      setConversations((previous) => previous.map((item) => ({ ...item, unreadCount: 0 })));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Impossible de tout marquer comme lu.');
+    }
+  }, [token]);
+
+  const leaveConversation = useCallback(
+    async (conversation: ConversationSummary) => {
+      if (!token || !user) {
+        return;
+      }
+      try {
+        await api.removeConversationMember(token, conversation.id, user.id);
+        setConversations((previous) => previous.filter((item) => item.id !== conversation.id));
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Impossible de quitter la discussion.');
+      }
+    },
+    [token, user],
+  );
 
   if (!token || !user) {
     return <Redirect href="/login" />;
   }
-
-  const previewOf = (item: ConversationSummary) => {
-    const last = item.lastMessage;
-    if (!last) {
-      return 'Nouvelle conversation';
-    }
-    const mine = last.sender.id === user.id;
-    if (mine) {
-      return `${item.type === 'GROUP' ? '\u2713\u2713 Vous : ' : '\u2713\u2713 '}${last.content}`;
-    }
-    return item.type === 'GROUP' ? `${last.sender.displayName} : ${last.content}` : last.content;
-  };
 
   const memberSince = new Date(user.createdAt).toLocaleDateString('fr-FR', {
     day: 'numeric',
@@ -181,11 +344,83 @@ export default function ChatsScreen() {
     year: 'numeric',
   });
 
+  const sheetActions: SheetAction[] = actionTarget
+    ? [
+        ...(actionTarget.unreadCount > 0
+          ? [
+              {
+                key: 'read',
+                label: 'Marquer comme lu',
+                icon: '✓',
+                onPress: () => {
+                  setActionTarget(null);
+                  void markConversationRead(actionTarget);
+                },
+              },
+            ]
+          : []),
+        {
+          key: 'pin',
+          label: actionTarget.pinned ? 'Désépingler' : 'Épingler la discussion',
+          icon: '📌',
+          onPress: () => {
+            setActionTarget(null);
+            void applyPreferences(actionTarget, { pinned: !actionTarget.pinned });
+          },
+        },
+        {
+          key: 'mute',
+          label: actionTarget.muted ? 'Réactiver les notifications' : 'Couper les notifications',
+          icon: '🔕',
+          onPress: () => {
+            setActionTarget(null);
+            void applyPreferences(actionTarget, { muted: !actionTarget.muted });
+          },
+        },
+        ...(actionTarget.type === 'GROUP'
+          ? [
+              {
+                key: 'info',
+                label: 'Infos de la discussion',
+                icon: 'ℹ️',
+                onPress: () => {
+                  const id = actionTarget.id;
+                  setActionTarget(null);
+                  router.push({ pathname: '/conversation-settings/[id]', params: { id } });
+                },
+              },
+            ]
+          : []),
+        {
+          key: 'leave',
+          label:
+            actionTarget.type === 'GROUP'
+              ? 'Quitter la discussion'
+              : 'Supprimer la conversation',
+          icon: '🚪',
+          destructive: true,
+          onPress: () => {
+            setActionTarget(null);
+            setLeaveTarget(actionTarget);
+          },
+        },
+      ]
+    : [];
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.flex} edges={['top', 'left', 'right']}>
         <ThemedView style={styles.header}>
-          <ThemedText style={styles.brandTitle}>MboloChat</ThemedText>
+          <ThemedView style={styles.headerTitleRow}>
+            <ThemedText style={styles.brandTitle}>MboloChat</ThemedText>
+            {totalUnread > 0 ? (
+              <ThemedView style={styles.headerBadge}>
+                <ThemedText style={styles.headerBadgeText}>
+                  {totalUnread > 99 ? '99+' : totalUnread}
+                </ThemedText>
+              </ThemedView>
+            ) : null}
+          </ThemedView>
           <Pressable
             onPress={() => setMenuView('menu')}
             hitSlop={8}
@@ -204,7 +439,9 @@ export default function ChatsScreen() {
           />
         </ThemedView>
 
-        {error && !loading ? (
+        <FilterTabs options={filterOptions} value={filter} onChange={setFilter} />
+
+        {error ? (
           <ThemedText type="small" style={styles.error}>
             {error}
           </ThemedText>
@@ -216,75 +453,56 @@ export default function ChatsScreen() {
           </ThemedView>
         ) : (
           <FlatList
-            data={filtered}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={filtered.length === 0 ? styles.emptyList : styles.listContent}
+            data={filteredRows}
+            keyExtractor={(item) => item.key}
+            contentContainerStyle={filteredRows.length === 0 ? styles.emptyList : styles.listContent}
             keyboardShouldPersistTaps="handled"
             onRefresh={refresh}
-            refreshing={false}
-            ItemSeparatorComponent={() => (
-              <View style={[styles.separator, { backgroundColor: theme.backgroundElement }]} />
-            )}
+            refreshing={refreshing}
+            ItemSeparatorComponent={({ leadingItem }) => {
+              if (leadingItem.type === 'section') {
+                return null;
+              }
+              return (
+                <View
+                  style={[styles.separator, { backgroundColor: theme.backgroundElement }]}
+                />
+              );
+            }}
             ListEmptyComponent={
               <ThemedView style={styles.center}>
                 <ThemedText themeColor="textSecondary" style={styles.emptyText}>
                   {query.trim().length > 0
                     ? 'Aucune discussion ne correspond à ta recherche.'
-                    : 'Aucune conversation pour le moment.\nAppuie sur + pour commencer.'}
+                    : filter === 'unread'
+                      ? 'Tout est lu !'
+                      : filter === 'groups'
+                        ? 'Aucun groupe pour le moment.'
+                        : 'Aucune conversation pour le moment.\nAppuie sur + pour commencer.'}
                 </ThemedText>
               </ThemedView>
             }
             renderItem={({ item }) => {
-              const title = conversationTitle(item, user.id);
-              const rowAvatarUri =
-                item.type === 'DIRECT'
-                  ? (item.members.find((member) => member.id !== user.id)?.avatarUrl ?? null)
-                  : null;
-              const unread = item.unreadCount > 0;
-              const typingEntry = typingMap[item.id];
+              if (item.type === 'section') {
+                return (
+                  <ThemedView style={styles.sectionRow}>
+                    <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+                      {item.label.toUpperCase()}
+                    </ThemedText>
+                  </ThemedView>
+                );
+              }
+              const conversation = item.conversation;
               return (
-                <Pressable
-                  onPress={() => router.push({ pathname: '/chat/[id]', params: { id: item.id } })}
-                  style={({ pressed }) => [
-                    styles.row,
-                    { backgroundColor: pressed ? theme.backgroundSelected : theme.background },
-                  ]}>
-                  <Avatar name={title} uri={rowAvatarUri} size={52} />
-                  <ThemedView style={styles.rowBody}>
-                    <ThemedText
-                      numberOfLines={1}
-                      style={[styles.rowTitle, unread && styles.rowUnread]}>
-                      {title}
-                    </ThemedText>
-                    <ThemedText
-                      type="small"
-                      themeColor="textSecondary"
-                      numberOfLines={1}
-                      style={[
-                        unread && styles.rowUnread,
-                        typingEntry && styles.rowPreviewTyping,
-                      ]}>
-                      {typingEntry
-                        ? `${item.type === 'GROUP' ? `${typingEntry.name} · ` : ''}en train d'écrire : ${typingEntry.text}`
-                        : previewOf(item)}
-                    </ThemedText>
-                  </ThemedView>
-                  <ThemedView style={styles.rowMeta}>
-                    <ThemedText
-                      type="small"
-                      themeColor="textSecondary"
-                      style={unread ? styles.rowTimeUnread : undefined}>
-                      {formatListTimestamp(item.lastMessage?.createdAt ?? item.createdAt)}
-                    </ThemedText>
-                    {unread ? (
-                      <ThemedView style={styles.badge}>
-                        <ThemedText style={styles.badgeText}>
-                          {item.unreadCount > 99 ? '99+' : item.unreadCount}
-                        </ThemedText>
-                      </ThemedView>
-                    ) : null}
-                  </ThemedView>
-                </Pressable>
+                <ConversationRow
+                  conversation={conversation}
+                  currentUserId={user.id}
+                  typing={typingMap[conversation.id] ?? null}
+                  onPress={() =>
+                    router.push({ pathname: '/chat/[id]', params: { id: conversation.id } })
+                  }
+                  onLongPress={() => setActionTarget(conversation)}
+                />
               );
             }}
           />
@@ -340,6 +558,19 @@ export default function ChatsScreen() {
                   ]}>
                   <ThemedText>Nouvelle discussion</ThemedText>
                 </Pressable>
+                {totalUnread > 0 ? (
+                  <Pressable
+                    onPress={() => {
+                      setMenuView(null);
+                      void markAllRead();
+                    }}
+                    style={({ pressed }) => [
+                      styles.menuItem,
+                      pressed && { backgroundColor: theme.backgroundSelected },
+                    ]}>
+                    <ThemedText>Tout marquer comme lu</ThemedText>
+                  </Pressable>
+                ) : null}
                 <View style={[styles.menuDivider, { backgroundColor: theme.backgroundElement }]} />
                 <Pressable
                   onPress={async () => {
@@ -372,6 +603,55 @@ export default function ChatsScreen() {
           </Pressable>
         </Modal>
 
+        <ActionSheet
+          visible={actionTarget !== null}
+          title={actionTarget ? conversationTitle(actionTarget, user.id) : undefined}
+          subtitle={
+            actionTarget
+              ? actionTarget.type === 'GROUP'
+                ? `${actionTarget.members.length} membres`
+                : undefined
+              : undefined
+          }
+          actions={sheetActions}
+          onClose={() => setActionTarget(null)}
+        />
+
+        <ActionSheet
+          visible={leaveTarget !== null}
+          title={leaveTarget ? conversationTitle(leaveTarget, user.id) : undefined}
+          subtitle={
+            leaveTarget?.type === 'GROUP'
+              ? 'Tu ne pourras plus recevoir les messages de ce groupe.'
+              : 'La conversation disparaîtra de ta liste.'
+          }
+          actions={
+            leaveTarget
+              ? [
+                  {
+                    key: 'cancel',
+                    label: 'Annuler',
+                    onPress: () => setLeaveTarget(null),
+                  },
+                  {
+                    key: 'confirm',
+                    label:
+                      leaveTarget.type === 'GROUP'
+                        ? 'Quitter la discussion'
+                        : 'Supprimer la conversation',
+                    destructive: true,
+                    onPress: () => {
+                      const target = leaveTarget;
+                      setLeaveTarget(null);
+                      void leaveConversation(target);
+                    },
+                  },
+                ]
+              : []
+          }
+          onClose={() => setLeaveTarget(null)}
+        />
+
         <Pressable
           onPress={() => router.push('/new-chat')}
           style={({ pressed }) => [styles.fab, pressed && styles.pressed]}>
@@ -396,6 +676,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.two,
     paddingBottom: Spacing.one,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  headerBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    backgroundColor: accentColor,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerBadgeText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
   },
   brandTitle: {
     fontSize: 26,
@@ -430,49 +729,14 @@ const styles = StyleSheet.create({
   listContent: {
     paddingBottom: 96,
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  sectionRow: {
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two + Spacing.half,
-    gap: Spacing.three,
+    paddingTop: Spacing.three,
+    paddingBottom: Spacing.one,
   },
-  rowBody: {
-    flex: 1,
-    gap: Spacing.half,
-  },
-  rowMeta: {
-    alignItems: 'flex-end',
-    gap: Spacing.one,
-  },
-  badge: {
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
-    paddingHorizontal: 6,
-    backgroundColor: accentColor,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeText: {
-    color: '#ffffff',
+  sectionLabel: {
+    letterSpacing: 0.8,
     fontSize: 12,
-    fontWeight: '700',
-  },
-  rowTitle: {
-    fontWeight: '600',
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  rowUnread: {
-    fontWeight: '700',
-  },
-  rowPreviewTyping: {
-    fontStyle: 'italic',
-  },
-  rowTimeUnread: {
-    color: accentColor,
-    fontWeight: '700',
   },
   separator: {
     height: StyleSheet.hairlineWidth,
