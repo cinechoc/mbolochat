@@ -12,6 +12,11 @@ export interface SenderInfo {
   avatarUrl: string | null;
 }
 
+export interface MemberInfo extends SenderInfo {
+  /** Dernier accusé de lecture de ce membre dans la conversation. */
+  lastReadAt: Date | null;
+}
+
 export interface MessageDto {
   id: string;
   conversationId: string;
@@ -25,9 +30,13 @@ export interface ConversationSummary {
   type: 'DIRECT' | 'GROUP';
   name: string | null;
   createdAt: Date;
-  members: SenderInfo[];
+  members: MemberInfo[];
   lastMessage: (Omit<MessageDto, 'conversationId'> & { conversationId: string }) | null;
   unreadCount: number;
+  /** Épinglée par l'utilisateur courant (remonte en tête de liste). */
+  pinned: boolean;
+  /** Muette par l'utilisateur courant (pas de badge de notification). */
+  muted: boolean;
 }
 
 export interface ListMessagesOptions {
@@ -124,6 +133,7 @@ export class ConversationsService {
         username: users.username,
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,
+        lastReadAt: conversationMembers.lastReadAt,
       })
       .from(conversationMembers)
       .innerJoin(users, eq(users.id, conversationMembers.userId))
@@ -151,23 +161,86 @@ export class ConversationsService {
       .groupBy(messages.conversationId);
     const unreadMap = new Map(unreadRows.map((r) => [r.conversationId, Number(r.cnt)]));
 
-    const summaries = conversationRows.map((conversation) => ({
-      id: conversation.id,
-      type: conversation.type,
-      name: conversation.name,
-      createdAt: conversation.createdAt,
-      members: memberRows
-        .filter((member) => member.conversationId === conversation.id)
-        .map(({ id, username, displayName, avatarUrl }) => ({ id, username, displayName, avatarUrl })),
-      lastMessage: lastMessages.get(conversation.id) ?? null,
-      unreadCount: unreadMap.get(conversation.id) ?? 0,
-    }));
+    // Préférences par utilisateur (épinglage / muet) : uniquement pour l'utilisateur courant.
+    const preferenceRows = await this.db
+      .select({
+        conversationId: conversationMembers.conversationId,
+        pinnedAt: conversationMembers.pinnedAt,
+        mutedAt: conversationMembers.mutedAt,
+      })
+      .from(conversationMembers)
+      .where(
+        and(
+          eq(conversationMembers.userId, userId),
+          inArray(conversationMembers.conversationId, ids),
+        ),
+      );
+    const preferenceMap = new Map(
+      preferenceRows.map((row) => [row.conversationId, row]),
+    );
+
+    const summaries = conversationRows.map((conversation) => {
+      const preferences = preferenceMap.get(conversation.id);
+      return {
+        id: conversation.id,
+        type: conversation.type,
+        name: conversation.name,
+        createdAt: conversation.createdAt,
+        members: memberRows
+          .filter((member) => member.conversationId === conversation.id)
+          .map(({ id, username, displayName, avatarUrl, lastReadAt }) => ({
+            id,
+            username,
+            displayName,
+            avatarUrl,
+            lastReadAt,
+          })),
+        lastMessage: lastMessages.get(conversation.id) ?? null,
+        unreadCount: unreadMap.get(conversation.id) ?? 0,
+        pinned: Boolean(preferences?.pinnedAt),
+        muted: Boolean(preferences?.mutedAt),
+      };
+    });
 
     return summaries.sort((a, b) => {
+      // Les conversations épinglées d'abord, puis les plus récentes en tête.
+      if (a.pinned !== b.pinned) {
+        return a.pinned ? -1 : 1;
+      }
       const aDate = (a.lastMessage?.createdAt ?? a.createdAt).getTime();
       const bDate = (b.lastMessage?.createdAt ?? b.createdAt).getTime();
       return bDate - aDate;
     });
+  }
+
+  async setPreferences(
+    conversationId: string,
+    userId: string,
+    preferences: { pinned?: boolean; muted?: boolean },
+  ): Promise<ConversationSummary> {
+    if (!(await this.isMember(conversationId, userId))) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+
+    const values: Partial<typeof conversationMembers.$inferInsert> = {};
+    if (preferences.pinned !== undefined) {
+      values.pinnedAt = preferences.pinned ? new Date() : null;
+    }
+    if (preferences.muted !== undefined) {
+      values.mutedAt = preferences.muted ? new Date() : null;
+    }
+    if (Object.keys(values).length > 0) {
+      await this.db
+        .update(conversationMembers)
+        .set(values)
+        .where(
+          and(
+            eq(conversationMembers.conversationId, conversationId),
+            eq(conversationMembers.userId, userId),
+          ),
+        );
+    }
+    return this.getSummaryForUser(conversationId, userId);
   }
 
   async rename(conversationId: string, userId: string, name: string): Promise<ConversationSummary> {
