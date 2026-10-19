@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ActionSheet, type SheetAction } from '@/components/action-sheet';
+import { ActionSheet, type SheetAction, type SheetIcon } from '@/components/action-sheet';
 import { Avatar } from '@/components/avatar';
 import { ConversationRow, type TypingEntry } from '@/components/conversation-row';
 import { FilterTabs } from '@/components/filter-tabs';
@@ -347,22 +347,22 @@ export default function ChatsScreen() {
   const sheetActions: SheetAction[] = actionTarget
     ? [
         ...(actionTarget.unreadCount > 0
-          ? [
+          ? ([
               {
                 key: 'read',
                 label: 'Marquer comme lu',
-                icon: '✓',
+                icon: 'mark-email-read',
                 onPress: () => {
                   setActionTarget(null);
                   void markConversationRead(actionTarget);
                 },
               },
-            ]
+            ] satisfies SheetAction[])
           : []),
         {
           key: 'pin',
           label: actionTarget.pinned ? 'Désépingler' : 'Épingler la discussion',
-          icon: '📌',
+          icon: (actionTarget.pinned ? 'fiber-pin' : 'push-pin') as SheetIcon,
           onPress: () => {
             setActionTarget(null);
             void applyPreferences(actionTarget, { pinned: !actionTarget.pinned });
@@ -371,25 +371,25 @@ export default function ChatsScreen() {
         {
           key: 'mute',
           label: actionTarget.muted ? 'Réactiver les notifications' : 'Couper les notifications',
-          icon: '🔕',
+          icon: (actionTarget.muted ? 'notifications' : 'notifications-off') as SheetIcon,
           onPress: () => {
             setActionTarget(null);
             void applyPreferences(actionTarget, { muted: !actionTarget.muted });
           },
         },
         ...(actionTarget.type === 'GROUP'
-          ? [
+          ? ([
               {
                 key: 'info',
                 label: 'Infos de la discussion',
-                icon: 'ℹ️',
+                icon: 'info-outline',
                 onPress: () => {
                   const id = actionTarget.id;
                   setActionTarget(null);
                   router.push({ pathname: '/conversation-settings/[id]', params: { id } });
                 },
               },
-            ]
+            ] satisfies SheetAction[])
           : []),
         {
           key: 'leave',
@@ -397,7 +397,7 @@ export default function ChatsScreen() {
             actionTarget.type === 'GROUP'
               ? 'Quitter la discussion'
               : 'Supprimer la conversation',
-          icon: '🚪',
+          icon: 'logout',
           destructive: true,
           onPress: () => {
             setActionTarget(null);

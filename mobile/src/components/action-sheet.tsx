@@ -1,3 +1,4 @@
+import { MaterialIcons } from '@expo/vector-icons';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -6,10 +7,12 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
+export type SheetIcon = React.ComponentProps<typeof MaterialIcons>['name'];
+
 export interface SheetAction {
   key: string;
   label: string;
-  icon?: string;
+  icon?: SheetIcon;
   destructive?: boolean;
   onPress: () => void;
 }
@@ -61,7 +64,14 @@ export function ActionSheet({ visible, title, subtitle, actions, onClose }: Acti
                 styles.action,
                 pressed && { backgroundColor: theme.backgroundSelected },
               ]}>
-              {action.icon ? <ThemedText style={styles.actionIcon}>{action.icon}</ThemedText> : null}
+              {action.icon ? (
+                <MaterialIcons
+                  name={action.icon}
+                  size={20}
+                  color={action.destructive ? '#e5484d' : theme.text}
+                  style={styles.actionIcon}
+                />
+              ) : null}
               <ThemedText style={action.destructive ? styles.destructive : undefined}>
                 {action.label}
               </ThemedText>
@@ -102,8 +112,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
   },
   actionIcon: {
-    fontSize: 18,
-    width: 22,
+    width: 24,
   },
   destructive: {
     color: '#e5484d',

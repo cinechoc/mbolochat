@@ -70,6 +70,7 @@ export function FilterTabs({ options, value, onChange }: FilterTabsProps) {
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: Spacing.two,
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.two,

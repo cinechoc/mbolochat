@@ -1,3 +1,4 @@
+import { MaterialIcons } from '@expo/vector-icons';
 import { memo } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 
@@ -61,14 +62,20 @@ function ConversationRowComponent({
             {title}
           </ThemedText>
           {conversation.pinned ? (
-            <ThemedText type="small" themeColor="textSecondary" style={styles.icon}>
-              📌
-            </ThemedText>
+            <MaterialIcons
+              name="push-pin"
+              size={13}
+              color={theme.textSecondary}
+              style={styles.icon}
+            />
           ) : null}
           {conversation.muted ? (
-            <ThemedText type="small" themeColor="textSecondary" style={styles.icon}>
-              🔕
-            </ThemedText>
+            <MaterialIcons
+              name="notifications-off"
+              size={13}
+              color={theme.textSecondary}
+              style={styles.icon}
+            />
           ) : null}
         </ThemedView>
         <ThemedText
@@ -124,7 +131,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   icon: {
-    fontSize: 12,
+    marginLeft: 2,
   },
   bold: {
     fontWeight: '700',
