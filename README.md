@@ -82,10 +82,12 @@ REST (Bearer token) :
 - `POST /auth/register`, `POST /auth/login`, `GET /auth/me`
 - `POST /auth/refresh` (`refreshToken`, rotation), `POST /auth/logout` (`refreshToken`)
 - `GET /users/search?q=`, `GET /users/me`, `PATCH /users/me` (`displayName`), `POST /users/me/avatar` (`data` base64, `mimeType`)
-- `POST /conversations` (`memberIds`, `name?`, `type?` DIRECT|GROUP), `GET /conversations` (incl. `unreadCount`)
+- `POST /conversations` (`memberIds`, `name?`, `type?` DIRECT|GROUP), `GET /conversations` (incl. `unreadCount`, `pinned`, `muted`, `members[].lastReadAt`)
 - `GET /conversations/:id`, `GET /conversations/:id/messages?before=&limit=`
 - `PATCH /conversations/:id` (`name`), `POST /conversations/:id/members` (`memberIds`), `DELETE /conversations/:id/members/:userId`
+- `PATCH /conversations/:id/preferences` (`pinned?`, `muted?`) — préférences propres à l'utilisateur
 - `POST /conversations/:id/read` — marque la conversation comme lue
+- `POST /conversations/read-all` — marque toutes les conversations comme lues
 
 WebSocket (Socket.IO, auth par `auth.token` avec access token 15 min) :
 
@@ -102,6 +104,10 @@ WebSocket (Socket.IO, auth par `auth.token` avec access token 15 min) :
 - Groupes : création côté UI (multi-sélection + nom), renommage, ajout/retrait de membres
 - Pagination inversée de l'historique (`before`/`limit` au scroll vers le haut)
 - Indicateur de frappe (`typing`) et accusés de lecture (`message:read` → ✓✓) + badge non-lus
+- Liste de conversations façon WhatsApp : sections (Épinglées / Aujourd'hui / Hier / 7 derniers jours / Plus ancien), filtres (Toutes / Non lus / Groupes), badge de non-lus total dans l'en-tête, pull-to-refresh, horodatage intelligent
+- Actions sur appui long : marquer comme lu, épingler/désépingler, couper les notifications, infos, quitter la discussion
+- Préférences par utilisateur et par conversation (épinglage, muet) stockées en base (`conversation_members.pinned_at` / `muted_at`)
+- ✓✓ dans l'aperçu de la liste (lu par tous les autres), mis à jour en temps réel via l'événement `read`
 
 ## Limites du MVP / prochaines étapes
 
