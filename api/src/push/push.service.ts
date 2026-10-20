@@ -30,11 +30,28 @@ interface ExpoPushMessage {
   sound: 'default';
   priority: 'high';
   channelId: string;
+  /** Photo de profil de l'expéditeur, utilisée comme grande icône Android. */
+  richContent?: { image: string };
   data: {
     type: 'message';
     conversationId: string;
     messageId: string;
   };
+}
+
+/**
+ * URL absolue d'une image de l'API, joignable depuis l'appareil.
+ * Les avatars sont stockés en chemin relatif (« /uploads/… ») : c'est
+ * l'appareil qui indique l'adresse par laquelle il joint l'API.
+ */
+function absoluteMediaUrl(path: string, baseUrl: string | null): string | null {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+  if (!baseUrl) {
+    return null;
+  }
+  return `${baseUrl.replace(/\/+$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
 /** Aperçu court du message pour la notification. */
@@ -114,7 +131,7 @@ export class PushService {
       }
 
       const tokens = await this.db
-        .select({ token: pushTokens.token })
+        .select({ token: pushTokens.token, baseUrl: pushTokens.baseUrl })
         .from(pushTokens)
         .where(inArray(pushTokens.userId, recipients));
       if (tokens.length === 0) {
@@ -128,19 +145,25 @@ export class PushService {
       const text = previewOf(message.content);
       const body = conversation.type === 'GROUP' ? `${message.sender.displayName} : ${text}` : text;
 
-      const payload: ExpoPushMessage[] = tokens.map(({ token }) => ({
-        to: token,
-        title,
-        body,
-        sound: 'default',
-        priority: 'high',
-        channelId: CHANNEL_ID,
-        data: {
-          type: 'message',
-          conversationId: message.conversationId,
-          messageId: message.id,
-        },
-      }));
+      const avatarPath = message.sender.avatarUrl;
+
+      const payload: ExpoPushMessage[] = tokens.map(({ token, baseUrl }) => {
+        const avatar = avatarPath ? absoluteMediaUrl(avatarPath, baseUrl) : null;
+        return {
+          to: token,
+          title,
+          body,
+          sound: 'default',
+          priority: 'high',
+          channelId: CHANNEL_ID,
+          ...(avatar ? { richContent: { image: avatar } } : {}),
+          data: {
+            type: 'message',
+            conversationId: message.conversationId,
+            messageId: message.id,
+          },
+        };
+      });
 
       await this.send(payload);
     } catch (error) {

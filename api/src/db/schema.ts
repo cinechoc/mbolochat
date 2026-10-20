@@ -74,6 +74,8 @@ export const pushTokens = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     token: text('token').notNull().unique(),
     platform: text('platform').notNull().default('android'),
+    /** Adresse de l'API telle que l'appareil la joint (pour les images). */
+    baseUrl: text('base_url'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('push_tokens_user_idx').on(table.userId)],

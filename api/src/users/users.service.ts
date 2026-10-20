@@ -160,13 +160,19 @@ export class UsersService {
   }
 
   /** Enregistre (ou met à jour) le jeton push d'un appareil. */
-  async registerPushToken(userId: string, token: string, platform: string): Promise<void> {
+  async registerPushToken(
+    userId: string,
+    token: string,
+    platform: string,
+    baseUrl?: string,
+  ): Promise<void> {
+    const normalizedBaseUrl = baseUrl?.trim().replace(/\/+$/, '') || null;
     await this.db
       .insert(pushTokens)
-      .values({ userId, token, platform })
+      .values({ userId, token, platform, baseUrl: normalizedBaseUrl })
       .onConflictDoUpdate({
         target: pushTokens.token,
-        set: { userId, platform },
+        set: { userId, platform, baseUrl: normalizedBaseUrl },
       });
   }
 

@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import { api } from './api';
 import type * as ExpoNotifications from 'expo-notifications';
 
 /**
@@ -112,6 +113,26 @@ export async function requestPushToken(): Promise<string | null> {
     return data ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Réenregistre le jeton push au démarrage, sans redemander la permission.
+ * L'API mémorise ainsi l'adresse par laquelle l'appareil joint les images
+ * (photo de profil dans la notification).
+ */
+export async function syncPushToken(authToken: string): Promise<void> {
+  try {
+    if ((await getPushPermissionStatus()) !== 'granted') {
+      return;
+    }
+    const pushToken = await requestPushToken();
+    if (!pushToken) {
+      return;
+    }
+    await api.registerPushToken(authToken, pushToken);
+  } catch {
+    // Sans réseau, le prochain démarrage réessaiera.
   }
 }
 

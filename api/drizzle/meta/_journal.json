@@ -71,6 +71,13 @@
       "when": 1792485918583,
       "tag": "0009_modern_praxagora",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792501863407,
+      "tag": "0010_easy_red_hulk",
+      "breakpoints": true
     }
   ]
 }

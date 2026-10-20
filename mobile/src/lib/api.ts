@@ -270,7 +270,7 @@ export const api = {
     return request<{ registered: boolean }>('/users/me/push-token', {
       method: 'POST',
       token,
-      body: { token: pushToken, platform },
+      body: { token: pushToken, platform, apiBaseUrl: API_URL },
     });
   },
 

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { cache } from './cache';
+import { syncPushToken } from './push';
 import { disconnectSocket } from './socket';
 import {
   clearStoredTokens,
@@ -25,6 +26,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // À chaque session restaurée, on rafraîchit le jeton push (et l'adresse
+  // de l'API que l'appareil utilise pour les photos de notification).
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    void syncPushToken(token);
+  }, [token]);
 
   useEffect(() => {
     let cancelled = false;

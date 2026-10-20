@@ -71,13 +71,18 @@ export class UsersController {
   @Post('me/push-token')
   async registerPushToken(
     @CurrentUser() current: JwtPayload,
-    @Body() body: { token?: string; platform?: string },
+    @Body() body: { token?: string; platform?: string; apiBaseUrl?: string },
   ) {
     const token = body?.token?.trim();
     if (!token) {
       throw new BadRequestException('Missing push token');
     }
-    await this.usersService.registerPushToken(current.sub, token, body?.platform ?? 'android');
+    await this.usersService.registerPushToken(
+      current.sub,
+      token,
+      body?.platform ?? 'android',
+      body?.apiBaseUrl,
+    );
     return { registered: true };
   }
 
