@@ -62,6 +62,23 @@ export const blocks = pgTable(
   (table) => [primaryKey({ columns: [table.blockerId, table.blockedId] })],
 );
 
+/** Jetons de notification push (Expo Push Service) par appareil. */
+export const pushTokens = pgTable(
+  'push_tokens',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    token: text('token').notNull().unique(),
+    platform: text('platform').notNull().default('android'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('push_tokens_user_idx').on(table.userId)],
+);
+
 export const messages = pgTable(
   'messages',
   {
@@ -119,3 +136,4 @@ export type Conversation = typeof conversations.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type RefreshToken = typeof refreshTokens.$inferSelect;
+export type PushToken = typeof pushTokens.$inferSelect;

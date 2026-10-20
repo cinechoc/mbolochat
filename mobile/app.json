@@ -17,7 +17,12 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.mbolochat"
+      "package": "com.anonymous.mbolochat",
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "single",
@@ -33,7 +38,24 @@
           "imageWidth": 110
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#3c87f7",
+          "defaultChannel": "messages"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "MboloChat utilise l’appareil photo pour prendre une photo à envoyer dans une discussion.",
+          "microphonePermission": "MboloChat utilise le micro pour enregistrer des messages vocaux.",
+          "recordAudioAndroid": true,
+          "barcodeScannerEnabled": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

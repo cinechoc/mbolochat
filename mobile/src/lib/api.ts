@@ -265,4 +265,20 @@ export const api = {
       body: { notificationsEnabled: enabled },
     });
   },
+
+  registerPushToken(token: string, pushToken: string, platform = 'android') {
+    return request<{ registered: boolean }>('/users/me/push-token', {
+      method: 'POST',
+      token,
+      body: { token: pushToken, platform },
+    });
+  },
+
+  removePushToken(token: string, pushToken: string) {
+    return request<{ registered: boolean }>('/users/me/push-token', {
+      method: 'DELETE',
+      token,
+      body: { token: pushToken },
+    });
+  },
 };

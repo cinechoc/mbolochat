@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -43,8 +44,7 @@ export class UsersController {
   }
 
   @Post('me/avatar')
-  async uploadAvatar(@CurrentUser() current: JwtPayload, @Req() req: Request) {
-    // Expect raw body as binary image via multipart? We'll accept base64 JSON instead.
+  async uploadAvatar(@CurrentUser() current: JwtPayload, @Req() req: Request) {    // Expect raw body as binary image via multipart? We'll accept base64 JSON instead.
     const body = req.body as { data?: string; mimeType?: string } | undefined;
     if (!body?.data) {
       throw new (await import('@nestjs/common')).BadRequestException('Missing image data');
@@ -65,6 +65,29 @@ export class UsersController {
     const url = `/uploads/${filename}?v=${Date.now()}`;
     const user = await this.usersService.updateProfile(current.sub, { avatarUrl: url });
     return toPublicUser(user);
+  }
+
+  /** Enregistre le jeton push de l'appareil pour les notifications. */
+  @Post('me/push-token')
+  async registerPushToken(
+    @CurrentUser() current: JwtPayload,
+    @Body() body: { token?: string; platform?: string },
+  ) {
+    const token = body?.token?.trim();
+    if (!token) {
+      throw new BadRequestException('Missing push token');
+    }
+    await this.usersService.registerPushToken(current.sub, token, body?.platform ?? 'android');
+    return { registered: true };
+  }
+
+  @Delete('me/push-token')
+  async removePushToken(@CurrentUser() current: JwtPayload, @Body() body: { token?: string }) {
+    const token = body?.token?.trim();
+    if (token) {
+      await this.usersService.removePushToken(token);
+    }
+    return { registered: false };
   }
 
   @Get('search')

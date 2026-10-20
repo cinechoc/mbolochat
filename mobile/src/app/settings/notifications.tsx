@@ -12,6 +12,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { conversationTitle } from '@/lib/format';
+import { getPushPermissionStatus, requestPushToken } from '@/lib/push';
 import type { ConversationSummary } from '@/lib/types';
 
 /** Réglages des notifications : interrupteur global + silence par discussion. */
@@ -21,6 +22,9 @@ export default function NotificationSettingsScreen() {
   const insets = useSafeAreaInsets();
 
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [pushStatus, setPushStatus] = useState<'granted' | 'denied' | 'undetermined'>(
+    'undetermined',
+  );
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -30,6 +34,7 @@ export default function NotificationSettingsScreen() {
     try {
       const list = await api.listConversations(token);
       setConversations(list);
+      setPushStatus(await getPushPermissionStatus());
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Impossible de charger les discussions.');
     }
@@ -49,6 +54,14 @@ export default function NotificationSettingsScreen() {
     try {
       const updated = await api.setNotificationsEnabled(token, value);
       setUser(updated);
+      if (value) {
+        // Activer les notifications push : permission + enregistrement du jeton.
+        const pushToken = await requestPushToken();
+        if (pushToken) {
+          await api.registerPushToken(token, pushToken);
+        }
+        setPushStatus(await getPushPermissionStatus());
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Changement impossible.');
     }
@@ -88,6 +101,28 @@ export default function NotificationSettingsScreen() {
         <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
           Quand cette option est désactivée, MboloChat n&apos;affiche plus les pastilles de messages
           non lus.
+        </ThemedText>
+
+        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
+          NOTIFICATIONS APPAREIL
+        </ThemedText>
+        <ThemedView style={styles.group}>
+          <View style={[styles.row, { borderBottomColor: theme.backgroundElement }]}>
+            <MaterialIcons name="phone-android" size={22} color={theme.text} />
+            <ThemedText style={styles.rowLabel}>Notifications push</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {pushStatus === 'granted'
+                ? 'Activées'
+                : pushStatus === 'denied'
+                  ? 'Refusées'
+                  : 'Non activées'}
+            </ThemedText>
+          </View>
+        </ThemedView>
+        <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
+          {pushStatus === 'granted'
+            ? 'MboloChat peut te prévenir même quand l’application est fermée.'
+            : 'Active l’option « Notifications » ci-dessus pour autoriser MboloChat à t’avertir même quand l’application est fermée.'}
         </ThemedText>
 
         <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>

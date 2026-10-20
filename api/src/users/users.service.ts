@@ -5,6 +5,7 @@ import {
   blocks,
   conversationMembers,
   messages,
+  pushTokens,
   users,
   type User,
 } from '../db/schema.js';
@@ -156,6 +157,30 @@ export class UsersService {
       )
       .limit(1);
     return Boolean(row);
+  }
+
+  /** Enregistre (ou met à jour) le jeton push d'un appareil. */
+  async registerPushToken(userId: string, token: string, platform: string): Promise<void> {
+    await this.db
+      .insert(pushTokens)
+      .values({ userId, token, platform })
+      .onConflictDoUpdate({
+        target: pushTokens.token,
+        set: { userId, platform },
+      });
+  }
+
+  async removePushToken(token: string): Promise<void> {
+    await this.db.delete(pushTokens).where(eq(pushTokens.token, token));
+  }
+
+  /** Jetons push d'un utilisateur (pour l'envoi de notifications). */
+  async listPushTokens(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ token: pushTokens.token })
+      .from(pushTokens)
+      .where(eq(pushTokens.userId, userId));
+    return rows.map((row) => row.token);
   }
 
   /** Profil public enrichi (statistiques + indicateurs "c'est moi"). */

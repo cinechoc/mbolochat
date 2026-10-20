@@ -4,6 +4,10 @@ import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { AuthProvider } from '@/lib/auth-context';
+import { configureNotificationHandler } from '@/lib/push';
+
+// Les notifications push s'affichent aussi quand l'app est au premier plan.
+configureNotificationHandler();
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
