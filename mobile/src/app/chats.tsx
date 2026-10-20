@@ -1,6 +1,7 @@
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ActionSheet, type SheetAction, type SheetIcon } from '@/components/action-sheet';
@@ -39,11 +40,10 @@ function sortConversations(list: ConversationSummary[]): ConversationSummary[] {
 }
 
 export default function ChatsScreen() {
-  const { token, user, signOut } = useAuth();
+  const { token, user } = useAuth();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const [menuView, setMenuView] = useState<'menu' | 'profile' | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [typingMap, setTypingMap] = useState<Record<string, TypingEntry>>({});
   const [filter, setFilter] = useState<ConversationFilter>('all');
@@ -449,12 +449,22 @@ export default function ChatsScreen() {
               </ThemedView>
             ) : null}
           </ThemedView>
-          <Pressable
-            onPress={() => setMenuView('menu')}
-            hitSlop={8}
-            style={({ pressed }) => pressed && styles.pressed}>
-            <Avatar name={user.displayName} uri={user.avatarUrl} size={36} />
-          </Pressable>
+          <ThemedView style={styles.headerActions}>
+            {totalUnread > 0 ? (
+              <Pressable
+                onPress={() => void markAllRead()}
+                hitSlop={8}
+                style={({ pressed }) => pressed && styles.pressed}>
+                <MaterialIcons name="mark-email-read" size={22} color={theme.text} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={() => router.push('/profile')}
+              hitSlop={8}
+              style={({ pressed }) => pressed && styles.pressed}>
+              <Avatar name={user.displayName} uri={user.avatarUrl} size={36} />
+            </Pressable>
+          </ThemedView>
         </ThemedView>
 
         <ThemedView style={styles.searchWrapper}>
@@ -535,86 +545,6 @@ export default function ChatsScreen() {
             }}
           />
         )}
-
-        <Modal
-          visible={menuView !== null}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setMenuView(null)}>
-          <Pressable
-            style={[styles.backdrop, menuView === 'profile' && styles.backdropDim]}
-            onPress={() => setMenuView(null)}>
-            {menuView === 'menu' ? (
-              <Pressable
-                onPress={() => undefined}
-                style={[
-                  styles.menuCard,
-                  {
-                    top: insets.top + 52,
-                    backgroundColor: theme.background,
-                    borderColor: theme.backgroundElement,
-                  },
-                ]}>
-                <ThemedView style={styles.menuHeader}>
-                  <Avatar name={user.displayName} uri={user.avatarUrl} size={48} />
-                  <ThemedView style={styles.menuHeaderBody}>
-                    <ThemedText numberOfLines={1} style={styles.menuName}>
-                      {user.displayName}
-                    </ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                      @{user.username}
-                    </ThemedText>
-                  </ThemedView>
-                </ThemedView>
-                <View style={[styles.menuDivider, { backgroundColor: theme.backgroundElement }]} />
-                <Pressable
-                  onPress={() => { setMenuView(null); router.push('/profile'); }}
-                  style={({ pressed }) => [
-                    styles.menuItem,
-                    pressed && { backgroundColor: theme.backgroundSelected },
-                  ]}>
-                  <ThemedText>Mon profil</ThemedText>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    setMenuView(null);
-                    router.push('/new-chat');
-                  }}
-                  style={({ pressed }) => [
-                    styles.menuItem,
-                    pressed && { backgroundColor: theme.backgroundSelected },
-                  ]}>
-                  <ThemedText>Nouvelle discussion</ThemedText>
-                </Pressable>
-                {totalUnread > 0 ? (
-                  <Pressable
-                    onPress={() => {
-                      setMenuView(null);
-                      void markAllRead();
-                    }}
-                    style={({ pressed }) => [
-                      styles.menuItem,
-                      pressed && { backgroundColor: theme.backgroundSelected },
-                    ]}>
-                    <ThemedText>Tout marquer comme lu</ThemedText>
-                  </Pressable>
-                ) : null}
-                <View style={[styles.menuDivider, { backgroundColor: theme.backgroundElement }]} />
-                <Pressable
-                  onPress={async () => {
-                    setMenuView(null);
-                    await signOut();
-                  }}
-                  style={({ pressed }) => [
-                    styles.menuItem,
-                    pressed && { backgroundColor: theme.backgroundSelected },
-                  ]}>
-                  <ThemedText style={styles.danger}>Se déconnecter</ThemedText>
-                </Pressable>
-              </Pressable>
-            ) : null}
-          </Pressable>
-        </Modal>
 
         <ActionSheet
           visible={actionTarget !== null}
@@ -793,43 +723,9 @@ const styles = StyleSheet.create({
   backdropDim: {
     backgroundColor: 'rgba(0, 0, 0, 0.35)',
   },
-  menuCard: {
-    position: 'absolute',
-    right: Spacing.three,
-    minWidth: 252,
-    borderRadius: Spacing.three,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingVertical: Spacing.one,
-    shadowColor: '#000000',
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
-  },
-  menuHeader: {
+  headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-  },
-  menuHeaderBody: {
-    flex: 1,
-    gap: Spacing.half,
-  },
-  menuName: {
-    fontWeight: '700',
-  },
-  menuDivider: {
-    height: StyleSheet.hairlineWidth,
-    marginVertical: Spacing.one,
-  },
-  menuItem: {
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two + Spacing.half,
-  },
-  danger: {
-    color: '#e5484d',
-    fontWeight: '600',
+    gap: Spacing.three,
   },
 });
