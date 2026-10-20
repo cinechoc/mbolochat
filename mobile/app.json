@@ -56,7 +56,8 @@
           "recordAudioAndroid": true,
           "barcodeScannerEnabled": false
         }
-      ]
+      ],
+      "./plugins/withMessagingNotifications"
     ],
     "experiments": {
       "typedRoutes": true,

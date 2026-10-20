@@ -13,8 +13,6 @@ import type { MessageDto } from '../conversations/conversations.service.js';
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 /** L'API Expo accepte au maximum 100 messages par requête. */
 const BATCH_SIZE = 100;
-/** Canal Android déclaré par l'application (importance haute). */
-const CHANNEL_ID = 'messages';
 
 interface ExpoTicket {
   status?: 'ok' | 'error';
@@ -23,19 +21,25 @@ interface ExpoTicket {
   details?: { error?: string };
 }
 
+/**
+ * Notification « data-only » : elle n'est pas affichée par le système, c'est
+ * l'application (MessagingNotificationService côté Android) qui la construit,
+ * pour obtenir le rendu WhatsApp (avatar rond + badge du logo).
+ */
 interface ExpoPushMessage {
   to: string;
-  title: string;
-  body: string;
-  sound: 'default';
   priority: 'high';
-  channelId: string;
-  /** Photo de profil de l'expéditeur, utilisée comme grande icône Android. */
-  richContent?: { image: string };
   data: {
     type: 'message';
+    title: string;
+    message: string;
     conversationId: string;
     messageId: string;
+    senderName: string;
+    /** URL absolue de la photo de l'expéditeur (vide s'il n'en a pas). */
+    avatarUrl: string;
+    /** Nom du groupe (vide pour une discussion directe). */
+    groupName: string;
   };
 }
 
@@ -146,21 +150,22 @@ export class PushService {
       const body = conversation.type === 'GROUP' ? `${message.sender.displayName} : ${text}` : text;
 
       const avatarPath = message.sender.avatarUrl;
+      const groupName = conversation.type === 'GROUP' ? title : '';
 
       const payload: ExpoPushMessage[] = tokens.map(({ token, baseUrl }) => {
         const avatar = avatarPath ? absoluteMediaUrl(avatarPath, baseUrl) : null;
         return {
           to: token,
-          title,
-          body,
-          sound: 'default',
           priority: 'high',
-          channelId: CHANNEL_ID,
-          ...(avatar ? { richContent: { image: avatar } } : {}),
           data: {
             type: 'message',
+            title,
+            message: body,
             conversationId: message.conversationId,
             messageId: message.id,
+            senderName: message.sender.displayName,
+            avatarUrl: avatar ?? '',
+            groupName,
           },
         };
       });
