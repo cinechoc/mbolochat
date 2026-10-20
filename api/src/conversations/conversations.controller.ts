@@ -18,6 +18,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { JwtPayload } from '../auth/jwt-payload.js';
 import { ConversationsService } from './conversations.service.js';
 import { CreateConversationDto } from './dto/create-conversation.dto.js';
+import { UpdatePreferencesDto } from './dto/update-preferences.dto.js';
 
 @Controller('conversations')
 @UseGuards(JwtAuthGuard)
@@ -46,6 +47,18 @@ export class ConversationsController {
     @Body() body: { name?: string },
   ) {
     return this.conversationsService.rename(id, current.sub, body?.name ?? '');
+  }
+
+  @Patch(':id/preferences')
+  updatePreferences(
+    @CurrentUser() current: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdatePreferencesDto,
+  ) {
+    return this.conversationsService.setPreferences(id, current.sub, {
+      pinned: dto.pinned,
+      muted: dto.muted,
+    });
   }
 
   @Post(':id/members')
@@ -78,6 +91,12 @@ export class ConversationsController {
       before: beforeDate && !Number.isNaN(beforeDate.getTime()) ? beforeDate : undefined,
       limit,
     });
+  }
+
+  @Post('read-all')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async markAllRead(@CurrentUser() current: JwtPayload) {
+    await this.conversationsService.markAllRead(current.sub);
   }
 
   @Post(':id/read')

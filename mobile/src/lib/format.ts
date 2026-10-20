@@ -65,3 +65,69 @@ export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).slice(0, 2);
   return parts.map((part) => part.charAt(0).toUpperCase()).join('') || '?';
 }
+
+/** Filtres de la liste de discussions. */
+export type ConversationFilter = 'all' | 'unread' | 'groups';
+
+/** Étiquette de section pour regrouper les discussions par ancienneté. */
+export function conversationSectionLabel(iso: string): string {
+  const date = new Date(iso);
+  const now = new Date();
+  const startOfDay = (value: Date) =>
+    new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+  const days = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
+
+  if (days <= 0) return "Aujourd'hui";
+  if (days === 1) return 'Hier';
+  if (days <= 7) return '7 derniers jours';
+  return 'Plus ancien';
+}
+
+/** Le message a-t-il été lu par tous les autres membres de la conversation ? */
+export function isReadByOthers(
+  conversation: ConversationSummary,
+  currentUserId: string,
+  messageCreatedAt: string,
+): boolean {
+  const others = conversation.members.filter((member) => member.id !== currentUserId);
+  if (others.length === 0) {
+    return false;
+  }
+  const sentAt = new Date(messageCreatedAt).getTime();
+  return others.every(
+    (member) => member.lastReadAt !== null && new Date(member.lastReadAt).getTime() >= sentAt,
+  );
+}
+
+export interface ConversationPreview {
+  /** Texte affiché sous le titre de la discussion. */
+  text: string;
+  /** Le dernier message a-t-il été envoyé par l'utilisateur courant ? */
+  mine: boolean;
+  /** Les autres ont-ils lu le dernier message ? */
+  read: boolean;
+}
+
+/** Aperçu du dernier message, façon WhatsApp (✓ / ✓✓ + expéditeur). */
+export function conversationPreview(
+  conversation: ConversationSummary,
+  currentUserId: string,
+): ConversationPreview {
+  const last = conversation.lastMessage;
+  if (!last) {
+    return { text: 'Nouvelle conversation', mine: false, read: false };
+  }
+
+  const mine = last.sender.id === currentUserId;
+  const isGroup = conversation.type === 'GROUP';
+  if (mine) {
+    const read = isReadByOthers(conversation, currentUserId, last.createdAt);
+    const tick = read ? '✓✓' : '✓';
+    return { text: `${isGroup ? `${tick} Vous : ` : `${tick} `}${last.content}`, mine, read };
+  }
+  return {
+    text: isGroup ? `${last.sender.displayName} : ${last.content}` : last.content,
+    mine,
+    read: false,
+  };
+}

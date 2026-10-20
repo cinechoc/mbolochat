@@ -5,6 +5,11 @@ export interface SenderInfo {
   avatarUrl: string | null;
 }
 
+/** Membre d'une conversation, avec son dernier accusé de lecture. */
+export interface MemberInfo extends SenderInfo {
+  lastReadAt: string | null;
+}
+
 export type Gender = 'FEMALE' | 'MALE' | 'CUSTOM';
 
 export interface User {
@@ -28,9 +33,13 @@ export interface ConversationSummary {
   type: 'DIRECT' | 'GROUP';
   name: string | null;
   createdAt: string;
-  members: SenderInfo[];
+  members: MemberInfo[];
   lastMessage: Message | null;
   unreadCount: number;
+  /** Épinglée par l'utilisateur courant. */
+  pinned: boolean;
+  /** Muette par l'utilisateur courant. */
+  muted: boolean;
 }
 
 export interface AuthResult {

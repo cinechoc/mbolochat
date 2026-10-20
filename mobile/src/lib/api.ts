@@ -214,4 +214,20 @@ export const api = {
   markRead(token: string, conversationId: string) {
     return request<void>(`/conversations/${conversationId}/read`, { method: 'POST', token });
   },
+
+  markAllRead(token: string) {
+    return request<void>('/conversations/read-all', { method: 'POST', token });
+  },
+
+  setConversationPreferences(
+    token: string,
+    conversationId: string,
+    body: { pinned?: boolean; muted?: boolean },
+  ) {
+    return request<ConversationSummary>(`/conversations/${conversationId}/preferences`, {
+      method: 'PATCH',
+      token,
+      body,
+    });
+  },
 };
