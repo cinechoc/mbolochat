@@ -6,3 +6,7 @@ api/uploads/
 *.log
 *.tsbuildinfo
 .DS_Store
+
+# Clés de service Firebase (FCM v1) : ne jamais versionner
+*service-account*.json
+*firebase-adminsdk*.json

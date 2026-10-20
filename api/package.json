@@ -22,7 +22,8 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "smoke": "node scripts/ws-smoke.mjs"
+    "smoke": "node scripts/ws-smoke.mjs",
+    "push:smoke": "node scripts/push-smoke.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",
