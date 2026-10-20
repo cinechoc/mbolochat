@@ -11,42 +11,59 @@ export function conversationTitle(conversation: ConversationSummary, currentUser
   return others.map((member) => member.displayName).join(', ');
 }
 
+// Formatage manuel plutôt qu'Intl : `toLocaleTimeString`/`toLocaleDateString`
+// construisent un formateur à chaque appel, ce qui coûte cher sur les
+// appareils d'entrée de gamme (30 messages = 60 formats à l'ouverture).
+const MONTHS = [
+  'janvier',
+  'février',
+  'mars',
+  'avril',
+  'mai',
+  'juin',
+  'juillet',
+  'août',
+  'septembre',
+  'octobre',
+  'novembre',
+  'décembre',
+];
+
+const pad = (value: number) => (value < 10 ? `0${value}` : String(value));
+
+const clock = (date: Date) => `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+
+const startOfDay = (date: Date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+
+function daysAgo(date: Date): number {
+  return Math.round((startOfDay(new Date()) - startOfDay(date)) / 86_400_000);
+}
+
 export function formatTime(iso: string): string {
   const date = new Date(iso);
-  const now = new Date();
-  const sameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-
-  if (sameDay) {
-    return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  if (daysAgo(date) <= 0) {
+    return clock(date);
   }
-  return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}`;
 }
 
 export function formatListTimestamp(iso: string): string {
   const date = new Date(iso);
-  const now = new Date();
-  const startOfDay = (value: Date) =>
-    new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
-  const days = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
+  const days = daysAgo(date);
 
   if (days <= 0) {
-    return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    return clock(date);
   }
   if (days === 1) {
     return 'Hier';
   }
-  return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${pad(date.getFullYear() % 100)}`;
 }
 
 export function formatDateLabel(iso: string): string {
   const date = new Date(iso);
-  const now = new Date();
-  const startOfDay = (value: Date) =>
-    new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
-  const days = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
+  const days = daysAgo(date);
 
   if (days <= 0) {
     return "Aujourd'hui";
@@ -54,11 +71,9 @@ export function formatDateLabel(iso: string): string {
   if (days === 1) {
     return 'Hier';
   }
-  return date.toLocaleDateString('fr-FR', {
-    day: 'numeric',
-    month: 'long',
-    ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
-  });
+  const year =
+    date.getFullYear() === new Date().getFullYear() ? '' : ` ${date.getFullYear()}`;
+  return `${date.getDate()} ${MONTHS[date.getMonth()]}${year}`;
 }
 
 export function initials(name: string): string {
@@ -71,11 +86,7 @@ export type ConversationFilter = 'all' | 'unread' | 'groups';
 
 /** Étiquette de section pour regrouper les discussions par ancienneté. */
 export function conversationSectionLabel(iso: string): string {
-  const date = new Date(iso);
-  const now = new Date();
-  const startOfDay = (value: Date) =>
-    new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
-  const days = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
+  const days = daysAgo(new Date(iso));
 
   if (days <= 0) return "Aujourd'hui";
   if (days === 1) return 'Hier';

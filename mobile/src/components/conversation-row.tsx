@@ -28,8 +28,9 @@ interface ConversationRowProps {
   conversation: ConversationSummary;
   currentUserId: string;
   typing?: TypingEntry | null;
-  onPress: () => void;
-  onLongPress: () => void;
+  /** Reçoit la conversation : la fonction peut rester stable entre les rendus. */
+  onPress: (conversation: ConversationSummary) => void;
+  onLongPress: (conversation: ConversationSummary) => void;
 }
 
 function ConversationRowComponent({
@@ -67,8 +68,8 @@ function ConversationRowComponent({
 
   return (
     <AnimatedPressable
-      onPress={onPress}
-      onLongPress={onLongPress}
+      onPress={() => onPress(conversation)}
+      onLongPress={() => onLongPress(conversation)}
       delayLongPress={300}
       onPressIn={() => {
         // Pattern Reanimated officiel : on pilote la valeur partagée depuis un handler.

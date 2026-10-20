@@ -1,5 +1,5 @@
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,6 +39,16 @@ function sortConversations(list: ConversationSummary[]): ConversationSummary[] {
     return bDate - aDate;
   });
 }
+
+function ConversationSeparator({ leadingItem }: { leadingItem?: ListRow }) {
+  const theme = useTheme();
+  if (leadingItem?.type === 'section') {
+    return null;
+  }
+  return <View style={[styles.separator, { backgroundColor: theme.backgroundElement }]} />;
+}
+
+const listKeyExtractor = (item: ListRow) => item.key;
 
 export default function ChatsScreen() {
   const { token, user } = useAuth();
@@ -354,6 +364,60 @@ export default function ChatsScreen() {
     [token, user],
   );
 
+  const openConversation = useCallback(
+    (conversation: ConversationSummary) => {
+      router.push({ pathname: '/chat/[id]', params: { id: conversation.id } });
+    },
+    [router],
+  );
+
+  const openConversationActions = useCallback((conversation: ConversationSummary) => {
+    setActionTarget(conversation);
+  }, []);
+
+  const renderItem = useCallback<({ item }: { item: ListRow }) => ReactElement>(
+    ({ item }) => {
+      if (item.type === 'section') {
+        return (
+          <ThemedView style={styles.sectionRow}>
+            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+              {item.label.toUpperCase()}
+            </ThemedText>
+          </ThemedView>
+        );
+      }
+      const conversation = item.conversation;
+      return (
+        <ConversationRow
+          conversation={conversation}
+          currentUserId={user?.id ?? ''}
+          typing={typingMap[conversation.id] ?? null}
+          onPress={openConversation}
+          onLongPress={openConversationActions}
+        />
+      );
+    },
+    [openConversation, openConversationActions, typingMap, user?.id],
+  );
+
+  const listEmpty = useMemo(
+    () =>
+      ready ? (
+        <ThemedView style={styles.center}>
+          <ThemedText themeColor="textSecondary" style={styles.emptyText}>
+            {query.trim().length > 0
+              ? 'Aucune discussion ne correspond à ta recherche.'
+              : filter === 'unread'
+                ? 'Tout est lu !'
+                : filter === 'groups'
+                  ? 'Aucun groupe pour le moment.'
+                  : 'Aucune conversation pour le moment.\nAppuie sur + pour commencer.'}
+          </ThemedText>
+        </ThemedView>
+      ) : undefined,
+    [ready, query, filter],
+  );
+
   if (!token || !user) {
     return <Redirect href="/login" />;
   }
@@ -508,55 +572,12 @@ export default function ChatsScreen() {
 
         <FlatList
           data={filteredRows}
-          keyExtractor={(item) => item.key}
+          keyExtractor={listKeyExtractor}
           contentContainerStyle={filteredRows.length === 0 ? styles.emptyList : styles.listContent}
           keyboardShouldPersistTaps="handled"
-          ItemSeparatorComponent={({ leadingItem }) => {
-            if (leadingItem.type === 'section') {
-              return null;
-            }
-            return (
-              <View style={[styles.separator, { backgroundColor: theme.backgroundElement }]} />
-            );
-          }}
-          ListEmptyComponent={
-            ready ? (
-              <ThemedView style={styles.center}>
-                <ThemedText themeColor="textSecondary" style={styles.emptyText}>
-                  {query.trim().length > 0
-                    ? 'Aucune discussion ne correspond à ta recherche.'
-                    : filter === 'unread'
-                      ? 'Tout est lu !'
-                      : filter === 'groups'
-                        ? 'Aucun groupe pour le moment.'
-                        : 'Aucune conversation pour le moment.\nAppuie sur + pour commencer.'}
-                </ThemedText>
-              </ThemedView>
-            ) : undefined
-          }
-          renderItem={({ item }) => {
-            if (item.type === 'section') {
-              return (
-                <ThemedView style={styles.sectionRow}>
-                  <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
-                    {item.label.toUpperCase()}
-                  </ThemedText>
-                </ThemedView>
-              );
-            }
-            const conversation = item.conversation;
-            return (
-              <ConversationRow
-                conversation={conversation}
-                currentUserId={user.id}
-                typing={typingMap[conversation.id] ?? null}
-                onPress={() =>
-                  router.push({ pathname: '/chat/[id]', params: { id: conversation.id } })
-                }
-                onLongPress={() => setActionTarget(conversation)}
-              />
-            );
-          }}
+          ItemSeparatorComponent={ConversationSeparator}
+          ListEmptyComponent={listEmpty}
+          renderItem={renderItem}
         />
 
         <ActionSheet

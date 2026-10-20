@@ -281,18 +281,153 @@ export default function ChatScreen() {
     return chronological.reverse();
   }, [messages]);
 
-  if (!token || !user) {
-    return <Redirect href="/login" />;
-  }
-
-  const title = conversation ? conversationTitle(conversation, user.id) : '';
+  const title = conversation && user ? conversationTitle(conversation, user.id) : '';
   const isGroup = Boolean(conversation?.name);
-  const other = conversation?.members.find((member) => member.id !== user.id);
+  const other = user ? conversation?.members.find((member) => member.id !== user.id) : undefined;
   const subtitle = isGroup
     ? `${conversation?.members.length ?? 0} membres`
     : other
       ? `@${other.username}`
       : '';
+
+  // Les callbacks et l'en-tête sont mémorisés : chaque frappe dans le champ
+  // ne doit pas reconstruire l'en-tête ni les bulles de la liste.
+  const openOtherProfile = useCallback(() => {
+    if (!other) {
+      return;
+    }
+    router.push({
+      pathname: '/user/[id]',
+      params: {
+        id: other.id,
+        name: other.displayName,
+        username: other.username,
+        avatar: other.avatarUrl ?? '',
+      },
+    });
+  }, [other, router]);
+
+  const openConversationSettings = useCallback(() => {
+    if (id) {
+      router.push({ pathname: '/conversation-settings/[id]', params: { id } });
+    }
+  }, [id, router]);
+
+  const headerOptions = useMemo(
+    () => ({
+      headerTitle: () => (
+        <ChatHeaderTitle
+          title={title}
+          subtitle={subtitle}
+          uri={conversation?.type === 'DIRECT' ? other?.avatarUrl : null}
+          onPress={conversation?.type === 'DIRECT' && other ? openOtherProfile : undefined}
+        />
+      ),
+      headerRight: () =>
+        conversation?.type === 'GROUP' ? (
+          <Pressable onPress={openConversationSettings}>
+            <ThemedText style={{ color: accentColor, fontWeight: '600' }}>Infos</ThemedText>
+          </Pressable>
+        ) : null,
+    }),
+    [conversation, other, title, subtitle, openOtherProfile, openConversationSettings],
+  );
+
+  const keyExtractor = useCallback((item: ListRow) => item.key, []);
+
+  const loadOlder = useCallback(() => {
+    if (!hasMore || loadingMore || messages.length === 0 || !token || !id) {
+      return;
+    }
+    const oldest = messages[0];
+    setLoadingMore(true);
+    api
+      .listMessages(token, id, oldest.createdAt, 30)
+      .then((older) => {
+        setMessages((prev) => [...older, ...prev]);
+        setHasMore(older.length >= 30);
+      })
+      .catch(() => undefined)
+      .finally(() => setLoadingMore(false));
+  }, [hasMore, loadingMore, messages, token, id]);
+
+  const scrollToBottom = useCallback(() => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, []);
+
+  const listEmpty = useMemo(
+    () =>
+      ready ? (
+        <ThemedView style={styles.center}>
+          <ThemedText themeColor="textSecondary" style={styles.emptyText}>
+            Aucun message. Dis bonjour !
+          </ThemedText>
+        </ThemedView>
+      ) : undefined,
+    [ready],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: ListRow }) => {
+      if (item.type === 'date') {
+        return (
+          <View style={styles.dateRow}>
+            <ThemedView style={[styles.datePill, { backgroundColor: theme.backgroundElement }]}>
+              <ThemedText type="small" themeColor="textSecondary" style={styles.dateText}>
+                {item.label}
+              </ThemedText>
+            </ThemedView>
+          </View>
+        );
+      }
+      const { message } = item;
+      const mine = message.sender.id === user?.id;
+      const read =
+        mine &&
+        Object.values(readBy).some(
+          (at) => new Date(at).getTime() >= new Date(message.createdAt).getTime(),
+        );
+      return (
+        <View style={[styles.bubbleRow, mine ? styles.rowMine : styles.rowTheirs]}>
+          <View
+            style={[
+              styles.bubble,
+              mine
+                ? styles.bubbleMine
+                : { backgroundColor: theme.backgroundElement, borderBottomLeftRadius: 6 },
+            ]}>
+            {!mine && isGroup ? (
+              <ThemedText type="smallBold" style={styles.senderName}>
+                {message.sender.displayName}
+              </ThemedText>
+            ) : null}
+            <ThemedText style={mine ? styles.bubbleTextMine : undefined}>
+              {message.content}
+            </ThemedText>
+            <View style={styles.metaRow}>
+              <ThemedText
+                style={[
+                  styles.metaText,
+                  mine ? styles.metaTextMine : { color: theme.textSecondary },
+                ]}>
+                {formatTime(message.createdAt)}
+              </ThemedText>
+              {mine ? (
+                <ThemedText style={[styles.metaText, styles.metaTextMine]}>
+                  {read ? '✓✓' : '✓'}
+                </ThemedText>
+              ) : null}
+            </View>
+          </View>
+        </View>
+      );
+    },
+    [user?.id, theme, isGroup, readBy],
+  );
+
+  if (!token || !user) {
+    return <Redirect href="/login" />;
+  }
 
   const send = async () => {
     const content = input.trim();
@@ -358,37 +493,7 @@ export default function ChatScreen() {
         // donc nous-mêmes le contenu au-dessus du clavier.
         keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
       ]}>
-      <Stack.Screen
-        options={{
-          headerTitle: () => (
-            <ChatHeaderTitle
-              title={title}
-              subtitle={subtitle}
-              uri={conversation?.type === 'DIRECT' ? other?.avatarUrl : null}
-              onPress={
-                conversation?.type === 'DIRECT' && other
-                  ? () =>
-                      router.push({
-                        pathname: '/user/[id]',
-                        params: {
-                          id: other.id,
-                          name: other.displayName,
-                          username: other.username,
-                          avatar: other.avatarUrl ?? '',
-                        },
-                      })
-                  : undefined
-              }
-            />
-          ),
-          headerRight: () =>
-            conversation?.type === 'GROUP' ? (
-              <Pressable onPress={() => router.push({ pathname: '/conversation-settings/[id]', params: { id } })}>
-                <ThemedText style={{ color: accentColor, fontWeight: '600' }}>Infos</ThemedText>
-              </Pressable>
-            ) : null,
-        }}
-      />
+      <Stack.Screen options={headerOptions} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
@@ -397,87 +502,13 @@ export default function ChatScreen() {
           ref={listRef}
             data={rows}
             inverted
-            keyExtractor={(item) => item.key}
-            onEndReached={() => {
-              if (!hasMore || loadingMore || messages.length === 0) return;
-              const oldest = messages[0];
-              setLoadingMore(true);
-              api
-                .listMessages(token!, id!, oldest.createdAt, 30)
-                .then((older) => {
-                  setMessages((prev) => [...older, ...prev]);
-                  setHasMore(older.length >= 30);
-                })
-                .catch(() => undefined)
-                .finally(() => setLoadingMore(false));
-            }}
+            keyExtractor={keyExtractor}
+            onEndReached={loadOlder}
             onEndReachedThreshold={0.3}
             contentContainerStyle={styles.listContent}
-            onContentSizeChange={() => listRef.current?.scrollToOffset({ offset: 0, animated: false })}
-            ListEmptyComponent={
-              ready ? (
-                <ThemedView style={styles.center}>
-                  <ThemedText themeColor="textSecondary" style={styles.emptyText}>
-                    Aucun message. Dis bonjour !
-                  </ThemedText>
-                </ThemedView>
-              ) : undefined
-            }
-            renderItem={({ item }) => {
-              if (item.type === 'date') {
-                return (
-                  <View style={styles.dateRow}>
-                    <ThemedView
-                      style={[styles.datePill, { backgroundColor: theme.backgroundElement }]}>
-                      <ThemedText
-                        type="small"
-                        themeColor="textSecondary"
-                        style={styles.dateText}>
-                        {item.label}
-                      </ThemedText>
-                    </ThemedView>
-                  </View>
-                );
-              }
-              const { message } = item;
-              const mine = message.sender.id === user.id;
-              return (
-                <View style={[styles.bubbleRow, mine ? styles.rowMine : styles.rowTheirs]}>
-                  <View
-                    style={[
-                      styles.bubble,
-                      mine
-                        ? styles.bubbleMine
-                        : { backgroundColor: theme.backgroundElement, borderBottomLeftRadius: 6 },
-                    ]}>
-                    {!mine && isGroup ? (
-                      <ThemedText type="smallBold" style={styles.senderName}>
-                        {message.sender.displayName}
-                      </ThemedText>
-                    ) : null}
-                    <ThemedText style={mine ? styles.bubbleTextMine : undefined}>
-                      {message.content}
-                    </ThemedText>
-                    <View style={styles.metaRow}>
-                      <ThemedText
-                        style={[
-                          styles.metaText,
-                          mine ? styles.metaTextMine : { color: theme.textSecondary },
-                        ]}>
-                        {formatTime(message.createdAt)}
-                      </ThemedText>
-                      {mine ? (
-                        <ThemedText style={[styles.metaText, styles.metaTextMine]}>
-                          {Object.values(readBy).some((at) => new Date(at).getTime() >= new Date(message.createdAt).getTime())
-                            ? '✓✓'
-                            : '✓'}
-                        </ThemedText>
-                      ) : null}
-                    </View>
-                  </View>
-                </View>
-              );
-            }}
+            onContentSizeChange={scrollToBottom}
+            ListEmptyComponent={listEmpty}
+            renderItem={renderItem}
           />
 
         {error ? (
