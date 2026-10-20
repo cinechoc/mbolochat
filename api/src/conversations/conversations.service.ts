@@ -37,6 +37,8 @@ export interface ConversationSummary {
   pinned: boolean;
   /** Muette par l'utilisateur courant (pas de badge de notification). */
   muted: boolean;
+  /** Masquée par l'utilisateur courant (absente de la liste principale). */
+  hidden: boolean;
 }
 
 export interface ListMessagesOptions {
@@ -110,7 +112,11 @@ export class ConversationsService {
     return this.getSummaryForUser(conversation.id, currentUserId);
   }
 
-  async listForUser(userId: string, conversationId?: string): Promise<ConversationSummary[]> {
+  async listForUser(
+    userId: string,
+    conversationId?: string,
+    options: { onlyHidden?: boolean } = {},
+  ): Promise<ConversationSummary[]> {
     const memberships = await this.db
       .select({ conversationId: conversationMembers.conversationId })
       .from(conversationMembers)
@@ -118,6 +124,8 @@ export class ConversationsService {
         and(
           eq(conversationMembers.userId, userId),
           conversationId ? eq(conversationMembers.conversationId, conversationId) : undefined,
+          // Une conversation ouverte explicitement reste accessible même masquée.
+          conversationId ? undefined : eq(conversationMembers.hidden, options.onlyHidden ?? false),
         ),
       );
 
@@ -172,6 +180,7 @@ export class ConversationsService {
         conversationId: conversationMembers.conversationId,
         pinnedAt: conversationMembers.pinnedAt,
         mutedAt: conversationMembers.mutedAt,
+        hidden: conversationMembers.hidden,
       })
       .from(conversationMembers)
       .where(
@@ -204,6 +213,7 @@ export class ConversationsService {
         unreadCount: unreadMap.get(conversation.id) ?? 0,
         pinned: Boolean(preferences?.pinnedAt),
         muted: Boolean(preferences?.mutedAt),
+        hidden: Boolean(preferences?.hidden),
       };
     });
 
@@ -219,7 +229,7 @@ export class ConversationsService {
   async setPreferences(
     conversationId: string,
     userId: string,
-    preferences: { pinned?: boolean; muted?: boolean },
+    preferences: { pinned?: boolean; muted?: boolean; hidden?: boolean },
   ): Promise<ConversationSummary> {
     if (!(await this.isMember(conversationId, userId))) {
       throw new ForbiddenException('You are not a member of this conversation');
@@ -231,6 +241,9 @@ export class ConversationsService {
     }
     if (preferences.muted !== undefined) {
       values.mutedAt = preferences.muted ? new Date() : null;
+    }
+    if (preferences.hidden !== undefined) {
+      values.hidden = preferences.hidden;
     }
     if (Object.keys(values).length > 0) {
       await this.db
@@ -244,6 +257,11 @@ export class ConversationsService {
         );
     }
     return this.getSummaryForUser(conversationId, userId);
+  }
+
+  /** Conversations masquées par l'utilisateur. */
+  async listHiddenForUser(userId: string): Promise<ConversationSummary[]> {
+    return this.listForUser(userId, undefined, { onlyHidden: true });
   }
 
   async rename(conversationId: string, userId: string, name: string): Promise<ConversationSummary> {
@@ -367,6 +385,18 @@ export class ConversationsService {
   async createMessage(conversationId: string, senderId: string, content: string): Promise<MessageDto> {
     if (!(await this.isMember(conversationId, senderId))) {
       throw new ForbiddenException('You are not a member of this conversation');
+    }
+
+    // Un blocage coupe les échanges dans les deux sens.
+    const members = await this.db
+      .select({ userId: conversationMembers.userId })
+      .from(conversationMembers)
+      .where(eq(conversationMembers.conversationId, conversationId));
+    for (const member of members) {
+      if (member.userId === senderId) continue;
+      if (await this.usersService.isBlockedBetween(senderId, member.userId)) {
+        throw new ForbiddenException('Cette conversation est bloquée');
+      }
     }
 
     const [message] = await this.db

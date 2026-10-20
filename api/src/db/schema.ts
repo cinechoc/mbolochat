@@ -1,4 +1,4 @@
-import { date, integer, pgEnum, pgTable, primaryKey, text, timestamp, index } from 'drizzle-orm/pg-core';
+import { boolean, date, integer, pgEnum, pgTable, primaryKey, text, timestamp, index } from 'drizzle-orm/pg-core';
 
 export const conversationTypeEnum = pgEnum('conversation_type', ['DIRECT', 'GROUP']);
 
@@ -9,6 +9,9 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   username: text('username').notNull().unique(),
   displayName: text('display_name').notNull(),
+  bio: text('bio'),
+  /** Notifications dans l'application (badges, compteurs de non-lus). */
+  notificationsEnabled: boolean('notifications_enabled').notNull().default(true),
   passwordHash: text('password_hash').notNull(),
   avatarUrl: text('avatar_url'),
   birthday: date('birthday'),
@@ -38,8 +41,25 @@ export const conversationMembers = pgTable(
     lastReadAt: timestamp('last_read_at', { withTimezone: true }),
     pinnedAt: timestamp('pinned_at', { withTimezone: true }),
     mutedAt: timestamp('muted_at', { withTimezone: true }),
+    /** Discussion masquée : elle n'apparaît plus dans la liste. */
+    hidden: boolean('hidden').notNull().default(false),
   },
   (table) => [primaryKey({ columns: [table.conversationId, table.userId] })],
+);
+
+/** Comptes bloqués par un utilisateur. */
+export const blocks = pgTable(
+  'blocks',
+  {
+    blockerId: text('blocker_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    blockedId: text('blocked_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.blockerId, table.blockedId] })],
 );
 
 export const messages = pgTable(

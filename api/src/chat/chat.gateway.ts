@@ -66,7 +66,16 @@ export class ChatGateway implements OnGatewayConnection {
       throw new WsException('Message is too long (max 4000 characters)');
     }
 
-    const message = await this.conversationsService.createMessage(conversationId, userId, content);
+    const message = await this.conversationsService
+      .createMessage(conversationId, userId, content)
+      .catch((error: unknown) => {
+        // L'acquittement porte l'erreur : le client peut l'afficher
+        // (message bloqué, quota atteint, etc.) au lieu d'attendre indéfiniment.
+        return { error: error instanceof Error ? error.message : "L'envoi a échoué" };
+      });
+    if ('error' in message) {
+      return message;
+    }
     this.server.to(roomOf(conversationId)).emit('message:new', message);
     return message;
   }

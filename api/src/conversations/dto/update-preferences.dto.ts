@@ -8,4 +8,8 @@ export class UpdatePreferencesDto {
   @IsOptional()
   @IsBoolean()
   muted?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  hidden?: boolean;
 }

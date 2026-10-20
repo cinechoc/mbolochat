@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { CurrentUser } from '../auth/current-user.decorator.js';
@@ -21,10 +32,12 @@ export class UsersController {
   @Patch('me')
   async updateMe(
     @CurrentUser() current: JwtPayload,
-    @Body() body: { displayName?: string },
+    @Body() body: { displayName?: string; bio?: string; notificationsEnabled?: boolean },
   ) {
     const user = await this.usersService.updateProfile(current.sub, {
       displayName: body?.displayName,
+      bio: body?.bio?.trim() ? body.bio.trim() : body?.bio === '' ? null : undefined,
+      notificationsEnabled: body?.notificationsEnabled,
     });
     return toPublicUser(user);
   }
@@ -60,5 +73,32 @@ export class UsersController {
       return [];
     }
     return this.usersService.search(query, current.sub);
+  }
+
+  /** Comptes bloqués par l'utilisateur courant. */
+  @Get('blocked')
+  async blocked(@CurrentUser() current: JwtPayload) {
+    return this.usersService.listBlocked(current.sub);
+  }
+
+  @Post(':id/block')
+  async block(@CurrentUser() current: JwtPayload, @Param('id') id: string) {
+    await this.usersService.block(current.sub, id);
+    return { blocked: true };
+  }
+
+  @Delete(':id/block')
+  async unblock(@CurrentUser() current: JwtPayload, @Param('id') id: string) {
+    await this.usersService.unblock(current.sub, id);
+    return { blocked: false };
+  }
+
+  /**
+   * Profil public d'un utilisateur (statistiques, hors données sensibles).
+   * Déclaré après « search » et « blocked » pour ne pas capter ces routes.
+   */
+  @Get(':id')
+  async profile(@CurrentUser() current: JwtPayload, @Param('id') id: string) {
+    return this.usersService.getProfile(id, current.sub);
   }
 }

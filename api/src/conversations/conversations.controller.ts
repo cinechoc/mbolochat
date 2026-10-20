@@ -35,6 +35,12 @@ export class ConversationsController {
     return this.conversationsService.listForUser(current.sub);
   }
 
+  /** Conversations masquées (déclaré avant « :id » pour ne pas être capté). */
+  @Get('hidden')
+  listHidden(@CurrentUser() current: JwtPayload) {
+    return this.conversationsService.listHiddenForUser(current.sub);
+  }
+
   @Get(':id')
   get(@CurrentUser() current: JwtPayload, @Param('id') id: string) {
     return this.conversationsService.getSummaryForUser(id, current.sub);
@@ -58,6 +64,7 @@ export class ConversationsController {
     return this.conversationsService.setPreferences(id, current.sub, {
       pinned: dto.pinned,
       muted: dto.muted,
+      hidden: dto.hidden,
     });
   }
 
