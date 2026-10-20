@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { Avatar } from '@/components/avatar';
+import { SkeletonRows } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, TextField, accentColor } from '@/components/ui';
@@ -110,8 +111,8 @@ export default function ConversationSettingsScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.center}>
-        <ActivityIndicator size="large" />
+      <ThemedView style={styles.container}>
+        <SkeletonRows count={4} avatarSize={40} />
       </ThemedView>
     );
   }

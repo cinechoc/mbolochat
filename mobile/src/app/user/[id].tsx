@@ -1,14 +1,16 @@
 import { Redirect, Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ProfileAction, ProfileHeader, PhotoGrid } from '@/components/profile-view';
+import { SkeletonProfile } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { cache } from '@/lib/cache';
 import type { UserProfile } from '@/lib/types';
 
 export default function UserProfileScreen() {
@@ -17,7 +19,7 @@ export default function UserProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(() => (id ? cache.getProfile(id) : null));
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -33,6 +35,7 @@ export default function UserProfileScreen() {
         api.listBlockedUsers(token),
       ]);
       setProfile(result);
+      cache.setProfile(result);
       setBlocked(blockedUsers.some((item) => item.id === id));
       setError(null);
     } catch (err) {
@@ -87,9 +90,13 @@ export default function UserProfileScreen() {
     <ThemedView style={styles.container}>
       <Stack.Screen options={{ title: profile?.username ?? 'Profil' }} />
       {loading || !profile ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" />
-        </View>
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: insets.bottom + Spacing.four },
+          ]}>
+          <SkeletonProfile />
+        </ScrollView>
       ) : (
         <ScrollView
           contentContainerStyle={[

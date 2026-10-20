@@ -1,10 +1,11 @@
 import { Redirect, Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ProfileAction, ProfileHeader, PhotoGrid } from '@/components/profile-view';
+import { SkeletonProfile } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -19,8 +20,23 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Le profil est connu immédiatement (cache d'authentification) : la page
+  // s'affiche sans attente, seules les statistiques se remplissent ensuite.
+  const [profile, setProfile] = useState<UserProfile | null>(() =>
+    user
+      ? {
+          id: user.id,
+          username: user.username,
+          displayName: user.displayName,
+          bio: user.bio,
+          avatarUrl: user.avatarUrl,
+          notificationsEnabled: user.notificationsEnabled,
+          createdAt: user.createdAt,
+          isMe: true,
+          stats: { messages: 0, conversations: 0 },
+        }
+      : null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -33,8 +49,6 @@ export default function ProfileScreen() {
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Impossible de charger le profil.');
-    } finally {
-      setLoading(false);
     }
   }, [token, user]);
 
@@ -52,7 +66,7 @@ export default function ProfileScreen() {
     <ThemedView style={styles.container}>
       <Stack.Screen
         options={{
-          title: profile?.username ?? 'Profil',
+          title: profile?.username ?? user.username,
           // Bouton réglages dans la barre de navigation, comme sur Instagram.
           headerRight: () => (
             <Pressable onPress={() => router.push('/settings')} hitSlop={8}>
@@ -61,17 +75,13 @@ export default function ProfileScreen() {
           ),
         }}
       />
-      {loading || !profile ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" />
-        </View>
-      ) : (
-        <ScrollView
-          contentContainerStyle={[
-            styles.content,
-            { paddingBottom: insets.bottom + Spacing.four },
-          ]}
-          keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: insets.bottom + Spacing.four },
+        ]}
+        keyboardShouldPersistTaps="handled">
+        {profile ? (
           <ProfileHeader
             profile={profile}
             actions={
@@ -81,19 +91,23 @@ export default function ProfileScreen() {
               />
             }
           />
+        ) : (
+          // Le squelette n'apparaît qu'une fraction de seconde : le profil de
+          // l'utilisateur courant est déjà connu (cache d'authentification).
+          <SkeletonProfile />
+        )}
 
-          {error ? (
-            <ThemedText type="small" style={styles.error}>
-              {error}
-            </ThemedText>
-          ) : null}
+        {error ? (
+          <ThemedText type="small" style={styles.error}>
+            {error}
+          </ThemedText>
+        ) : null}
 
-          <View style={styles.section}>
-            <ThemedText style={styles.sectionTitle}>Photos</ThemedText>
-            <PhotoGrid photos={[]} />
-          </View>
-        </ScrollView>
-      )}
+        <View style={styles.section}>
+          <ThemedText style={styles.sectionTitle}>Photos</ThemedText>
+          <PhotoGrid photos={[]} />
+        </View>
+      </ScrollView>
     </ThemedView>
   );
 }

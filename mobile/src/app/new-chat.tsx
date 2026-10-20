@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { Avatar } from '@/components/avatar';
+import { SkeletonRows } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, TextField, accentColor } from '@/components/ui';
@@ -150,9 +151,9 @@ export default function NewChatScreen() {
       ) : null}
 
       {showingResults && searching && results.length === 0 ? (
-        <ThemedView style={styles.center}>
-          <ActivityIndicator />
-        </ThemedView>
+        <View style={styles.resultsSkeleton}>
+          <SkeletonRows count={5} avatarSize={40} />
+        </View>
       ) : (
         <FlatList
           data={showingResults ? results : []}
@@ -239,6 +240,7 @@ const styles = StyleSheet.create({
   searchBox: { paddingHorizontal: Spacing.three, paddingBottom: Spacing.two },
   search: { borderRadius: 22, paddingVertical: Spacing.two },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.five },
+  resultsSkeleton: { paddingTop: Spacing.two },
   hint: { textAlign: 'center' },
   error: { color: '#e5484d', paddingHorizontal: Spacing.three },
   row: {

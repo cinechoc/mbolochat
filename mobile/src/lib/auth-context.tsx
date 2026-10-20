@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api } from './api';
+import { cache } from './cache';
 import {
   clearStoredTokens,
   getStoredAccessToken,
@@ -85,6 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await clearStoredTokens();
         setToken(null);
         setUser(null);
+        cache.clear();
       },
     }),
     [token, user, loading],

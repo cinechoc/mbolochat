@@ -1,6 +1,6 @@
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,6 +8,7 @@ import { ActionSheet, type SheetAction, type SheetIcon } from '@/components/acti
 import { Avatar } from '@/components/avatar';
 import { ConversationRow, type TypingEntry } from '@/components/conversation-row';
 import { FilterTabs } from '@/components/filter-tabs';
+import { SkeletonRows } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TextField, accentColor } from '@/components/ui';
@@ -15,6 +16,7 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { cache } from '@/lib/cache';
 import {
   conversationSectionLabel,
   conversationTitle,
@@ -44,13 +46,16 @@ export default function ChatsScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [conversations, setConversations] = useState<ConversationSummary[]>(
+    // Dernière liste connue : la liste s'affiche immédiatement, sans clignotement.
+    () => cache.getConversationList() ?? [],
+  );
   const [typingMap, setTypingMap] = useState<Record<string, TypingEntry>>({});
   const [filter, setFilter] = useState<ConversationFilter>('all');
   const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Si la liste est déjà en cache, on l'affiche tout de suite (pas de squelette).
+  const [loading, setLoading] = useState(() => cache.getConversationList() === null);
+  const [refreshing, setRefreshing] = useState(false);  const [error, setError] = useState<string | null>(null);
   const [actionTarget, setActionTarget] = useState<ConversationSummary | null>(null);
   const [leaveTarget, setLeaveTarget] = useState<ConversationSummary | null>(null);
   const typingTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -67,6 +72,7 @@ export default function ChatsScreen() {
     try {
       const list = await api.listConversations(token);
       setConversations(sortConversations(list));
+      cache.setConversationList(list);
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Impossible de charger les discussions.');
@@ -486,9 +492,7 @@ export default function ChatsScreen() {
         ) : null}
 
         {loading ? (
-          <ThemedView style={styles.center}>
-            <ActivityIndicator size="large" />
-          </ThemedView>
+          <SkeletonRows count={7} />
         ) : (
           <FlatList
             data={filteredRows}

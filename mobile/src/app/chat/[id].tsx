@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/avatar';
+import { SkeletonBubbles } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TextField, accentColor } from '@/components/ui';
@@ -21,6 +22,7 @@ import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { cache } from '@/lib/cache';
 import { conversationTitle, formatDateLabel, formatTime } from '@/lib/format';
 import { connectSocket, disconnectSocket } from '@/lib/socket';
 import type { ConversationSummary, Message } from '@/lib/types';
@@ -133,8 +135,11 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
 
-  const [conversation, setConversation] = useState<ConversationSummary | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  // Historique déjà connu : la conversation s'affiche immédiatement.
+  const [conversation, setConversation] = useState<ConversationSummary | null>(() =>
+    id ? cache.getConversation(id) : null,
+  );
+  const [messages, setMessages] = useState<Message[]>(() => (id ? cache.getMessages(id) ?? [] : []));
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [input, setInput] = useState('');
@@ -144,7 +149,7 @@ export default function ChatScreen() {
   const lastTypingEmitRef = useRef(0);
   const pendingTypingRef = useRef<string | null>(null);
   const [readBy, setReadBy] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => (id ? cache.getMessages(id) === null : true));
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const listRef = useRef<FlatList<ListRow>>(null);
@@ -164,6 +169,8 @@ export default function ChatScreen() {
           setConversation(summary);
           setMessages(history);
           setHasMore(history.length >= 30);
+          cache.setConversation(summary);
+          cache.setMessages(id, history);
           setError(null);
         }
       } catch (err) {
@@ -195,11 +202,14 @@ export default function ChatScreen() {
       if (message.conversationId !== id) {
         return;
       }
-      setMessages((previous) =>
-        previous.some((existing) => existing.id === message.id)
-          ? previous
-          : [...previous, message],
-      );
+      setMessages((previous) => {
+        if (previous.some((existing) => existing.id === message.id)) {
+          return previous;
+        }
+        const next = [...previous, message];
+        cache.setMessages(id, next);
+        return next;
+      });
       setTyping((cur) => (cur && cur.userId === message.sender.id ? null : cur));
       socket.emit('message:read', { conversationId: id });
     };
@@ -357,9 +367,7 @@ export default function ChatScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         style={styles.flex}>
         {loading ? (
-          <ThemedView style={styles.center}>
-            <ActivityIndicator size="large" />
-          </ThemedView>
+          <SkeletonBubbles count={7} />
         ) : (
           <FlatList
             ref={listRef}
