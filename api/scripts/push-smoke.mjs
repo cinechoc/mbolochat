@@ -66,6 +66,9 @@ for (const row of rows) {
       sound: 'default',
       title,
       body,
+      priority: 'high',
+      // Canal Android déclaré par l'app (importance HIGH, couleur de la marque).
+      channelId: 'messages',
       data: { type: 'test' },
     }),
   });

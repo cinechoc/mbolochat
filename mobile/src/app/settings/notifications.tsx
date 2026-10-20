@@ -1,6 +1,6 @@
 import { Redirect, Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -27,6 +27,10 @@ export default function NotificationSettingsScreen() {
   );
   const [error, setError] = useState<string | null>(null);
 
+  // Extrait avant le useCallback : le compilateur React n'accepte pas un
+  // membre optionnel dans la liste de dépendances.
+  const notificationsEnabled = user?.notificationsEnabled ?? false;
+
   const load = useCallback(async () => {
     if (!token) {
       return;
@@ -34,11 +38,20 @@ export default function NotificationSettingsScreen() {
     try {
       const list = await api.listConversations(token);
       setConversations(list);
-      setPushStatus(await getPushPermissionStatus());
+      const status = await getPushPermissionStatus();
+      setPushStatus(status);
+      // Permission déjà accordée (par exemple depuis les réglages Android) :
+      // on enregistre le jeton sans redemander quoi que ce soit.
+      if (status === 'granted' && notificationsEnabled) {
+        const pushToken = await requestPushToken();
+        if (pushToken) {
+          await api.registerPushToken(token, pushToken);
+        }
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Impossible de charger les discussions.');
     }
-  }, [token]);
+  }, [token, notificationsEnabled]);
 
   useFocusEffect(
     useCallback(() => {
@@ -122,8 +135,23 @@ export default function NotificationSettingsScreen() {
         <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
           {pushStatus === 'granted'
             ? 'MboloChat peut te prévenir même quand l’application est fermée.'
-            : 'Active l’option « Notifications » ci-dessus pour autoriser MboloChat à t’avertir même quand l’application est fermée.'}
+            : pushStatus === 'denied'
+              ? 'Android bloque les notifications de MboloChat. Autorise-les dans les réglages du téléphone.'
+              : 'Active l’option « Notifications » ci-dessus pour autoriser MboloChat à t’avertir même quand l’application est fermée.'}
         </ThemedText>
+        {pushStatus === 'denied' ? (
+          <Pressable
+            onPress={() => void Linking.openSettings()}
+            style={({ pressed }) => [
+              styles.linkButton,
+              pressed ? { backgroundColor: theme.backgroundSelected } : null,
+            ]}>
+            <ThemedText type="smallBold" style={styles.linkLabel}>
+              Ouvrir les réglages Android
+            </ThemedText>
+            <MaterialIcons name="open-in-new" size={16} color="#3c87f7" />
+          </Pressable>
+        ) : null}
 
         <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
           PAR DISCUSSION
@@ -201,6 +229,20 @@ const styles = StyleSheet.create({
   hint: {
     paddingHorizontal: Spacing.three,
     marginTop: Spacing.one,
+  },
+  linkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    alignSelf: 'flex-start',
+    marginTop: Spacing.two,
+    marginLeft: Spacing.three,
+    paddingVertical: Spacing.one,
+    paddingHorizontal: Spacing.two,
+    borderRadius: 8,
+  },
+  linkLabel: {
+    color: '#3c87f7',
   },
   error: {
     color: '#e5484d',
