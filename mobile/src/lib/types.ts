@@ -16,8 +16,22 @@ export interface User {
   id: string;
   username: string;
   displayName: string;
+  bio: string | null;
   avatarUrl: string | null;
+  /** Notifications dans l'application (badges de non-lus). */
+  notificationsEnabled: boolean;
   createdAt: string;
+}
+
+/** Profil public « façon Instagram » : infos + quelques statistiques. */
+export interface UserProfile extends User {
+  isMe: boolean;
+  stats: {
+    /** Nombre de messages envoyés. */
+    messages: number;
+    /** Nombre de discussions partagées avec le visiteur. */
+    conversations: number;
+  };
 }
 
 export interface Message {
@@ -40,6 +54,8 @@ export interface ConversationSummary {
   pinned: boolean;
   /** Muette par l'utilisateur courant. */
   muted: boolean;
+  /** Masquée par l'utilisateur courant (absente de la liste principale). */
+  hidden: boolean;
 }
 
 export interface AuthResult {

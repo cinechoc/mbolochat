@@ -9,7 +9,7 @@ import { ConversationRow, type TypingEntry } from '@/components/conversation-row
 import { FilterTabs } from '@/components/filter-tabs';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Button, TextField, accentColor } from '@/components/ui';
+import { TextField, accentColor } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
@@ -245,11 +245,16 @@ export default function ChatsScreen() {
 
   const filterOptions = useMemo(
     () => [
-      { key: 'all' as const, label: 'Toutes', count: conversations.length },
+      // « Toutes » n'affiche aucun nombre : un compteur à côté de cet onglet est
+      // confondu avec un badge de messages non lus.
+      { key: 'all' as const, label: 'Toutes' },
       {
         key: 'unread' as const,
         label: 'Non lus',
-        count: conversations.filter((item) => item.unreadCount > 0).length,
+        count: (user?.notificationsEnabled ?? true)
+          ? conversations.filter((item) => item.unreadCount > 0).length
+          : 0,
+        badge: true,
       },
       {
         key: 'groups' as const,
@@ -257,21 +262,23 @@ export default function ChatsScreen() {
         count: conversations.filter((item) => item.type === 'GROUP').length,
       },
     ],
-    [conversations],
+    [conversations, user?.notificationsEnabled],
   );
 
   const totalUnread = useMemo(
     () =>
-      conversations
-        .filter((item) => !item.muted)
-        .reduce((total, item) => total + item.unreadCount, 0),
-    [conversations],
+      (user?.notificationsEnabled ?? true)
+        ? conversations
+            .filter((item) => !item.muted)
+            .reduce((total, item) => total + item.unreadCount, 0)
+        : 0,
+    [conversations, user?.notificationsEnabled],
   );
 
   const applyPreferences = useCallback(
     async (
       conversation: ConversationSummary,
-      body: { pinned?: boolean; muted?: boolean },
+      body: { pinned?: boolean; muted?: boolean; hidden?: boolean },
     ) => {
       if (!token) {
         return;
@@ -338,14 +345,26 @@ export default function ChatsScreen() {
     return <Redirect href="/login" />;
   }
 
-  const memberSince = new Date(user.createdAt).toLocaleDateString('fr-FR', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-
   const sheetActions: SheetAction[] = actionTarget
     ? [
+        ...(actionTarget.type === 'DIRECT'
+          ? (() => {
+              const other = actionTarget.members.find((member) => member.id !== user.id);
+              return [
+                {
+                  key: 'profile',
+                  label: 'Voir le profil',
+                  icon: 'account-circle' as SheetIcon,
+                  onPress: () => {
+                    setActionTarget(null);
+                    if (other) {
+                      router.push({ pathname: '/user/[id]', params: { id: other.id } });
+                    }
+                  },
+                },
+              ] satisfies SheetAction[];
+            })()
+          : []),
         ...(actionTarget.unreadCount > 0
           ? ([
               {
@@ -375,6 +394,15 @@ export default function ChatsScreen() {
           onPress: () => {
             setActionTarget(null);
             void applyPreferences(actionTarget, { muted: !actionTarget.muted });
+          },
+        },
+        {
+          key: 'hide',
+          label: actionTarget.hidden ? 'Afficher la discussion' : 'Masquer la discussion',
+          icon: (actionTarget.hidden ? 'visibility' : 'visibility-off') as SheetIcon,
+          onPress: () => {
+            setActionTarget(null);
+            void applyPreferences(actionTarget, { hidden: !actionTarget.hidden });
           },
         },
         ...(actionTarget.type === 'GROUP'
@@ -584,22 +612,7 @@ export default function ChatsScreen() {
                   <ThemedText style={styles.danger}>Se déconnecter</ThemedText>
                 </Pressable>
               </Pressable>
-            ) : (
-              <Pressable onPress={() => undefined} style={styles.profileWrapper}>
-                <ThemedView
-                  style={[styles.profileCard, { borderColor: theme.backgroundElement }]}>
-                  <Avatar name={user.displayName} uri={user.avatarUrl} size={72} />
-                  <ThemedText type="subtitle">{user.displayName}</ThemedText>
-                  <ThemedText themeColor="textSecondary">@{user.username}</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    Membre depuis le {memberSince}
-                  </ThemedText>
-                  <ThemedView style={styles.profileButton}>
-                    <Button title="Fermer" variant="secondary" onPress={() => setMenuView(null)} />
-                  </ThemedView>
-                </ThemedView>
-              </Pressable>
-            )}
+            ) : null}
           </Pressable>
         </Modal>
 
@@ -654,7 +667,11 @@ export default function ChatsScreen() {
 
         <Pressable
           onPress={() => router.push('/new-chat')}
-          style={({ pressed }) => [styles.fab, pressed && styles.pressed]}>
+          style={({ pressed }) => [
+            styles.fab,
+            { bottom: insets.bottom + Spacing.three },
+            pressed && styles.pressed,
+          ]}>
           <ThemedText style={styles.fabIcon}>+</ThemedText>
         </Pressable>
       </SafeAreaView>
@@ -814,29 +831,5 @@ const styles = StyleSheet.create({
   danger: {
     color: '#e5484d',
     fontWeight: '600',
-  },
-  profileWrapper: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.four,
-  },
-  profileCard: {
-    width: '100%',
-    maxWidth: 340,
-    alignItems: 'center',
-    gap: Spacing.two,
-    borderRadius: Spacing.three,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: Spacing.four,
-    shadowColor: '#000000',
-    shadowOpacity: 0.22,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
-  },
-  profileButton: {
-    alignSelf: 'stretch',
-    marginTop: Spacing.two,
   },
 });

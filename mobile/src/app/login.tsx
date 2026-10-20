@@ -2,18 +2,23 @@ import { Link, Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { FadeInUp } from 'react-native-reanimated';
 
 import { LogoMark } from '@/components/logo';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, PasswordField, TextField, accentColor } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
+import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 
 export default function LoginScreen() {
   const { token, signIn } = useAuth();
+  const theme = useTheme();
   const router = useRouter();
+  const keyboardHeight = useKeyboardHeight();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -48,20 +53,26 @@ export default function LoginScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView
+      style={[
+        styles.container,
+        keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
+      ]}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
         <SafeAreaView style={styles.content}>
-          <ThemedView style={styles.brandBlock}>
-            <LogoMark size={84} />
-            <ThemedText type="subtitle">MboloChat</ThemedText>
+          <Animated.View entering={FadeInUp.duration(520)} style={styles.brandBlock}>
+            <ThemedView style={styles.brandRow}>
+              <LogoMark size={48} />
+              <ThemedText type="subtitle">MboloChat</ThemedText>
+            </ThemedView>
             <ThemedText themeColor="textSecondary" style={styles.tagline}>
               Messagerie simple, rapide, en temps réel.
             </ThemedText>
-          </ThemedView>
+          </Animated.View>
 
-          <ThemedView style={styles.form}>
+          <Animated.View entering={FadeInUp.duration(520).delay(120)} style={styles.form}>
             <TextField
               placeholder="Email ou nom d’utilisateur"
               autoCapitalize="none"
@@ -84,12 +95,12 @@ export default function LoginScreen() {
               </ThemedText>
             </Pressable>
             {error ? (
-              <ThemedText type="small" style={styles.error}>
+              <ThemedText type="small" style={{ color: theme.error }}>
                 {error}
               </ThemedText>
             ) : null}
             <Button title="Se connecter" onPress={onSubmit} loading={submitting} />
-          </ThemedView>
+          </Animated.View>
 
           <Link href="/register" style={styles.link}>
             <ThemedText type="link" style={{ color: accentColor }}>
@@ -113,12 +124,17 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: Spacing.four,
     justifyContent: 'center',
-    gap: Spacing.two,
+    gap: Spacing.three,
   },
   brandBlock: {
     alignItems: 'center',
     gap: Spacing.two,
-    marginBottom: Spacing.four,
+    marginBottom: Spacing.three,
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
   },
   tagline: {
     textAlign: 'center',
@@ -126,15 +142,12 @@ const styles = StyleSheet.create({
   form: {
     gap: Spacing.three,
   },
-  error: {
-    color: '#e5484d',
-  },
   forgot: {
     alignSelf: 'flex-end',
-    marginTop: -Spacing.two,
+    marginTop: -Spacing.one,
   },
   link: {
-    marginTop: Spacing.four,
+    marginTop: Spacing.three,
     alignSelf: 'center',
   },
 });

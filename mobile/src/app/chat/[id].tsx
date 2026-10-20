@@ -17,6 +17,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TextField, accentColor } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -86,8 +87,18 @@ function TypingLine({ name, text }: { name: string; text: string }) {
   );
 }
 
-function ChatHeaderTitle({ title, subtitle, uri }: { title: string; subtitle: string; uri?: string | null }) {
-  return (
+function ChatHeaderTitle({
+  title,
+  subtitle,
+  uri,
+  onPress,
+}: {
+  title: string;
+  subtitle: string;
+  uri?: string | null;
+  onPress?: () => void;
+}) {
+  const content = (
     <View style={styles.headerTitle}>
       <Avatar name={title} uri={uri} size={36} />
       <View style={styles.headerTitleBody}>
@@ -102,6 +113,16 @@ function ChatHeaderTitle({ title, subtitle, uri }: { title: string; subtitle: st
       </View>
     </View>
   );
+
+  if (!onPress) {
+    return content;
+  }
+
+  return (
+    <Pressable onPress={onPress} hitSlop={8} style={styles.headerPressable}>
+      {content}
+    </Pressable>
+  );
 }
 
 export default function ChatScreen() {
@@ -110,6 +131,7 @@ export default function ChatScreen() {
   const { token, user } = useAuth();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
 
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -253,7 +275,15 @@ export default function ChatScreen() {
     setError(null);
     try {
       const socket = connectSocket(token);
-      await socket.emitWithAck('message:send', { conversationId: id, content });
+      const result = (await socket.emitWithAck('message:send', {
+        conversationId: id,
+        content,
+      })) as { error?: string } | undefined;
+      if (result?.error) {
+        // Conversation bloquée, quota atteint… : on garde le texte à l'écran.
+        setError(result.error);
+        return;
+      }
       socket.emit('typing', { conversationId: id, text: '' });
       setInput('');
     } catch (err) {
@@ -293,7 +323,13 @@ export default function ChatScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView
+      style={[
+        styles.container,
+        // Android (edge-to-edge) : la fenêtre n'est pas redimensionnée, on pousse
+        // donc nous-mêmes le contenu au-dessus du clavier.
+        keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
+      ]}>
       <Stack.Screen
         options={{
           headerTitle: () => (
@@ -301,6 +337,11 @@ export default function ChatScreen() {
               title={title}
               subtitle={subtitle}
               uri={conversation?.type === 'DIRECT' ? other?.avatarUrl : null}
+              onPress={
+                conversation?.type === 'DIRECT' && other
+                  ? () => router.push({ pathname: '/user/[id]', params: { id: other.id } })
+                  : undefined
+              }
             />
           ),
           headerRight: () =>
@@ -427,7 +468,8 @@ export default function ChatScreen() {
           style={[
             styles.inputRow,
             {
-              paddingBottom: Math.max(insets.bottom, Spacing.three),
+              // Quand le clavier est ouvert, c'est lui qui fait office de marge basse.
+              paddingBottom: keyboardHeight > 0 ? Spacing.two : Math.max(insets.bottom, Spacing.three),
               borderTopColor: theme.backgroundElement,
             },
           ]}>
@@ -469,6 +511,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
+  },
+  headerPressable: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   headerTitleBody: {
     maxWidth: 220,

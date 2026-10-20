@@ -1,6 +1,12 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { memo } from 'react';
-import { Pressable, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import Animated, {
+  interpolateColor,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
@@ -10,6 +16,8 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { conversationPreview, conversationTitle, formatListTimestamp } from '@/lib/format';
 import type { ConversationSummary } from '@/lib/types';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export interface TypingEntry {
   name: string;
@@ -42,22 +50,40 @@ function ConversationRowComponent({
     conversation.lastMessage?.createdAt ?? conversation.createdAt,
   );
 
+  // Animation de pression : le fond de la ligne glisse vers la couleur de sélection
+  // (la ligne reste en pleine largeur, rien ne bouge à l'écran).
+  const pressProgress = useSharedValue(0);
+  const rowAnimatedStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(
+      pressProgress.value,
+      [0, 1],
+      [theme.background, theme.backgroundSelected],
+    ),
+  }));
+
   const previewText = typing
     ? `${isGroup ? `${typing.name} · ` : ''}en train d'écrire : ${typing.text}`
     : preview.text;
 
   return (
-    <Pressable
+    <AnimatedPressable
       onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={300}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: pressed ? theme.backgroundSelected : theme.background },
-      ]}>
+      onPressIn={() => {
+        // Pattern Reanimated officiel : on pilote la valeur partagée depuis un handler.
+        // Exception au compilateur React qui n'aime pas la mutation (react-hooks/immutability).
+        // eslint-disable-next-line react-hooks/immutability
+        pressProgress.value = withTiming(1, { duration: 110 });
+      }}
+      onPressOut={() => {
+        // eslint-disable-next-line react-hooks/immutability
+        pressProgress.value = withTiming(0, { duration: 160 });
+      }}
+      style={[styles.row, rowAnimatedStyle]}>
       <Avatar name={title} uri={avatarUri} size={52} />
-      <ThemedView style={styles.body}>
-        <ThemedView style={styles.titleRow}>
+      <View style={styles.body}>
+        <View style={styles.titleRow}>
           <ThemedText numberOfLines={1} style={[styles.title, unread && styles.bold]}>
             {title}
           </ThemedText>
@@ -77,7 +103,7 @@ function ConversationRowComponent({
               style={styles.icon}
             />
           ) : null}
-        </ThemedView>
+        </View>
         <ThemedText
           type="small"
           themeColor="textSecondary"
@@ -85,8 +111,8 @@ function ConversationRowComponent({
           style={[unread && styles.bold, typing ? styles.typing : null]}>
           {previewText}
         </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.meta}>
+      </View>
+      <View style={styles.meta}>
         <ThemedText
           type="small"
           themeColor="textSecondary"
@@ -100,8 +126,8 @@ function ConversationRowComponent({
             </ThemedText>
           </ThemedView>
         ) : null}
-      </ThemedView>
-    </Pressable>
+      </View>
+    </AnimatedPressable>
   );
 }
 

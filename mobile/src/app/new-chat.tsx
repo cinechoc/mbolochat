@@ -180,13 +180,17 @@ export default function NewChatScreen() {
                   styles.row,
                   { backgroundColor: pressed ? theme.backgroundSelected : theme.background },
                 ]}>
-                <Avatar name={item.displayName} size={48} uri={item.avatarUrl} />
-                <ThemedView style={styles.rowBody}>
+                <Pressable
+                  onPress={() => router.push({ pathname: '/user/[id]', params: { id: item.id } })}
+                  hitSlop={6}>
+                  <Avatar name={item.displayName} size={48} uri={item.avatarUrl} />
+                </Pressable>
+                <View style={styles.rowBody}>
                   <ThemedText style={styles.rowTitle}>{item.displayName}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">
                     @{item.username}
                   </ThemedText>
-                </ThemedView>
+                </View>
                 {mode === 'group' ? (
                   <ThemedText style={isSelected ? styles.checkOn : styles.checkOff}>
                     {isSelected ? '✓' : '○'}

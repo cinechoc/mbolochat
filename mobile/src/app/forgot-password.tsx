@@ -5,8 +5,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { LogoMark } from '@/components/logo';
 import { Button, PasswordField, TextField, accentColor } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 
@@ -25,6 +27,7 @@ function errorMessage(err: unknown, fallback: string): string {
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const theme = useTheme();
+  const keyboardHeight = useKeyboardHeight();
   const [step, setStep] = useState<Step>('request');
   const [identifier, setIdentifier] = useState('');
   const [devCode, setDevCode] = useState<string | null>(null);
@@ -78,7 +81,11 @@ export default function ForgotPasswordScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView
+      style={[
+        styles.container,
+        keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
+      ]}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
@@ -86,7 +93,10 @@ export default function ForgotPasswordScreen() {
           {step === 'request' ? (
             <>
               <ThemedView style={styles.block}>
-                <ThemedText type="subtitle">Mot de passe oublié</ThemedText>
+                <ThemedView style={styles.brandRow}>
+                  <LogoMark size={40} />
+                  <ThemedText type="subtitle">MboloChat</ThemedText>
+                </ThemedView>
                 <ThemedText themeColor="textSecondary" style={styles.hint}>
                   Indique ton email ou ton nom d’utilisateur pour recevoir un code de
                   réinitialisation à 6 chiffres.
@@ -102,7 +112,7 @@ export default function ForgotPasswordScreen() {
                   onSubmitEditing={onRequest}
                 />
                 {error ? (
-                  <ThemedText type="small" style={styles.error}>
+                  <ThemedText type="small" style={{ color: theme.error }}>
                     {error}
                   </ThemedText>
                 ) : null}
@@ -153,7 +163,7 @@ export default function ForgotPasswordScreen() {
                   onSubmitEditing={onReset}
                 />
                 {error ? (
-                  <ThemedText type="small" style={styles.error}>
+                  <ThemedText type="small" style={{ color: theme.error }}>
                     {error}
                   </ThemedText>
                 ) : null}
@@ -212,15 +222,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
   },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
   hint: {
     textAlign: 'center',
   },
   form: {
     gap: Spacing.three,
     marginTop: Spacing.one,
-  },
-  error: {
-    color: '#e5484d',
   },
   link: {
     alignSelf: 'center',

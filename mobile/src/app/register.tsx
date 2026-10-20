@@ -2,6 +2,7 @@ import { Link, Redirect, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { FadeInUp } from 'react-native-reanimated';
 
 import { LogoMark } from '@/components/logo';
 import { Select, type SelectOption } from '@/components/select';
@@ -9,6 +10,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, PasswordField, TextField, accentColor } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -39,6 +41,7 @@ export default function RegisterScreen() {
   const { token, signIn } = useAuth();
   const theme = useTheme();
   const router = useRouter();
+  const keyboardHeight = useKeyboardHeight();
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -139,20 +142,27 @@ export default function RegisterScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView
+      style={[
+        styles.container,
+        keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
+      ]}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
         <SafeAreaView style={styles.flex} edges={['top', 'left', 'right']}>
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-            <ThemedView style={styles.brandBlock}>
-              <LogoMark size={56} />
-              <ThemedText type="subtitle">Créer un compte</ThemedText>
+            <Animated.View entering={FadeInUp.duration(520)} style={styles.brandBlock}>
+              <ThemedView style={styles.brandRow}>
+                <LogoMark size={40} />
+                <ThemedText type="subtitle">MboloChat</ThemedText>
+              </ThemedView>
               <ThemedText type="small" themeColor="textSecondary">
-                C&apos;est rapide et facile.
+                Créer un compte — c&apos;est rapide et facile.
               </ThemedText>
-            </ThemedView>
+            </Animated.View>
 
+            <Animated.View entering={FadeInUp.duration(520).delay(120)} style={styles.form}>
             <ThemedView style={styles.nameRow}>
               <TextField
                 style={styles.flex}
@@ -245,7 +255,7 @@ export default function RegisterScreen() {
             </ThemedText>
 
             {error ? (
-              <ThemedText type="small" style={styles.error}>
+              <ThemedText type="small" style={{ color: theme.error }}>
                 {error}
               </ThemedText>
             ) : null}
@@ -257,6 +267,7 @@ export default function RegisterScreen() {
                 Déjà un compte ? Se connecter
               </ThemedText>
             </Link>
+            </Animated.View>
           </ScrollView>
         </SafeAreaView>
       </KeyboardAvoidingView>
@@ -283,6 +294,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
     marginBottom: Spacing.two,
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  form: {
+    gap: Spacing.three,
   },
   nameRow: {
     flexDirection: 'row',
@@ -317,9 +336,6 @@ const styles = StyleSheet.create({
   },
   terms: {
     lineHeight: 18,
-  },
-  error: {
-    color: '#e5484d',
   },
   link: {
     alignSelf: 'center',

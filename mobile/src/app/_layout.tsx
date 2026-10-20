@@ -34,6 +34,10 @@ function RootNavigator() {
       <Stack.Screen name="chats" options={{ headerShown: false }} />
       <Stack.Screen name="new-chat" options={{ title: 'Nouvelle discussion' }} />
       <Stack.Screen name="chat/[id]" options={{ title: '' }} />
+      <Stack.Screen name="profile" options={{ title: 'Profil' }} />
+      <Stack.Screen name="profile/edit" options={{ title: 'Modifier le profil' }} />
+      <Stack.Screen name="user/[id]" options={{ title: 'Profil' }} />
+      <Stack.Screen name="settings" options={{ title: 'Paramètres' }} />
     </Stack>
   );
 }

@@ -7,6 +7,7 @@ import type {
   Message,
   ResetPasswordResult,
   User,
+  UserProfile,
 } from './types';
 
 export class ApiError extends Error {
@@ -159,8 +160,12 @@ export const api = {
     return request<User>('/auth/me', { token });
   },
 
-  updateProfile(token: string, body: { displayName?: string }) {
+  updateProfile(token: string, body: { displayName?: string; bio?: string }) {
     return request<User>('/users/me', { method: 'PATCH', token, body });
+  },
+
+  getUserProfile(token: string, id: string) {
+    return request<UserProfile>(`/users/${encodeURIComponent(id)}`, { token });
   },
 
   uploadAvatar(token: string, data: string, mimeType: string) {
@@ -222,12 +227,42 @@ export const api = {
   setConversationPreferences(
     token: string,
     conversationId: string,
-    body: { pinned?: boolean; muted?: boolean },
+    body: { pinned?: boolean; muted?: boolean; hidden?: boolean },
   ) {
     return request<ConversationSummary>(`/conversations/${conversationId}/preferences`, {
       method: 'PATCH',
       token,
       body,
+    });
+  },
+
+  listHiddenConversations(token: string) {
+    return request<ConversationSummary[]>('/conversations/hidden', { token });
+  },
+
+  listBlockedUsers(token: string) {
+    return request<User[]>('/users/blocked', { token });
+  },
+
+  blockUser(token: string, id: string) {
+    return request<{ blocked: boolean }>(`/users/${encodeURIComponent(id)}/block`, {
+      method: 'POST',
+      token,
+    });
+  },
+
+  unblockUser(token: string, id: string) {
+    return request<{ blocked: boolean }>(`/users/${encodeURIComponent(id)}/block`, {
+      method: 'DELETE',
+      token,
+    });
+  },
+
+  setNotificationsEnabled(token: string, enabled: boolean) {
+    return request<User>('/users/me', {
+      method: 'PATCH',
+      token,
+      body: { notificationsEnabled: enabled },
     });
   },
 };

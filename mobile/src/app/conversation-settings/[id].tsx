@@ -1,12 +1,13 @@
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, TextField, accentColor } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -15,6 +16,7 @@ import type { ConversationSummary, User } from '@/lib/types';
 export default function ConversationSettingsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { token, user } = useAuth();
+  const theme = useTheme();
   const router = useRouter();
   const [conversation, setConversation] = useState<ConversationSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -135,6 +137,32 @@ export default function ConversationSettingsScreen() {
       ) : null}
 
       <ThemedView style={styles.section}>
+        <ThemedText type="smallBold">Masquer la discussion</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">
+          La discussion disparaît de ta liste. Tu la retrouveras dans Paramètres › Confidentialité ›
+          Conversations masquées.
+        </ThemedText>
+        <View style={styles.switchRow}>
+          <ThemedText>{conversation?.hidden ? 'Masquée' : 'Visible'}</ThemedText>
+          <Switch
+            value={Boolean(conversation?.hidden)}
+            onValueChange={(value) => {
+              if (!token || !id) return;
+              void api
+                .setConversationPreferences(token, id, { hidden: value })
+                .then((updated) => setConversation(updated))
+                .catch((err: unknown) =>
+                  setError(
+                    err instanceof ApiError ? err.message : 'Action impossible.',
+                  ),
+                );
+            }}
+            trackColor={{ true: '#3c87f7', false: theme.backgroundElement }}
+          />
+        </View>
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
         <ThemedText type="smallBold">Membres ({conversation?.members.length ?? 0})</ThemedText>
         <FlatList
           data={conversation?.members ?? []}
@@ -205,6 +233,12 @@ const styles = StyleSheet.create({
   input: { flex: 1 },
   search: {},
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.one },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.one,
+  },
   memberBody: { flex: 1, gap: 2 },
   memberName: { fontWeight: '600' },
   resultRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.one },

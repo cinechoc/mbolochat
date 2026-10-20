@@ -10,7 +10,10 @@ import type { ConversationFilter } from '@/lib/format';
 export interface FilterOption {
   key: ConversationFilter;
   label: string;
-  count: number;
+  /** Nombre affiché à côté du libellé (absent = aucun nombre). */
+  count?: number;
+  /** Le compte s'affiche en pastille (et non en simple texte) : réservé aux non-lus. */
+  badge?: boolean;
 }
 
 interface FilterTabsProps {
@@ -31,6 +34,9 @@ export function FilterTabs({ options, value, onChange }: FilterTabsProps) {
       keyboardShouldPersistTaps="handled">
       {options.map((option) => {
         const active = option.key === value;
+        // Seule la pastille « non lus » ressemble à un badge : les autres
+        // compteurs sont affichés en texte discret pour ne pas prêter à confusion.
+        const asBadge = option.badge === true && (option.count ?? 0) > 0;
         return (
           <Pressable
             key={option.key}
@@ -47,19 +53,21 @@ export function FilterTabs({ options, value, onChange }: FilterTabsProps) {
               style={[styles.label, active && styles.labelActive]}>
               {option.label}
             </ThemedText>
-            {option.count > 0 ? (
-              <ThemedView
-                style={[
-                  styles.count,
-                  { backgroundColor: active ? 'rgba(255,255,255,0.25)' : theme.background },
-                ]}>
+            {option.count !== undefined && option.count > 0 ? (
+              asBadge ? (
+                <ThemedView style={[styles.count, { backgroundColor: accentColor }]}>
+                  <ThemedText type="small" style={styles.countBadge}>
+                    {option.count}
+                  </ThemedText>
+                </ThemedView>
+              ) : (
                 <ThemedText
                   type="small"
                   themeColor={active ? undefined : 'textSecondary'}
-                  style={active ? styles.countActive : styles.countInactive}>
+                  style={[styles.countText, active && styles.countTextActive]}>
                   {option.count}
                 </ThemedText>
-              </ThemedView>
+              )
             ) : null}
           </Pressable>
         );
@@ -101,11 +109,14 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: 'center',
   },
-  countActive: {
+  countBadge: {
     color: '#ffffff',
     fontWeight: '700',
   },
-  countInactive: {
-    fontWeight: '700',
+  countText: {
+    fontWeight: '600',
+  },
+  countTextActive: {
+    color: '#ffffff',
   },
 });
