@@ -1,4 +1,4 @@
-const { withAndroidManifest, withDangerousMod } = require('expo/config-plugins');
+const { withAndroidManifest, withAppBuildGradle, withDangerousMod } = require('expo/config-plugins');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -37,6 +37,23 @@ module.exports = function withMessagingNotifications(config) {
       ],
     });
     application.service = services;
+    return config;
+  });
+
+  // Le service a besoin des classes Firebase (expo-notifications ne les expose
+  // pas : il les déclare en `implementation`, donc invisibles pour l'app).
+  config = withAppBuildGradle(config, (config) => {
+    if (config.modResults.language !== 'groovy') {
+      return config;
+    }
+    let contents = config.modResults.contents;
+    if (!contents.includes('firebase-messaging')) {
+      contents = contents.replace(
+        /dependencies\s*\{/,
+        "dependencies {\n    implementation 'com.google.firebase:firebase-messaging:25.0.1'",
+      );
+    }
+    config.modResults.contents = contents;
     return config;
   });
 
