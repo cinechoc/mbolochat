@@ -28,6 +28,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Le cache disque est chargé avant tout affichage : les pages s'ouvrent
+      // ensuite instantanément, avec leur contenu déjà prêt.
+      await cache.hydrate();
       try {
         const stored = await getStoredAccessToken();
         if (stored) {
@@ -86,7 +89,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await clearStoredTokens();
         setToken(null);
         setUser(null);
-        cache.clear();
+        cache.flush();
+        void cache.clear();
       },
     }),
     [token, user, loading],

@@ -12,6 +12,7 @@ import { useTheme } from '@/hooks/use-theme';
 
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { cache } from '@/lib/cache';
 import type { ConversationSummary, User } from '@/lib/types';
 
 export default function ConversationSettingsScreen() {
@@ -19,8 +20,10 @@ export default function ConversationSettingsScreen() {
   const { token, user } = useAuth();
   const theme = useTheme();
   const router = useRouter();
-  const [conversation, setConversation] = useState<ConversationSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [conversation, setConversation] = useState<ConversationSummary | null>(() =>
+    id ? cache.getConversation(id) : null,
+  );
+  const [loading, setLoading] = useState(() => (id ? cache.getConversation(id) === null : true));
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [savingName, setSavingName] = useState(false);
@@ -34,6 +37,7 @@ export default function ConversationSettingsScreen() {
     try {
       const c = await api.getConversation(token, id);
       setConversation(c);
+      cache.setConversation(c);
       setName(c.name ?? '');
       setError(null);
     } catch (err) {

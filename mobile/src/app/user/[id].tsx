@@ -20,7 +20,7 @@ export default function UserProfileScreen() {
   const insets = useSafeAreaInsets();
 
   const [profile, setProfile] = useState<UserProfile | null>(() => (id ? cache.getProfile(id) : null));
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => (id ? cache.getProfile(id) === null : true));
   const [starting, setStarting] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
