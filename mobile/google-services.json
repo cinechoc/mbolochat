@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "990980081014",
+    "project_id": "mbolochat",
+    "storage_bucket": "mbolochat.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:990980081014:android:77713a8ad67864b307e657",
+        "android_client_info": {
+          "package_name": "com.groupenzogho.mbolochat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCK2z0mtGKEM6H-V-nVW1EORrJ0mc2De6A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
