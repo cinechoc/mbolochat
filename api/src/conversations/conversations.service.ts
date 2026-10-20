@@ -58,6 +58,14 @@ export class ConversationsService {
     private readonly usersService: UsersService,
   ) {}
 
+  async listMemberIds(conversationId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ userId: conversationMembers.userId })
+      .from(conversationMembers)
+      .where(eq(conversationMembers.conversationId, conversationId));
+    return rows.map((row) => row.userId);
+  }
+
   async isMember(conversationId: string, userId: string): Promise<boolean> {
     const [row] = await this.db
       .select({ userId: conversationMembers.userId })

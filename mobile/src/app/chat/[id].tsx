@@ -1,5 +1,5 @@
-import { Redirect, Stack, useRouter, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Redirect, Stack, useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -23,7 +23,7 @@ import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { cache } from '@/lib/cache';
 import { conversationTitle, formatDateLabel, formatTime } from '@/lib/format';
-import { connectSocket, disconnectSocket } from '@/lib/socket';
+import { connectSocket, getSocket } from '@/lib/socket';
 import type { ConversationSummary, Message } from '@/lib/types';
 
 type ListRow =
@@ -196,6 +196,8 @@ export default function ChatScreen() {
     const join = () => {
       socket.emit('conversation:join', { conversationId: id });
       socket.emit('message:read', { conversationId: id });
+      // La discussion est à l'écran : pas besoin de notification push.
+      socket.emit('conversation:focus', { conversationId: id });
     };
     const onMessage = (message: Message) => {
       if (message.conversationId !== id) {
@@ -244,9 +246,26 @@ export default function ChatScreen() {
       socket.off('connect', join);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       if (typingFlushRef.current) clearTimeout(typingFlushRef.current);
-      disconnectSocket();
+      // Le socket reste ouvert : la liste des discussions continue de
+      // recevoir les messages en temps réel après le retour.
     };
   }, [token, id, user?.id]);
+
+  // Quitter l'écran (profil, retour à la liste…) réautorise les notifications.
+  useFocusEffect(
+    useCallback(() => {
+      if (!id) {
+        return;
+      }
+      const socket = getSocket();
+      if (socket?.connected) {
+        socket.emit('conversation:focus', { conversationId: id });
+      }
+      return () => {
+        socket?.emit('conversation:blur', { conversationId: id });
+      };
+    }, [id]),
+  );
 
   const rows = useMemo(() => {
     const chronological: ListRow[] = [];

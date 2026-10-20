@@ -1,11 +1,11 @@
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
-import { AuthProvider } from '@/lib/auth-context';
-import { configureNotificationHandler } from '@/lib/push';
+import { AuthProvider, useAuth } from '@/lib/auth-context';
+import { configureNotificationHandler, subscribeToNotificationOpens } from '@/lib/push';
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -22,9 +22,53 @@ export default function RootLayout() {
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <StatusBar style="auto" />
         <RootNavigator />
+        <NotificationRouter />
       </ThemeProvider>
     </AuthProvider>
   );
+}
+
+/**
+ * Toucher une notification ouvre la conversation concernée. La navigation
+ * attend la fin de la restauration de session (démarrage à froid).
+ */
+function NotificationRouter() {
+  const { token, loading } = useAuth();
+  const pendingRef = useRef<string | null>(null);
+
+  useEffect(
+    () =>
+      subscribeToNotificationOpens((data) => {
+        if (!data.conversationId) {
+          return;
+        }
+        if (loading) {
+          pendingRef.current = data.conversationId;
+          return;
+        }
+        if (!token) {
+          return;
+        }
+        router.push({ pathname: '/chat/[id]', params: { id: data.conversationId } });
+      }),
+    [loading, token],
+  );
+
+  // La notification a été touchée pendant le chargement : on ouvre la
+  // conversation dès que la session est prête.
+  useEffect(() => {
+    if (loading || !token) {
+      return;
+    }
+    const pending = pendingRef.current;
+    if (!pending) {
+      return;
+    }
+    pendingRef.current = null;
+    router.push({ pathname: '/chat/[id]', params: { id: pending } });
+  }, [loading, token]);
+
+  return null;
 }
 
 function RootNavigator() {

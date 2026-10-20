@@ -114,3 +114,53 @@ export async function requestPushToken(): Promise<string | null> {
     return null;
   }
 }
+
+/** Données attachées à une notification (voir PushService côté API). */
+export interface PushData {
+  type?: string;
+  conversationId?: string;
+  messageId?: string;
+}
+
+// Identifiants déjà traités : une même réponse ne doit pas ouvrir deux fois
+// la conversation (réabonnements lors du chargement de la session).
+const handledResponses = new Set<string>();
+
+/**
+ * Réagit au toucher d'une notification (application ouverte ou lancée par
+ * la notification). Renvoie la fonction de désabonnement.
+ */
+export function subscribeToNotificationOpens(onOpen: (data: PushData) => void): () => void {
+  const module = getNotifications();
+  if (!module) {
+    return () => undefined;
+  }
+
+  const handle = (response: ExpoNotifications.NotificationResponse) => {
+    const identifier = response.notification.request.identifier;
+    if (handledResponses.has(identifier)) {
+      return;
+    }
+    handledResponses.add(identifier);
+    // Évite de rejouer la même ouverture au prochain démarrage.
+    void module.clearLastNotificationResponseAsync().catch(() => undefined);
+    const data = response.notification.request.content.data as PushData | undefined;
+    if (data?.type === 'message' && data.conversationId) {
+      onOpen(data);
+    }
+  };
+
+  const subscription = module.addNotificationResponseReceivedListener(handle);
+  void module
+    .getLastNotificationResponseAsync()
+    .then((response) => {
+      if (response) {
+        handle(response);
+      }
+    })
+    .catch(() => undefined);
+
+  return () => {
+    subscription.remove();
+  };
+}

@@ -39,3 +39,8 @@ export function disconnectSocket(): void {
   socket?.disconnect();
   socket = null;
 }
+
+/** Socket courant (null tant qu'aucune connexion n'a été ouverte). */
+export function getSocket(): Socket | null {
+  return socket;
+}

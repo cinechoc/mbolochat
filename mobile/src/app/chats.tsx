@@ -84,7 +84,12 @@ export default function ChatsScreen() {
   useFocusEffect(
     useCallback(() => {
       refresh();
-    }, [refresh]),
+      if (token) {
+        // Le socket partagé reste ouvert entre les écrans ; on s'assure
+        // simplement qu'il l'est quand la liste reprend le focus.
+        connectSocket(token);
+      }
+    }, [refresh, token]),
   );
 
   // Rejoint les salons de toutes les discussions affichées (temps réel).
@@ -122,6 +127,9 @@ export default function ChatsScreen() {
 
     const onMessage = (message: Message) => {
       if (!conversationsRef.current.some((item) => item.id === message.conversationId)) {
+        // Conversation encore inconnue (quelqu'un vient de l'ouvrir) :
+        // on recharge la liste pour la faire apparaître.
+        void refresh();
         return;
       }
       clearTyping(message.conversationId);
@@ -206,7 +214,7 @@ export default function ChatsScreen() {
       socket.off('typing', onTyping);
       socket.off('read', onRead);
     };
-  }, [token, user?.id]);
+  }, [token, user?.id, refresh]);
 
   const filteredRows = useMemo<ListRow[]>(() => {
     const needle = query.trim().toLowerCase();
