@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { Avatar } from '@/components/avatar';
-import { SkeletonRows } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, TextField, accentColor } from '@/components/ui';
@@ -23,7 +22,6 @@ export default function ConversationSettingsScreen() {
   const [conversation, setConversation] = useState<ConversationSummary | null>(() =>
     id ? cache.getConversation(id) : null,
   );
-  const [loading, setLoading] = useState(() => (id ? cache.getConversation(id) === null : true));
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [savingName, setSavingName] = useState(false);
@@ -42,8 +40,6 @@ export default function ConversationSettingsScreen() {
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Impossible de charger.');
-    } finally {
-      setLoading(false);
     }
   }, [token, id]);
 
@@ -113,12 +109,10 @@ export default function ConversationSettingsScreen() {
     }
   };
 
-  if (loading) {
-    return (
-      <ThemedView style={styles.container}>
-        <SkeletonRows count={4} avatarSize={40} />
-      </ThemedView>
-    );
+  // Rien à afficher tant que la conversation n'est pas connue (elle vient
+  // normalement du cache) : pas de squelette, la page apparaît d'un coup.
+  if (!conversation) {
+    return <ThemedView style={styles.container} />;
   }
 
   const isGroup = conversation?.type === 'GROUP';

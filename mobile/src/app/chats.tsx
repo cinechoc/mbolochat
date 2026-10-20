@@ -8,7 +8,6 @@ import { ActionSheet, type SheetAction, type SheetIcon } from '@/components/acti
 import { Avatar } from '@/components/avatar';
 import { ConversationRow, type TypingEntry } from '@/components/conversation-row';
 import { FilterTabs } from '@/components/filter-tabs';
-import { SkeletonRows } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TextField, accentColor } from '@/components/ui';
@@ -53,9 +52,10 @@ export default function ChatsScreen() {
   const [typingMap, setTypingMap] = useState<Record<string, TypingEntry>>({});
   const [filter, setFilter] = useState<ConversationFilter>('all');
   const [query, setQuery] = useState('');
-  // Si la liste est déjà en cache, on l'affiche tout de suite (pas de squelette).
-  const [loading, setLoading] = useState(() => cache.getConversationList() === null);
-  const [refreshing, setRefreshing] = useState(false);  const [error, setError] = useState<string | null>(null);
+  // La liste en cache s'affiche immédiatement ; ce drapeau sert seulement à
+  // éviter d'afficher « aucune conversation » avant la première réponse.
+  const [ready, setReady] = useState(() => cache.getConversationList() !== null);
+  const [error, setError] = useState<string | null>(null);
   const [actionTarget, setActionTarget] = useState<ConversationSummary | null>(null);
   const [leaveTarget, setLeaveTarget] = useState<ConversationSummary | null>(null);
   const typingTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -77,8 +77,7 @@ export default function ChatsScreen() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Impossible de charger les discussions.');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      setReady(true);
     }
   }, [token]);
 
@@ -364,7 +363,15 @@ export default function ChatsScreen() {
                   onPress: () => {
                     setActionTarget(null);
                     if (other) {
-                      router.push({ pathname: '/user/[id]', params: { id: other.id } });
+                      router.push({
+                        pathname: '/user/[id]',
+                        params: {
+                          id: other.id,
+                          name: other.displayName,
+                          username: other.username,
+                          avatar: other.avatarUrl ?? '',
+                        },
+                      });
                     }
                   },
                 },
@@ -491,27 +498,21 @@ export default function ChatsScreen() {
           </ThemedText>
         ) : null}
 
-        {loading ? (
-          <SkeletonRows count={7} />
-        ) : (
-          <FlatList
-            data={filteredRows}
-            keyExtractor={(item) => item.key}
-            contentContainerStyle={filteredRows.length === 0 ? styles.emptyList : styles.listContent}
-            keyboardShouldPersistTaps="handled"
-            onRefresh={refresh}
-            refreshing={refreshing}
-            ItemSeparatorComponent={({ leadingItem }) => {
-              if (leadingItem.type === 'section') {
-                return null;
-              }
-              return (
-                <View
-                  style={[styles.separator, { backgroundColor: theme.backgroundElement }]}
-                />
-              );
-            }}
-            ListEmptyComponent={
+        <FlatList
+          data={filteredRows}
+          keyExtractor={(item) => item.key}
+          contentContainerStyle={filteredRows.length === 0 ? styles.emptyList : styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          ItemSeparatorComponent={({ leadingItem }) => {
+            if (leadingItem.type === 'section') {
+              return null;
+            }
+            return (
+              <View style={[styles.separator, { backgroundColor: theme.backgroundElement }]} />
+            );
+          }}
+          ListEmptyComponent={
+            ready ? (
               <ThemedView style={styles.center}>
                 <ThemedText themeColor="textSecondary" style={styles.emptyText}>
                   {query.trim().length > 0
@@ -523,32 +524,32 @@ export default function ChatsScreen() {
                         : 'Aucune conversation pour le moment.\nAppuie sur + pour commencer.'}
                 </ThemedText>
               </ThemedView>
-            }
-            renderItem={({ item }) => {
-              if (item.type === 'section') {
-                return (
-                  <ThemedView style={styles.sectionRow}>
-                    <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
-                      {item.label.toUpperCase()}
-                    </ThemedText>
-                  </ThemedView>
-                );
-              }
-              const conversation = item.conversation;
+            ) : undefined
+          }
+          renderItem={({ item }) => {
+            if (item.type === 'section') {
               return (
-                <ConversationRow
-                  conversation={conversation}
-                  currentUserId={user.id}
-                  typing={typingMap[conversation.id] ?? null}
-                  onPress={() =>
-                    router.push({ pathname: '/chat/[id]', params: { id: conversation.id } })
-                  }
-                  onLongPress={() => setActionTarget(conversation)}
-                />
+                <ThemedView style={styles.sectionRow}>
+                  <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionLabel}>
+                    {item.label.toUpperCase()}
+                  </ThemedText>
+                </ThemedView>
               );
-            }}
-          />
-        )}
+            }
+            const conversation = item.conversation;
+            return (
+              <ConversationRow
+                conversation={conversation}
+                currentUserId={user.id}
+                typing={typingMap[conversation.id] ?? null}
+                onPress={() =>
+                  router.push({ pathname: '/chat/[id]', params: { id: conversation.id } })
+                }
+                onLongPress={() => setActionTarget(conversation)}
+              />
+            );
+          }}
+        />
 
         <ActionSheet
           visible={actionTarget !== null}

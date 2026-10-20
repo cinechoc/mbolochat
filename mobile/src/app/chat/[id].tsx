@@ -13,7 +13,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/avatar';
-import { SkeletonBubbles } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TextField, accentColor } from '@/components/ui';
@@ -149,7 +148,7 @@ export default function ChatScreen() {
   const lastTypingEmitRef = useRef(0);
   const pendingTypingRef = useRef<string | null>(null);
   const [readBy, setReadBy] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(() => (id ? cache.getMessages(id) === null : true));
+  const [ready, setReady] = useState(() => (id ? cache.getMessages(id) !== null : false));
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const listRef = useRef<FlatList<ListRow>>(null);
@@ -179,7 +178,7 @@ export default function ChatScreen() {
         }
       } finally {
         if (active) {
-          setLoading(false);
+          setReady(true);
         }
       }
     })();
@@ -349,7 +348,16 @@ export default function ChatScreen() {
               uri={conversation?.type === 'DIRECT' ? other?.avatarUrl : null}
               onPress={
                 conversation?.type === 'DIRECT' && other
-                  ? () => router.push({ pathname: '/user/[id]', params: { id: other.id } })
+                  ? () =>
+                      router.push({
+                        pathname: '/user/[id]',
+                        params: {
+                          id: other.id,
+                          name: other.displayName,
+                          username: other.username,
+                          avatar: other.avatarUrl ?? '',
+                        },
+                      })
                   : undefined
               }
             />
@@ -366,11 +374,8 @@ export default function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         style={styles.flex}>
-        {loading ? (
-          <SkeletonBubbles count={7} />
-        ) : (
-          <FlatList
-            ref={listRef}
+        <FlatList
+          ref={listRef}
             data={rows}
             inverted
             keyExtractor={(item) => item.key}
@@ -391,11 +396,13 @@ export default function ChatScreen() {
             contentContainerStyle={styles.listContent}
             onContentSizeChange={() => listRef.current?.scrollToOffset({ offset: 0, animated: false })}
             ListEmptyComponent={
-              <ThemedView style={styles.center}>
-                <ThemedText themeColor="textSecondary" style={styles.emptyText}>
-                  Aucun message. Dis bonjour !
-                </ThemedText>
-              </ThemedView>
+              ready ? (
+                <ThemedView style={styles.center}>
+                  <ThemedText themeColor="textSecondary" style={styles.emptyText}>
+                    Aucun message. Dis bonjour !
+                  </ThemedText>
+                </ThemedView>
+              ) : undefined
             }
             renderItem={({ item }) => {
               if (item.type === 'date') {
@@ -453,7 +460,6 @@ export default function ChatScreen() {
               );
             }}
           />
-        )}
 
         {error ? (
           <ThemedText type="small" style={styles.error}>

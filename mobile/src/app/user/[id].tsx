@@ -4,7 +4,6 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ProfileAction, ProfileHeader, PhotoGrid } from '@/components/profile-view';
-import { SkeletonProfile } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -14,13 +13,41 @@ import { cache } from '@/lib/cache';
 import type { UserProfile } from '@/lib/types';
 
 export default function UserProfileScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // Le nom et la photo sont passés par l'écran appelant (liste, chat) : le
+  // profil s'affiche ainsi instantanément, avant même la réponse du serveur.
+  const { id, name, username, avatar } = useLocalSearchParams<{
+    id: string;
+    name?: string;
+    username?: string;
+    avatar?: string;
+  }>();
   const { token, user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [profile, setProfile] = useState<UserProfile | null>(() => (id ? cache.getProfile(id) : null));
-  const [loading, setLoading] = useState(() => (id ? cache.getProfile(id) === null : true));
+  const [profile, setProfile] = useState<UserProfile | null>(() => {
+    if (!id) {
+      return null;
+    }
+    const cached = cache.getProfile(id);
+    if (cached) {
+      return cached;
+    }
+    if (!name || !username) {
+      return null;
+    }
+    return {
+      id,
+      username,
+      displayName: name,
+      bio: null,
+      avatarUrl: avatar ? avatar : null,
+      notificationsEnabled: true,
+      createdAt: '',
+      isMe: false,
+      stats: { messages: 0, conversations: 0 },
+    };
+  });
   const [starting, setStarting] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,8 +67,6 @@ export default function UserProfileScreen() {
       setError(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Impossible de charger ce profil.');
-    } finally {
-      setLoading(false);
     }
   }, [token, id]);
 
@@ -89,20 +114,12 @@ export default function UserProfileScreen() {
   return (
     <ThemedView style={styles.container}>
       <Stack.Screen options={{ title: profile?.username ?? 'Profil' }} />
-      {loading || !profile ? (
-        <ScrollView
-          contentContainerStyle={[
-            styles.content,
-            { paddingBottom: insets.bottom + Spacing.four },
-          ]}>
-          <SkeletonProfile />
-        </ScrollView>
-      ) : (
-        <ScrollView
-          contentContainerStyle={[
-            styles.content,
-            { paddingBottom: insets.bottom + Spacing.four },
-          ]}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: insets.bottom + Spacing.four },
+        ]}>
+        {profile ? (
           <ProfileHeader
             profile={profile}
             actions={
@@ -134,19 +151,19 @@ export default function UserProfileScreen() {
               )
             }
           />
+        ) : null}
 
-          {error ? (
-            <ThemedText type="small" style={styles.error}>
-              {error}
-            </ThemedText>
-          ) : null}
+        {error ? (
+          <ThemedText type="small" style={styles.error}>
+            {error}
+          </ThemedText>
+        ) : null}
 
-          <View style={styles.section}>
-            <ThemedText style={styles.sectionTitle}>Photos</ThemedText>
-            <PhotoGrid photos={[]} />
-          </View>
-        </ScrollView>
-      )}
+        <View style={styles.section}>
+          <ThemedText style={styles.sectionTitle}>Photos</ThemedText>
+          <PhotoGrid photos={[]} />
+        </View>
+      </ScrollView>
     </ThemedView>
   );
 }

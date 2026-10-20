@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { Avatar } from '@/components/avatar';
-import { SkeletonRows } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, TextField, accentColor } from '@/components/ui';
@@ -150,64 +149,70 @@ export default function NewChatScreen() {
         </ThemedText>
       ) : null}
 
-      {showingResults && searching && results.length === 0 ? (
-        <View style={styles.resultsSkeleton}>
-          <SkeletonRows count={5} avatarSize={40} />
-        </View>
-      ) : (
-        <FlatList
-          data={showingResults ? results : []}
-          keyExtractor={(item) => item.id}
-          keyboardShouldPersistTaps="handled"
-          ItemSeparatorComponent={() => (
-            <View style={[styles.separator, { backgroundColor: theme.backgroundElement }]} />
-          )}
-          ListEmptyComponent={
-            <ThemedView style={styles.center}>
-              <ThemedText themeColor="textSecondary" style={styles.hint}>
-                {query.trim().length === 0
-                  ? 'Tape un pseudo pour trouver quelqu’un.'
+      <FlatList
+        data={showingResults ? results : []}
+        keyExtractor={(item) => item.id}
+        keyboardShouldPersistTaps="handled"
+        ItemSeparatorComponent={() => (
+          <View style={[styles.separator, { backgroundColor: theme.backgroundElement }]} />
+        )}
+        ListEmptyComponent={
+          <ThemedView style={styles.center}>
+            <ThemedText themeColor="textSecondary" style={styles.hint}>
+              {query.trim().length === 0
+                ? 'Tape un pseudo pour trouver quelqu’un.'
+                : searching
+                  ? 'Recherche…'
                   : 'Aucun utilisateur trouvé.'}
-              </ThemedText>
-            </ThemedView>
-          }
-          renderItem={({ item }) => {
-            const isSelected = selected.some((x) => x.id === item.id);
-            return (
+            </ThemedText>
+          </ThemedView>
+        }
+        renderItem={({ item }) => {
+          const isSelected = selected.some((x) => x.id === item.id);
+          return (
+            <Pressable
+              onPress={() => (mode === 'group' ? toggleSelect(item) : createDirect(item))}
+              disabled={creating}
+              style={({ pressed }) => [
+                styles.row,
+                { backgroundColor: pressed ? theme.backgroundSelected : theme.background },
+              ]}>
               <Pressable
-                onPress={() => (mode === 'group' ? toggleSelect(item) : createDirect(item))}
-                disabled={creating}
-                style={({ pressed }) => [
-                  styles.row,
-                  { backgroundColor: pressed ? theme.backgroundSelected : theme.background },
-                ]}>
-                <Pressable
-                  onPress={() => router.push({ pathname: '/user/[id]', params: { id: item.id } })}
-                  hitSlop={6}>
-                  <Avatar name={item.displayName} size={48} uri={item.avatarUrl} />
-                </Pressable>
-                <View style={styles.rowBody}>
-                  <ThemedText style={styles.rowTitle}>{item.displayName}</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    @{item.username}
-                  </ThemedText>
-                </View>
-                {mode === 'group' ? (
-                  <ThemedText style={isSelected ? styles.checkOn : styles.checkOff}>
-                    {isSelected ? '✓' : '○'}
-                  </ThemedText>
-                ) : creating ? (
-                  <ActivityIndicator />
-                ) : (
-                  <ThemedText themeColor="textSecondary" style={styles.chevron}>
-                    ›
-                  </ThemedText>
-                )}
+                onPress={() =>
+                  router.push({
+                    pathname: '/user/[id]',
+                    params: {
+                      id: item.id,
+                      name: item.displayName,
+                      username: item.username,
+                      avatar: item.avatarUrl ?? '',
+                    },
+                  })
+                }
+                hitSlop={6}>
+                <Avatar name={item.displayName} size={48} uri={item.avatarUrl} />
               </Pressable>
-            );
-          }}
-        />
-      )}
+              <View style={styles.rowBody}>
+                <ThemedText style={styles.rowTitle}>{item.displayName}</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  @{item.username}
+                </ThemedText>
+              </View>
+              {mode === 'group' ? (
+                <ThemedText style={isSelected ? styles.checkOn : styles.checkOff}>
+                  {isSelected ? '✓' : '○'}
+                </ThemedText>
+              ) : creating ? (
+                <ActivityIndicator />
+              ) : (
+                <ThemedText themeColor="textSecondary" style={styles.chevron}>
+                  ›
+                </ThemedText>
+              )}
+            </Pressable>
+          );
+        }}
+      />
 
       {mode === 'group' && selected.length > 0 ? (
         <ThemedView style={styles.footer}>
@@ -240,7 +245,6 @@ const styles = StyleSheet.create({
   searchBox: { paddingHorizontal: Spacing.three, paddingBottom: Spacing.two },
   search: { borderRadius: 22, paddingVertical: Spacing.two },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.five },
-  resultsSkeleton: { paddingTop: Spacing.two },
   hint: { textAlign: 'center' },
   error: { color: '#e5484d', paddingHorizontal: Spacing.three },
   row: {
