@@ -13,16 +13,16 @@ function resolveApiUrl(): string {
       process.env.NODE_ENV === 'development' &&
       (location?.port === '8081' || location?.port === '8080');
     if (isExpoDevServer && location?.hostname) {
-      return `http://${location.hostname}:3000`;
+      return `http://${location.hostname}:3001`;
     }
     return '';
   }
   const hostUri = Constants.expoConfig?.hostUri;
   const host = hostUri?.split(':')[0];
   if (host) {
-    return `http://${host}:3000`;
+    return `http://${host}:3001`;
   }
-  return 'http://localhost:3000';
+  return 'http://localhost:3001';
 }
 
 export const API_URL = resolveApiUrl();
