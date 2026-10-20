@@ -1,16 +1,22 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { AuthProvider } from '@/lib/auth-context';
 import { configureNotificationHandler } from '@/lib/push';
 
-// Les notifications push s'affichent aussi quand l'app est au premier plan.
-configureNotificationHandler();
-
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+
+  // Configuré après le montage : charger expo-notifications pendant
+  // l'évaluation du bundle casse le démarrage (globalThis.expo pas encore
+  // installé par le runtime natif → « runtime not ready »).
+  useEffect(() => {
+    configureNotificationHandler();
+  }, []);
+
   return (
     <AuthProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>

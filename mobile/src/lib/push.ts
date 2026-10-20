@@ -19,6 +19,12 @@ let notificationsModule: NotificationsModule | null | undefined;
 
 function getNotifications(): NotificationsModule | null {
   if (notificationsModule === undefined) {
+    // Le runtime natif Expo installe `globalThis.expo` au démarrage. Tant
+    // qu'il n'est pas là, exiger expo-notifications lève « Cannot read
+    // property 'EventEmitter' of undefined » : on retente plus tard.
+    if (!(globalThis as { expo?: unknown }).expo) {
+      return null;
+    }
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       notificationsModule = require('expo-notifications') as NotificationsModule;
