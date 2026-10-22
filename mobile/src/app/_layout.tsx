@@ -1,11 +1,14 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
+import { drain } from '@/lib/outbox';
 import { configureNotificationHandler, subscribeToNotificationOpens } from '@/lib/push';
+import { runSync, startReliability } from '@/lib/sync';
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -23,6 +26,7 @@ export default function RootLayout() {
         <StatusBar style="auto" />
         <RootNavigator />
         <NotificationRouter />
+        <ReliabilityLoop />
       </ThemeProvider>
     </AuthProvider>
   );
@@ -67,6 +71,38 @@ function NotificationRouter() {
     pendingRef.current = null;
     router.push({ pathname: '/chat/[id]', params: { id: pending } });
   }, [loading, token]);
+
+  return null;
+}
+
+/**
+ * Rien d'affiché ici : c'est la boucle de fiabilité. Au retour du réseau, elle
+ * récupère ce qui est arrivé pendant l'absence et relance les messages qui
+ * attendaient d'être envoyés. Le retour d'application fait la même chose, sans
+ * attendre une nouvelle connexion.
+ */
+function ReliabilityLoop() {
+  const { token, user, loading } = useAuth();
+
+  useEffect(() => {
+    if (loading || !token || !user) {
+      return;
+    }
+    return startReliability(token, user.id);
+  }, [loading, token, user]);
+
+  useEffect(() => {
+    if (loading || !token || !user) {
+      return;
+    }
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void runSync(token, user.id);
+        void drain(token);
+      }
+    });
+    return () => subscription.remove();
+  }, [loading, token, user]);
 
   return null;
 }

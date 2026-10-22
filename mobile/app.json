@@ -57,7 +57,15 @@
           "barcodeScannerEnabled": false
         }
       ],
-      "./plugins/withMessagingNotifications"
+      "./plugins/withMessagingNotifications",
+      "expo-sqlite",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "MboloChat utilise le micro pour enregistrer les messages vocaux que tu envoies."
+        }
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,

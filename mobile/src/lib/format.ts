@@ -1,4 +1,4 @@
-import type { ConversationSummary } from './types';
+import type { ConversationSummary, MessageReceipt } from './types';
 
 export function conversationTitle(conversation: ConversationSummary, currentUserId: string): string {
   if (conversation.name) {
@@ -110,6 +110,33 @@ export function isReadByOthers(
   );
 }
 
+/** État de la coche d'un message que j'ai envoyé. */
+export type TickState = 'pending' | 'failed' | 'sent' | 'delivered' | 'read';
+
+/**
+ * Coche d'un de mes messages, d'après les accusés réellement reçus du serveur.
+ *
+ * `receipts` ne contient que ceux des autres membres. Rien n'est revenu : le
+ * message est seulement parti — pas de supposition sur les messages antérieurs à
+ * l'arrivée des accusés de réception. Tous l'ont reçu : double coche grise. Tous
+ * l'ont lu : double coche bleue. Dans un groupe, on reste gris tant qu'un seul
+ * n'a pas lu, comme WhatsApp.
+ */
+export function tickState(receipts: MessageReceipt[]): TickState {
+  if (receipts.length === 0) {
+    return 'sent';
+  }
+  const delivered = receipts.filter((receipt) => receipt.deliveredAt !== null).length;
+  const read = receipts.filter((receipt) => receipt.readAt !== null).length;
+  if (read === receipts.length) {
+    return 'read';
+  }
+  if (delivered > 0) {
+    return 'delivered';
+  }
+  return 'sent';
+}
+
 export interface ConversationPreview {
   /** Texte affiché sous le titre de la discussion. */
   text: string;
@@ -131,13 +158,24 @@ export function conversationPreview(
 
   const mine = last.sender.id === currentUserId;
   const isGroup = conversation.type === 'GROUP';
+  const body = last.deleted
+    ? 'Message supprimé'
+    : last.attachment
+    ? last.content
+      ? `${last.attachment.type === 'IMAGE' ? '📷' : '🎤'} ${last.content}`
+      : last.attachment.type === 'AUDIO'
+        ? '🎤 Message vocal'
+        : last.attachment.type === 'IMAGE'
+          ? '📷 Photo'
+          : '📎 Pièce jointe'
+    : last.content;
   if (mine) {
     const read = isReadByOthers(conversation, currentUserId, last.createdAt);
     const tick = read ? '✓✓' : '✓';
-    return { text: `${isGroup ? `${tick} Vous : ` : `${tick} `}${last.content}`, mine, read };
+    return { text: `${isGroup ? `${tick} Vous : ` : `${tick} `}${body}`, mine, read };
   }
   return {
-    text: isGroup ? `${last.sender.displayName} : ${last.content}` : last.content,
+    text: isGroup ? `${last.sender.displayName} : ${body}` : body,
     mine,
     read: false,
   };

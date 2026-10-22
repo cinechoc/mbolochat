@@ -21,7 +21,8 @@ import {
   conversationTitle,
   type ConversationFilter,
 } from '@/lib/format';
-import { connectSocket } from '@/lib/socket';
+import { connectSocket, onConnection } from '@/lib/socket';
+import { onMissedMessages } from '@/lib/sync';
 import type { ConversationSummary, Message } from '@/lib/types';
 
 type ListRow =
@@ -215,16 +216,50 @@ export default function ChatsScreen() {
       );
     };
 
+    /**
+     * Un message retiré change l'aperçu de la discussion — et parfois même son
+     * dernier message. Le plus juste reste de le redemander au serveur.
+     */
+    const onDeleted = (payload: { conversationId?: string }) => {
+      if (payload?.conversationId) {
+        void refresh();
+      }
+    };
+
     socket.on('message:new', onMessage);
     socket.on('typing', onTyping);
     socket.on('read', onRead);
+    socket.on('message:deleted', onDeleted);
 
     return () => {
       socket.off('message:new', onMessage);
       socket.off('typing', onTyping);
       socket.off('read', onRead);
+      socket.off('message:deleted', onDeleted);
     };
   }, [token, user?.id, refresh]);
+
+  /**
+   * Le rattrapage et le retour de connexion changent ce qui est lu, reçu et en
+   * attente : la liste relit, sinon les badges resteraient faux après une coupure.
+   */
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    const offMissed = onMissedMessages(() => {
+      void refresh();
+    });
+    const offConnection = onConnection((connected) => {
+      if (connected) {
+        void refresh();
+      }
+    });
+    return () => {
+      offMissed();
+      offConnection();
+    };
+  }, [token, refresh]);
 
   const filteredRows = useMemo<ListRow[]>(() => {
     const needle = query.trim().toLowerCase();

@@ -116,6 +116,8 @@ export default function ConversationSettingsScreen() {
   }
 
   const isGroup = conversation?.type === 'GROUP';
+  /** Seuls les administrateurs pilotent le groupe ; un membre peut juste partir. */
+  const isAdmin = conversation?.myRole === 'admin';
 
   return (
     <ThemedView style={styles.container}>
@@ -125,7 +127,7 @@ export default function ConversationSettingsScreen() {
         </ThemedText>
       ) : null}
 
-      {isGroup ? (
+      {isGroup && isAdmin ? (
         <ThemedView style={styles.section}>
           <ThemedText type="smallBold">Nom du groupe</ThemedText>
           <ThemedView style={styles.row}>
@@ -170,12 +172,23 @@ export default function ConversationSettingsScreen() {
             <ThemedView style={styles.memberRow}>
               <Avatar name={m.displayName} uri={m.avatarUrl} size={40} />
               <ThemedView style={styles.memberBody}>
-                <ThemedText style={styles.memberName}>{m.displayName}</ThemedText>
+                <ThemedText style={styles.memberName}>
+                  {m.displayName}
+                  {m.role === 'admin' ? (
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {'  '}· admin
+                    </ThemedText>
+                  ) : null}
+                </ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
                   @{m.username}
                 </ThemedText>
               </ThemedView>
-              {m.id !== user.id ? (
+              {m.id === user.id ? (
+                <Pressable onPress={() => removeMember(m.id)}>
+                  <ThemedText style={styles.danger}>Quitter</ThemedText>
+                </Pressable>
+              ) : isAdmin ? (
                 <Pressable onPress={() => removeMember(m.id)}>
                   <ThemedText style={styles.danger}>Retirer</ThemedText>
                 </Pressable>
@@ -185,37 +198,39 @@ export default function ConversationSettingsScreen() {
         />
       </ThemedView>
 
-      <ThemedView style={styles.section}>
-        <ThemedText type="smallBold">Ajouter un membre</ThemedText>
-        <TextField
-          style={styles.search}
-          placeholder="Rechercher..."
-          value={query}
-          onChangeText={setQuery}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        {searching ? <ActivityIndicator /> : null}
-        <FlatList
-          data={results}
-          keyExtractor={(u) => u.id}
-          renderItem={({ item: u }) => (
-            <Pressable
-              onPress={() => addMember(u)}
-              disabled={adding !== null}
-              style={({ pressed }) => [styles.resultRow, pressed && { opacity: 0.6 }]}>
-              <Avatar name={u.displayName} uri={u.avatarUrl} size={36} />
-              <ThemedView style={styles.memberBody}>
-                <ThemedText>{u.displayName}</ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  @{u.username}
-                </ThemedText>
-              </ThemedView>
-              {adding === u.id ? <ActivityIndicator /> : <ThemedText style={{ color: accentColor }}>+</ThemedText>}
-            </Pressable>
-          )}
-        />
-      </ThemedView>
+      {isAdmin ? (
+        <ThemedView style={styles.section}>
+          <ThemedText type="smallBold">Ajouter un membre</ThemedText>
+          <TextField
+            style={styles.search}
+            placeholder="Rechercher..."
+            value={query}
+            onChangeText={setQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {searching ? <ActivityIndicator /> : null}
+          <FlatList
+            data={results}
+            keyExtractor={(u) => u.id}
+            renderItem={({ item: u }) => (
+              <Pressable
+                onPress={() => addMember(u)}
+                disabled={adding !== null}
+                style={({ pressed }) => [styles.resultRow, pressed && { opacity: 0.6 }]}>
+                <Avatar name={u.displayName} uri={u.avatarUrl} size={36} />
+                <ThemedView style={styles.memberBody}>
+                  <ThemedText>{u.displayName}</ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    @{u.username}
+                  </ThemedText>
+                </ThemedView>
+                {adding === u.id ? <ActivityIndicator /> : <ThemedText style={{ color: accentColor }}>+</ThemedText>}
+              </Pressable>
+            )}
+          />
+        </ThemedView>
+      ) : null}
 
       <ThemedView style={styles.footer}>
         <Button title="Fermer" variant="secondary" onPress={() => router.back()} />

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { cache } from './cache';
+import { resetLocalStore } from './store';
 import { syncPushToken } from './push';
 import { disconnectSocket } from './socket';
 import {
@@ -103,6 +104,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         cache.flush();
         void cache.clear();
+        // La file d'envoi et le curseur appartiennent à ce compte : ils ne
+        // doivent pas passer sur le suivant.
+        void resetLocalStore();
       },
     }),
     [token, user, loading],

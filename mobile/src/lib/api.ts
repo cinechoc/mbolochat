@@ -1,3 +1,5 @@
+import { File } from 'expo-file-system';
+
 import { API_URL } from './config';
 import type {
   AuthResult,
@@ -5,7 +7,9 @@ import type {
   ForgotPasswordResult,
   Gender,
   Message,
+  MessageReceipt,
   ResetPasswordResult,
+  UploadResult,
   User,
   UserProfile,
 } from './types';
@@ -172,6 +176,64 @@ export const api = {
     return request<User>('/users/me/avatar', { method: 'POST', token, body: { data, mimeType } });
   },
 
+  /**
+   * Importe une image (multipart) et renvoie son identifiant, à joindre à un
+   * message. Le corps est un FormData : React Native gère seul le boundary,
+   * il ne faut donc pas fixer Content-Type.
+   */
+  /** Import d'un média — photo ou message vocal — avant son envoi. */
+  async uploadMedia(
+    token: string,
+    asset: {
+      uri: string;
+      mimeType?: string | null;
+      fileName?: string | null;
+      width?: number;
+      height?: number;
+      durationMs?: number;
+    },
+  ): Promise<UploadResult> {
+    const post = (accessToken: string) => {
+      const form = new FormData();
+      // `fetch` d'Expo (implémentation WinterCG) n'accepte pas l'objet
+      // propriétaire de React Native ({ uri, name, type }) : il faut un Blob.
+      // `File` d'expo-file-system en implémente l'interface et lit le fichier
+      // à la demande.
+      form.append('file', new File(asset.uri) as unknown as Blob);
+      if (asset.mimeType) form.append('mime', asset.mimeType);
+      if (asset.width) form.append('width', String(Math.round(asset.width)));
+      if (asset.height) form.append('height', String(Math.round(asset.height)));
+      if (asset.durationMs) form.append('duration', String(Math.round(asset.durationMs)));
+      return fetch(`${API_URL}/uploads`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: form,
+      });
+    };
+
+    let response = await post(token).catch((error: unknown) => {
+      console.warn('UPLOAD_FAIL', error);
+      throw new ApiError(0, "Impossible d'envoyer le fichier. Vérifie ta connexion.");
+    });
+    if (response.status === 401) {
+      const fresh = await refreshAccessToken();
+      response = await post(fresh);
+    }
+    if (!response.ok) {
+      let message = `Envoi impossible (${response.status})`;
+      try {
+        const data = (await response.json()) as { message?: string | string[] };
+        if (data.message) {
+          message = Array.isArray(data.message) ? data.message.join(', ') : data.message;
+        }
+      } catch {
+        // garde le message par défaut
+      }
+      throw new ApiError(response.status, message);
+    }
+    return (await response.json()) as UploadResult;
+  },
+
   forgotPassword(body: { emailOrUsername: string }) {
     return request<ForgotPasswordResult>('/auth/forgot-password', { method: 'POST', body });
   },
@@ -208,12 +270,31 @@ export const api = {
     return request<void>(`/conversations/${id}/members/${userId}`, { method: 'DELETE', token });
   },
 
-  listMessages(token: string, conversationId: string, before?: string, limit?: number) {
+  listMessages(
+    token: string,
+    conversationId: string,
+    options: { before?: string; after?: string; limit?: number } = {},
+  ) {
     const params = new URLSearchParams();
-    if (before) params.set('before', before);
-    if (limit) params.set('limit', String(limit));
+    if (options.before) params.set('before', options.before);
+    if (options.after) params.set('after', options.after);
+    if (options.limit) params.set('limit', String(options.limit));
     const query = params.toString() ? `?${params.toString()}` : '';
     return request<Message[]>(`/conversations/${conversationId}/messages${query}`, { token });
+  },
+
+  /**
+   * Tout ce qui est arrivé depuis un curseur, toutes discussions confondues.
+   * C'est ce qui rattrape une coupure réseau. Le message servant de curseur peut
+   * être renvoyé : les identifiants sont à comparer.
+   */
+  syncSince(token: string, since: string) {
+    return request<Message[]>(`/conversations/sync?since=${encodeURIComponent(since)}`, { token });
+  },
+
+  /** Accusés de réception des messages que j'ai envoyés (coches reçue / lue). */
+  listReceipts(token: string, conversationId: string) {
+    return request<MessageReceipt[]>(`/conversations/${conversationId}/receipts`, { token });
   },
 
   markRead(token: string, conversationId: string) {
