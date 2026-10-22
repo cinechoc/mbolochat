@@ -9,6 +9,7 @@ import {
   users,
 } from '../db/schema.js';
 import type { MessageDto } from '../conversations/conversations.service.js';
+import { MediaService } from '../media/media.service.js';
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 /** L'API Expo accepte au maximum 100 messages par requête. */
@@ -79,7 +80,10 @@ function previewOf(content: string): string {
 export class PushService {
   private readonly logger = new Logger(PushService.name);
 
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly media: MediaService,
+  ) {}
 
   async notifyNewMessage(message: MessageDto, activeUserIds: string[] = []): Promise<void> {
     try {
@@ -146,10 +150,19 @@ export class PushService {
         conversation.type === 'GROUP'
           ? (conversation.name?.trim() || 'Groupe')
           : message.sender.displayName;
-      const text = previewOf(message.content);
+      // Une pièce jointe sans légende s'annonce comme sur WhatsApp.
+      const text = message.attachment
+        ? message.content
+          ? previewOf(message.content)
+          : message.attachment.type === 'AUDIO'
+            ? '🎤 Message vocal'
+            : '📷 Photo'
+        : previewOf(message.content);
       const body = conversation.type === 'GROUP' ? `${message.sender.displayName} : ${text}` : text;
 
-      const avatarPath = message.sender.avatarUrl;
+      // L'avatar part en URL absolue dans la notification : il doit être signé
+      // ici aussi, la notification ne passe pas par la réponse HTTP.
+      const avatarPath = this.media.signOrNull(message.sender.avatarUrl);
       const groupName = conversation.type === 'GROUP' ? title : '';
 
       const payload: ExpoPushMessage[] = tokens.map(({ token, baseUrl }) => {

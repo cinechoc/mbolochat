@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   DefaultValuePipe,
@@ -39,6 +40,23 @@ export class ConversationsController {
   @Get('hidden')
   listHidden(@CurrentUser() current: JwtPayload) {
     return this.conversationsService.listHiddenForUser(current.sub);
+  }
+
+  /**
+   * Rattrapage : tout ce qui est arrivé depuis un curseur, toutes discussions
+   * confondues. C'est ce que l'app appelle après une coupure réseau.
+   */
+  @Get('sync')
+  sync(
+    @CurrentUser() current: JwtPayload,
+    @Query('since') since: string,
+    @Query('limit', new DefaultValuePipe(300), ParseIntPipe) limit: number,
+  ) {
+    const sinceDate = since ? new Date(since) : undefined;
+    if (!sinceDate || Number.isNaN(sinceDate.getTime())) {
+      throw new BadRequestException('since must be an ISO timestamp');
+    }
+    return this.conversationsService.syncSince(current.sub, sinceDate, limit);
   }
 
   @Get(':id')
@@ -91,13 +109,22 @@ export class ConversationsController {
     @CurrentUser() current: JwtPayload,
     @Param('id') id: string,
     @Query('before') before?: string,
+    @Query('after') after?: string,
     @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit?: number,
   ) {
     const beforeDate = before ? new Date(before) : undefined;
+    const afterDate = after ? new Date(after) : undefined;
     return this.conversationsService.listMessages(id, current.sub, {
       before: beforeDate && !Number.isNaN(beforeDate.getTime()) ? beforeDate : undefined,
+      after: afterDate && !Number.isNaN(afterDate.getTime()) ? afterDate : undefined,
       limit,
     });
+  }
+
+  /** Accusés de réception des messages que j'ai envoyés (coches reçue/lue). */
+  @Get(':id/receipts')
+  receipts(@CurrentUser() current: JwtPayload, @Param('id') id: string) {
+    return this.conversationsService.listReceipts(id, current.sub);
   }
 
   @Post('read-all')

@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 
-const API = process.env.API_URL ?? 'http://localhost:3000';
+const API = process.env.API_URL ?? 'http://localhost:3001';
 const suffix = Date.now();
 
 async function api(path, options = {}) {
