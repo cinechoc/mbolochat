@@ -3,27 +3,27 @@ import { IsDateString, IsEmail, IsIn, IsString, MaxLength, MinLength } from 'cla
 export type Gender = 'FEMALE' | 'MALE' | 'CUSTOM';
 
 export class RegisterDto {
-  @IsString()
-  @MinLength(1)
-  @MaxLength(24)
+  @IsString({ message: 'Le prénom doit être un texte.' })
+  @MinLength(1, { message: 'Le prénom est requis.' })
+  @MaxLength(24, { message: 'Le prénom ne peut pas dépasser 24 caractères.' })
   firstName: string;
 
-  @IsString()
-  @MinLength(1)
-  @MaxLength(24)
+  @IsString({ message: 'Le nom de famille doit être un texte.' })
+  @MinLength(1, { message: 'Le nom de famille est requis.' })
+  @MaxLength(24, { message: 'Le nom de famille ne peut pas dépasser 24 caractères.' })
   lastName: string;
 
-  @IsEmail()
+  @IsEmail({}, { message: 'L’adresse e-mail n’est pas valide.' })
   email: string;
 
-  @IsString()
-  @MinLength(8)
-  @MaxLength(72)
+  @IsString({ message: 'Le mot de passe doit être un texte.' })
+  @MinLength(8, { message: 'Le mot de passe doit contenir au moins 8 caractères.' })
+  @MaxLength(72, { message: 'Le mot de passe ne peut pas dépasser 72 caractères.' })
   password: string;
 
-  @IsDateString({}, { message: 'birthday must be a valid ISO date (YYYY-MM-DD)' })
+  @IsDateString({}, { message: 'La date de naissance doit être une date valide.' })
   birthday: string;
 
-  @IsIn(['FEMALE', 'MALE', 'CUSTOM'], { message: 'gender must be FEMALE, MALE or CUSTOM' })
+  @IsIn(['FEMALE', 'MALE', 'CUSTOM'], { message: 'Choisis un genre valide.' })
   gender: Gender;
 }

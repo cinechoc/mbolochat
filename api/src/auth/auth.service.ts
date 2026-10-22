@@ -67,15 +67,17 @@ export class AuthService {
   async register(dto: RegisterDto): Promise<AuthResult> {
     const existing = await this.usersService.findByEmailOrUsername(dto.email);
     if (existing) {
-      throw new ConflictException('Email already in use');
+      throw new ConflictException('Cette adresse e-mail est déjà utilisée.');
     }
 
     const birthday = new Date(dto.birthday);
     if (Number.isNaN(birthday.getTime())) {
-      throw new BadRequestException('Invalid birthday');
+      throw new BadRequestException('La date de naissance n’est pas valide.');
     }
     if (this.ageFrom(birthday) < MINIMUM_AGE) {
-      throw new BadRequestException(`You must be at least ${MINIMUM_AGE} years old`);
+      throw new BadRequestException(
+        `Tu dois avoir au moins ${MINIMUM_AGE} ans pour créer un compte.`,
+      );
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -96,7 +98,9 @@ export class AuthService {
   async login(dto: LoginDto): Promise<AuthResult> {
     const user = await this.usersService.findByEmailOrUsername(dto.emailOrUsername);
     if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException(
+        'Email (ou nom d’utilisateur) ou mot de passe incorrect.',
+      );
     }
     return this.buildAuthResult(user.id, user.username, toPublicUser(user));
   }
@@ -184,7 +188,9 @@ export class AuthService {
         return username;
       }
     }
-    throw new ConflictException('Could not allocate a unique username, please try again');
+    throw new ConflictException(
+      'Impossible de générer un nom d’utilisateur unique. Réessaie.',
+    );
   }
 
   private ageFrom(birthday: Date): number {

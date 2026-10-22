@@ -29,14 +29,23 @@ export default function LoginScreen() {
   }
 
   const onSubmit = async () => {
-    if (!identifier.trim() || !password) {
+    const cleanIdentifier = identifier.trim();
+    if (!cleanIdentifier || !password) {
       setError('Renseigne ton email (ou nom d’utilisateur) et ton mot de passe.');
+      return;
+    }
+    if (cleanIdentifier.length < 3) {
+      setError('L’email ou le nom d’utilisateur doit contenir au moins 3 caractères.');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Le mot de passe doit contenir au moins 8 caractères.');
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
-      const result = await api.login({ emailOrUsername: identifier.trim(), password });
+      const result = await api.login({ emailOrUsername: cleanIdentifier, password });
       await signIn(result.accessToken, result.refreshToken, result.user);
       router.replace('/chats');
     } catch (err) {
