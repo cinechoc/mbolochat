@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -1180,16 +1181,25 @@ export default function ChatScreen() {
     [token, id],
   );
 
+  const startingRecordingRef = useRef(false);
   const startRecording = useCallback(async () => {
-    if (!voice) {
+    if (!voice || startingRecordingRef.current) {
       return;
     }
+    startingRecordingRef.current = true;
     setError(null);
-    if (!(await voice.requestMicrophone())) {
-      setError('Autorise le micro pour enregistrer un message vocal.');
-      return;
+    // Le champ disparaît au profit du recorder : on ferme le clavier tout de
+    // suite, sinon il reste au-dessus de l'interface d'enregistrement.
+    Keyboard.dismiss();
+    try {
+      if (!(await voice.requestMicrophone())) {
+        setError('Autorise le micro pour enregistrer un message vocal.');
+        return;
+      }
+      setRecording(true);
+    } finally {
+      startingRecordingRef.current = false;
     }
-    setRecording(true);
   }, [voice]);
 
   if (!token || !user) {
@@ -1370,6 +1380,7 @@ export default function ChatScreen() {
             />
             {voice && input.trim().length === 0 ? (
               <Pressable
+                onPressIn={() => void startRecording()}
                 onPress={() => void startRecording()}
                 style={({ pressed }) => [styles.sendButton, pressed && styles.sendDisabled]}
                 accessibilityRole="button"
