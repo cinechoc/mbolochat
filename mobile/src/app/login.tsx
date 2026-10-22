@@ -69,7 +69,9 @@ export default function LoginScreen() {
             <Animated.View entering={FadeInUp.duration(520)} style={styles.brandBlock}>
               <ThemedView style={styles.brandRow}>
                 <LogoMark size={48} />
-                <ThemedText type="subtitle">MboloChat</ThemedText>
+                <ThemedText type="subtitle" style={{ color: accentColor }}>
+                  MboloChat
+                </ThemedText>
               </ThemedView>
               <ThemedText themeColor="textSecondary" style={styles.tagline}>
                 Messagerie simple, rapide, en temps réel.

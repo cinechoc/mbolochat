@@ -155,7 +155,9 @@ export default function RegisterScreen() {
             <Animated.View entering={FadeInUp.duration(520)} style={styles.brandBlock}>
               <ThemedView style={styles.brandRow}>
                 <LogoMark size={40} />
-                <ThemedText type="subtitle">MboloChat</ThemedText>
+                <ThemedText type="subtitle" style={{ color: accentColor }}>
+                  MboloChat
+                </ThemedText>
               </ThemedView>
               <ThemedText type="small" themeColor="textSecondary">
                 Créer un compte — c&apos;est rapide et facile.

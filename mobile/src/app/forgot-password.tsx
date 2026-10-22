@@ -95,7 +95,9 @@ export default function ForgotPasswordScreen() {
               <ThemedView style={styles.block}>
                 <ThemedView style={styles.brandRow}>
                   <LogoMark size={40} />
-                  <ThemedText type="subtitle">MboloChat</ThemedText>
+                  <ThemedText type="subtitle" style={{ color: accentColor }}>
+                    MboloChat
+                  </ThemedText>
                 </ThemedView>
                 <ThemedText themeColor="textSecondary" style={styles.hint}>
                   Indique ton email ou ton nom d’utilisateur pour recevoir un code de
