@@ -6,6 +6,7 @@ import { syncPushToken } from './push';
 import { disconnectSocket } from './socket';
 import {
   clearStoredTokens,
+  getCachedAccessToken,
   getStoredAccessToken,
   getStoredRefreshToken,
   storeTokens,
@@ -48,7 +49,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (stored) {
           const me = await api.me(stored);
           if (!cancelled) {
-            setToken(stored);
+            // `me` a pu rafraîchir le jeton : l'état doit garder le plus récent.
+            setToken(getCachedAccessToken() ?? stored);
             setUser(me);
           }
         }
