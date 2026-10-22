@@ -159,25 +159,47 @@ export class UsersService {
     return Boolean(row);
   }
 
-  /** Enregistre (ou met à jour) le jeton push d'un appareil. */
+  /**
+   * Enregistre (ou met à jour) le jeton push d'un appareil, pour ce compte
+   * uniquement. La mise à jour ne touche jamais `userId` : soumettre le jeton de
+   * quelqu'un d'autre ne peut pas vous l'attribuer.
+   */
   async registerPushToken(
     userId: string,
     token: string,
     platform: string,
     baseUrl?: string,
   ): Promise<void> {
-    const normalizedBaseUrl = baseUrl?.trim().replace(/\/+$/, '') || null;
+    const normalizedBaseUrl = this.normalizeBaseUrl(baseUrl);
     await this.db
       .insert(pushTokens)
       .values({ userId, token, platform, baseUrl: normalizedBaseUrl })
       .onConflictDoUpdate({
-        target: pushTokens.token,
-        set: { userId, platform, baseUrl: normalizedBaseUrl },
+        target: [pushTokens.userId, pushTokens.token],
+        set: { platform, baseUrl: normalizedBaseUrl },
       });
   }
 
-  async removePushToken(token: string): Promise<void> {
-    await this.db.delete(pushTokens).where(eq(pushTokens.token, token));
+  /** Retire le jeton de CE compte uniquement. */
+  async removePushToken(userId: string, token: string): Promise<void> {
+    await this.db
+      .delete(pushTokens)
+      .where(and(eq(pushTokens.userId, userId), eq(pushTokens.token, token)));
+  }
+
+  /** Seule une adresse HTTP(s) de l'API a du sens dans une notification. */
+  private normalizeBaseUrl(baseUrl: string | undefined): string | null {
+    const trimmed = baseUrl?.trim().replace(/\/+$/, '') ?? '';
+    if (!trimmed) {
+      return null;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      return null;
+    }
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? trimmed : null;
   }
 
   /** Jetons push d'un utilisateur (pour l'envoi de notifications). */

@@ -78,6 +78,48 @@
       "when": 1792501863407,
       "tag": "0010_easy_red_hulk",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792507445614,
+      "tag": "0011_message_attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792518564458,
+      "tag": "0012_receipts_and_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792531567812,
+      "tag": "0013_push_token_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792531900510,
+      "tag": "0014_group_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1792536110149,
+      "tag": "0015_message_moderation",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1792538104808,
+      "tag": "0016_voice_notes",
+      "breakpoints": true
     }
   ]
 }

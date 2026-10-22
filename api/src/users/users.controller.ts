@@ -90,7 +90,7 @@ export class UsersController {
   async removePushToken(@CurrentUser() current: JwtPayload, @Body() body: { token?: string }) {
     const token = body?.token?.trim();
     if (token) {
-      await this.usersService.removePushToken(token);
+      await this.usersService.removePushToken(current.sub, token);
     }
     return { registered: false };
   }

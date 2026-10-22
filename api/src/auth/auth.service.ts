@@ -36,6 +36,16 @@ const MAX_RESET_ATTEMPTS = 5;
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const GENERIC_RESET_MESSAGE = 'Si ce compte existe, un code de réinitialisation a été envoyé.';
 
+/**
+ * Le code de réinitialisation n'est renvoyé au client (et écrit dans les journaux)
+ * qu'en développement ou en test. `NODE_ENV` non défini n'ouvre PAS cette porte :
+ * une installation qui oublie de la régler doit être sûre par défaut.
+ */
+function exposesResetCode(): boolean {
+  const env = process.env.NODE_ENV;
+  return env === 'development' || env === 'test';
+}
+
 function usernamePart(value: string): string {
   return value
     .normalize('NFD')
@@ -102,16 +112,17 @@ export class AuthService {
     const code = randomInt(100000, 1000000).toString();
     await this.db.insert(passwordResetTokens).values({
       userId: user.id,
-      codeHash: this.hashResetCode(user.id, code),
+      codeHash: await this.hashResetCode(code),
       expiresAt: new Date(Date.now() + RESET_CODE_TTL_MS),
     });
 
+    if (!exposesResetCode()) {
+      return { message: GENERIC_RESET_MESSAGE };
+    }
+    // Hors production, le code est écrit et renvoyé : c'est ce qui tient lieu
+    // d'envoi de mail tant qu'il n'existe pas.
     this.logger.log(`Code de réinitialisation pour ${user.username} : ${code} (valable 15 min)`);
-
-    return {
-      message: GENERIC_RESET_MESSAGE,
-      ...(process.env.NODE_ENV === 'production' ? {} : { devCode: code }),
-    };
+    return { message: GENERIC_RESET_MESSAGE, devCode: code };
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
@@ -132,7 +143,7 @@ export class AuthService {
       await this.db.delete(passwordResetTokens).where(eq(passwordResetTokens.id, token.id));
       throw new BadRequestException('Trop de tentatives. Demande un nouveau code.');
     }
-    if (token.codeHash !== this.hashResetCode(user.id, dto.code)) {
+    if (!(await bcrypt.compare(dto.code, token.codeHash))) {
       await this.db
         .update(passwordResetTokens)
         .set({ attempts: token.attempts + 1 })
@@ -147,8 +158,13 @@ export class AuthService {
     return { message: 'Mot de passe modifié. Tu peux te connecter.' };
   }
 
-  private hashResetCode(userId: string, code: string): string {
-    return createHash('sha256').update(`${userId}:${code}`).digest('hex');
+  /**
+   * Le code n'est qu'un nombre à 6 chiffres : un SHA-256 non salé se teste par
+   * force brute en une fraction de seconde sur une base volée. bcrypt rend chaque
+   * hypothèse coûteuse, et le sel est porté par l'empreinte elle-même.
+   */
+  private async hashResetCode(code: string): Promise<string> {
+    return bcrypt.hash(code, 10);
   }
 
   private async generateUsername(firstName: string, lastName: string): Promise<string> {

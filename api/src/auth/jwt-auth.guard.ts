@@ -19,7 +19,9 @@ export class JwtAuthGuard implements CanActivate {
     }
     try {
       const payload = await this.jwtService.verifyAsync<JwtPayload>(token);
-      if (payload.type && payload.type !== 'access') {
+      // Un jeton sans type n'est pas un jeton d'accès : sans ce contrôle, un
+      // jeton fabriqué pour un autre usage serait accepté ici.
+      if (payload.type !== 'access') {
         throw new UnauthorizedException('Invalid token type');
       }
       request.user = payload;

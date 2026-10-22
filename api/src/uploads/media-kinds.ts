@@ -1,0 +1,81 @@
+import { extname } from 'node:path';
+import type { MessageAttachmentType } from '../db/schema.js';
+
+/**
+ * Ce que l'application sait importer et relire.
+ *
+ * Une seule table pour l'import et la diffusion : un fichier accepté à l'entrée
+ * doit nécessairement avoir un nom de contenu à la sortie, sinon il serait
+ * stocké sans jamais pouvoir être rejoué.
+ */
+export interface MediaKind {
+  /** Extension canonique, celle qui est écrite sur le disque. */
+  extension: string;
+  mime: string;
+  type: MessageAttachmentType;
+  /** Ce qui accompagne le fichier : dimensions pour l'image, durée pour la voix. */
+  measures: 'image' | 'duration';
+}
+
+const KINDS: MediaKind[] = [
+  { extension: '.jpg', mime: 'image/jpeg', type: 'IMAGE', measures: 'image' },
+  { extension: '.png', mime: 'image/png', type: 'IMAGE', measures: 'image' },
+  { extension: '.webp', mime: 'image/webp', type: 'IMAGE', measures: 'image' },
+  { extension: '.gif', mime: 'image/gif', type: 'IMAGE', measures: 'image' },
+  { extension: '.heic', mime: 'image/heic', type: 'IMAGE', measures: 'image' },
+  { extension: '.heif', mime: 'image/heif', type: 'IMAGE', measures: 'image' },
+  { extension: '.m4a', mime: 'audio/mp4', type: 'AUDIO', measures: 'duration' },
+  { extension: '.aac', mime: 'audio/aac', type: 'AUDIO', measures: 'duration' },
+  { extension: '.mp3', mime: 'audio/mpeg', type: 'AUDIO', measures: 'duration' },
+  { extension: '.ogg', mime: 'audio/ogg', type: 'AUDIO', measures: 'duration' },
+  { extension: '.opus', mime: 'audio/opus', type: 'AUDIO', measures: 'duration' },
+  { extension: '.webm', mime: 'audio/webm', type: 'AUDIO', measures: 'duration' },
+  { extension: '.wav', mime: 'audio/wav', type: 'AUDIO', measures: 'duration' },
+];
+
+const BY_EXTENSION = new Map(KINDS.map((kind) => [kind.extension, kind]));
+const BY_MIME = new Map(KINDS.map((kind) => [kind.mime, kind]));
+
+/** Les noms que les appareils et les navigateurs renvoient pour ces mêmes formats. */
+const MIME_ALIASES: Record<string, string> = {
+  'image/jpg': '.jpg',
+  'audio/m4a': '.m4a',
+  'audio/x-m4a': '.m4a',
+  'audio/mp4a-latm': '.m4a',
+  'audio/aacp': '.aac',
+  'audio/x-wav': '.wav',
+  'audio/wave': '.wav',
+  'audio/x-pn-realaudio': '.wav',
+  'audio/x-mpeg-3': '.mp3',
+  'audio/x-caf': '.m4a',
+};
+
+export function kindForExtension(extension: string): MediaKind | undefined {
+  return BY_EXTENSION.get(extension.toLowerCase());
+}
+
+/**
+ * À quel format appartient ce fichier ? Le nom et les types déclarés doivent
+ * tomber d'accord : c'est le seul contrôle qui tienne quand l'expéditeur écrit
+ * ce qu'il veut dans l'en-tête de sa requête. Un désaccord est un refus, même
+ * si l'un des deux indices paraît sincère.
+ */
+export function detectKind(
+  originalName: string | undefined,
+  declaredMimes: Array<string | undefined>,
+): MediaKind | null {
+  const fromExtension = BY_EXTENSION.get(extname(originalName ?? '').toLowerCase());
+  let fromMime: MediaKind | undefined;
+  for (const declared of declaredMimes) {
+    const mime = (declared ?? '').split(';')[0].trim().toLowerCase();
+    const resolved = BY_MIME.get(mime) ?? BY_EXTENSION.get(MIME_ALIASES[mime] ?? '');
+    if (!resolved) {
+      continue;
+    }
+    if (fromExtension && resolved.extension !== fromExtension.extension) {
+      return null;
+    }
+    fromMime ??= resolved;
+  }
+  return fromExtension ?? fromMime ?? null;
+}

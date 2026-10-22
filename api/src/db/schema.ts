@@ -1,4 +1,16 @@
-import { boolean, date, integer, pgEnum, pgTable, primaryKey, text, timestamp, index } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  date,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  index,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 
 export const conversationTypeEnum = pgEnum('conversation_type', ['DIRECT', 'GROUP']);
 
@@ -28,6 +40,8 @@ export const conversations = pgTable('conversations', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const conversationRoleEnum = pgEnum('conversation_role', ['admin', 'member']);
+
 export const conversationMembers = pgTable(
   'conversation_members',
   {
@@ -43,6 +57,11 @@ export const conversationMembers = pgTable(
     mutedAt: timestamp('muted_at', { withTimezone: true }),
     /** Discussion masquée : elle n'apparaît plus dans la liste. */
     hidden: boolean('hidden').notNull().default(false),
+    /**
+     * Qui pilote le groupe. Sans rôle, le premier arrivé pouvait renommer la
+     * discussion de tout le monde et en expulser n'importe qui.
+     */
+    role: conversationRoleEnum('role').notNull().default('member'),
   },
   (table) => [primaryKey({ columns: [table.conversationId, table.userId] })],
 );
@@ -62,7 +81,14 @@ export const blocks = pgTable(
   (table) => [primaryKey({ columns: [table.blockerId, table.blockedId] })],
 );
 
-/** Jetons de notification push (Expo Push Service) par appareil. */
+/**
+ * Jetons de notification push (Expo Push Service) par appareil.
+ *
+ * La clé est le couple (compte, appareil) — jamais le jeton seul : un jeton est
+ * une valeur publique une fois qu'un appareil l'a envoyée quelque part, et un
+ * compte ne doit pas pouvoir la rattacher à lui pour détourner les alertes d'un
+ * autre, ni la supprimer pour les faire taire.
+ */
 export const pushTokens = pgTable(
   'push_tokens',
   {
@@ -72,13 +98,55 @@ export const pushTokens = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    token: text('token').notNull().unique(),
+    token: text('token').notNull(),
     platform: text('platform').notNull().default('android'),
     /** Adresse de l'API telle que l'appareil la joint (pour les images). */
     baseUrl: text('base_url'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('push_tokens_user_idx').on(table.userId)],
+  (table) => [
+    index('push_tokens_user_idx').on(table.userId),
+    uniqueIndex('push_tokens_user_token_idx').on(table.userId, table.token),
+  ],
+);
+
+export type MessageAttachmentType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
+
+/** Pièce jointe d'un message (photo pour l'instant, extensible). */
+export interface MessageAttachment {
+  type: MessageAttachmentType;
+  /** Chemin relatif servi par l'API (« /uploads/… »). */
+  url: string;
+  mime: string;
+  size: number;
+  width?: number;
+  height?: number;
+  /** Durée d'un message vocal, en millisecondes. */
+  duration?: number;
+  /** Nom d'origine (fichiers). */
+  name?: string;
+}
+
+/** Fichier importé par un utilisateur, avant (ou après) son envoi. */
+export const uploads = pgTable(
+  'uploads',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    url: text('url').notNull(),
+    mime: text('mime').notNull(),
+    size: integer('size').notNull(),
+    width: integer('width'),
+    height: integer('height'),
+    /** Durée d'un message vocal importé, en millisecondes. */
+    durationMs: integer('duration_ms'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('uploads_user_idx').on(table.userId)],
 );
 
 export const messages = pgTable(
@@ -94,9 +162,74 @@ export const messages = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     content: text('content').notNull(),
+    /** Pièce jointe (photo, vidéo…), null pour un message texte. */
+    attachment: jsonb('attachment').$type<MessageAttachment>(),
+    /**
+     * Identifiant d'envoi généré par l'appareil émetteur. Une reprise après
+     * une coupure renvoie le même message au lieu d'en créer un doublon.
+     */
+    clientId: text('client_id'),
+    /**
+     * Message cité par une « réponse ». Un lien et non une copie : la citation
+     * suit le fil, et l'original garde sa place.
+     */
+    replyToId: text('reply_to_id'),
+    /**
+     * Supprimé pour tous. Le contenu et la pièce jointe sont effacés avec cette
+     * date ; sans elle, un message vide ressemblerait à un message supprimé.
+     */
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('messages_conversation_created_idx').on(table.conversationId, table.createdAt)],
+  (table) => [
+    index('messages_conversation_created_idx').on(table.conversationId, table.createdAt),
+    uniqueIndex('messages_sender_client_idx').on(table.senderId, table.clientId),
+  ],
+);
+
+/**
+ * Accusés de réception, par membre et par message : ce que l'appareil du
+ * destinataire a effectivement reçu (`delivered_at`) et ce qu'il a lu
+ * (`read_at`). C'est ce qui distingue la coche « envoyée », « reçue » et « lue ».
+ */
+export const messageReceipts = pgTable(
+  'message_receipts',
+  {
+    messageId: text('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    readAt: timestamp('read_at', { withTimezone: true }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.userId] }),
+    index('message_receipts_user_idx').on(table.userId),
+  ],
+);
+
+/**
+ * Messages retirés de la vue d'un seul membre (« supprimer pour moi »). La ligne
+ * reste en base : les autres membres continuent de la lire. C'est une liste
+ * d'interdits par compte, pas une suppression.
+ */
+export const messageHides = pgTable(
+  'message_hides',
+  {
+    messageId: text('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.userId] }),
+    index('message_hides_user_idx').on(table.userId),
+  ],
 );
 
 export const passwordResetTokens = pgTable(
@@ -136,6 +269,8 @@ export const refreshTokens = pgTable(
 export type User = typeof users.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
 export type Message = typeof messages.$inferSelect;
+export type MessageReceipt = typeof messageReceipts.$inferSelect;
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type RefreshToken = typeof refreshTokens.$inferSelect;
 export type PushToken = typeof pushTokens.$inferSelect;
+export type Upload = typeof uploads.$inferSelect;
