@@ -1,7 +1,7 @@
 import { Redirect, Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import { Settings } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ProfileAction, ProfileHeader, PhotoGrid } from '@/components/profile-view';
@@ -77,8 +77,12 @@ export default function ProfileScreen() {
           title: profile?.username ?? user.username,
           // Bouton réglages dans la barre de navigation, comme sur Instagram.
           headerRight: () => (
-            <Pressable onPress={() => router.push('/settings')} hitSlop={8}>
-              <MaterialIcons name="settings" size={22} color={theme.text} />
+            <Pressable
+              onPress={() => router.push('/settings')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Paramètres">
+              <Settings size={22} color={theme.text} />
             </Pressable>
           ),
         }}

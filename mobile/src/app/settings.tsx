@@ -1,8 +1,19 @@
 import { Redirect, Stack, useRouter } from 'expo-router';
+import {
+  Ban,
+  Bell,
+  CircleUserRound,
+  HelpCircle,
+  Info,
+  Lock,
+  LogOut,
+  Pencil,
+  type LucideIcon,
+} from 'lucide-react-native';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -12,7 +23,7 @@ import { useAuth } from '@/lib/auth-context';
 interface SettingRow {
   key: string;
   label: string;
-  icon: React.ComponentProps<typeof MaterialIcons>['name'];
+  icon: LucideIcon;
   onPress?: () => void;
   value?: string;
   destructive?: boolean;
@@ -33,13 +44,13 @@ export default function SettingsScreen() {
     {
       key: 'edit-profile',
       label: 'Modifier le profil',
-      icon: 'edit',
+      icon: Pencil,
       onPress: () => router.push('/profile/edit'),
     },
     {
       key: 'my-profile',
       label: 'Mon profil',
-      icon: 'account-circle',
+      icon: CircleUserRound,
       onPress: () => router.push('/profile'),
     },
   ];
@@ -48,20 +59,20 @@ export default function SettingsScreen() {
     {
       key: 'notifications',
       label: 'Notifications',
-      icon: 'notifications-none',
+      icon: Bell,
       value: user.notificationsEnabled ? 'Activées' : 'Désactivées',
       onPress: () => router.push('/settings/notifications'),
     },
     {
       key: 'privacy',
       label: 'Confidentialité',
-      icon: 'lock-outline',
+      icon: Lock,
       onPress: () => router.push('/settings/privacy'),
     },
     {
       key: 'blocked',
       label: 'Comptes bloqués',
-      icon: 'block',
+      icon: Ban,
       onPress: () => router.push('/settings/blocked'),
     },
   ];
@@ -70,13 +81,13 @@ export default function SettingsScreen() {
     {
       key: 'help',
       label: 'Aide',
-      icon: 'help-outline',
+      icon: HelpCircle,
       onPress: () => router.push('/settings/help'),
     },
     {
       key: 'version',
       label: 'Version de l’application',
-      icon: 'info-outline',
+      icon: Info,
       value: '1.0.0',
     },
   ];
@@ -91,8 +102,8 @@ export default function SettingsScreen() {
         { borderBottomColor: theme.backgroundElement },
         pressed && row.onPress ? { backgroundColor: theme.backgroundSelected } : null,
       ]}>
-      <MaterialIcons
-        name={row.icon}
+      <Icon
+        icon={row.icon}
         size={22}
         color={row.destructive ? '#e5484d' : theme.text}
       />
@@ -134,7 +145,7 @@ export default function SettingsScreen() {
           {renderRow({
             key: 'logout',
             label: 'Se déconnecter',
-            icon: 'logout',
+            icon: LogOut,
             destructive: true,
             onPress: () => void signOut(),
           })}

@@ -1,4 +1,5 @@
 import { Redirect, useRouter } from 'expo-router';
+import { Check, ChevronRight, Circle, X } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
 
@@ -123,7 +124,8 @@ export default function NewChatScreen() {
             <ThemedView style={styles.selectedRow}>
               {selected.map((u) => (
                 <Pressable key={u.id} onPress={() => toggleSelect(u)} style={styles.chip}>
-                  <ThemedText type="small">{u.displayName} ✕</ThemedText>
+                  <ThemedText type="small">{u.displayName}</ThemedText>
+                  <X size={13} strokeWidth={2.4} color={theme.textSecondary} />
                 </Pressable>
               ))}
             </ThemedView>
@@ -199,15 +201,15 @@ export default function NewChatScreen() {
                 </ThemedText>
               </View>
               {mode === 'group' ? (
-                <ThemedText style={isSelected ? styles.checkOn : styles.checkOff}>
-                  {isSelected ? '✓' : '○'}
-                </ThemedText>
+                isSelected ? (
+                  <Check size={20} strokeWidth={2.6} color={accentColor} />
+                ) : (
+                  <Circle size={20} strokeWidth={2} color={theme.textSecondary} />
+                )
               ) : creating ? (
                 <ActivityIndicator />
               ) : (
-                <ThemedText themeColor="textSecondary" style={styles.chevron}>
-                  ›
-                </ThemedText>
+                <ChevronRight size={20} color={theme.textSecondary} />
               )}
             </Pressable>
           );
@@ -237,6 +239,9 @@ const styles = StyleSheet.create({
   groupHeader: { paddingHorizontal: Spacing.three, gap: Spacing.two, paddingBottom: Spacing.two },
   selectedRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.one },
   chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.half,
     borderRadius: 999,
@@ -255,10 +260,7 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   separator: { height: StyleSheet.hairlineWidth, marginLeft: 80 },
-  chevron: { fontSize: 24, lineHeight: 24 },
   rowBody: { flex: 1, gap: Spacing.half },
   rowTitle: { fontWeight: '600' },
-  checkOn: { color: accentColor, fontSize: 20, fontWeight: '700' },
-  checkOff: { color: '#999', fontSize: 20 },
   footer: { padding: Spacing.three },
 });

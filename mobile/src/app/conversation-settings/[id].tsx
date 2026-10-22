@@ -1,4 +1,5 @@
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { Plus } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Switch, View } from 'react-native';
 
@@ -225,7 +226,7 @@ export default function ConversationSettingsScreen() {
                     @{u.username}
                   </ThemedText>
                 </ThemedView>
-                {adding === u.id ? <ActivityIndicator /> : <ThemedText style={{ color: accentColor }}>+</ThemedText>}
+                {adding === u.id ? <ActivityIndicator /> : <Plus size={20} color={accentColor} />}
               </Pressable>
             )}
           />

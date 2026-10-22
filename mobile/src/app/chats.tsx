@@ -1,10 +1,22 @@
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
+import {
+  Bell,
+  BellOff,
+  CheckCheck,
+  Eye,
+  EyeOff,
+  Info,
+  LogOut,
+  Pin,
+  PinOff,
+  Plus,
+  UserRound,
+} from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ActionSheet, type SheetAction, type SheetIcon } from '@/components/action-sheet';
+import { ActionSheet, type SheetAction } from '@/components/action-sheet';
 import { Avatar } from '@/components/avatar';
 import { ConversationRow, type TypingEntry } from '@/components/conversation-row';
 import { FilterTabs } from '@/components/filter-tabs';
@@ -466,7 +478,7 @@ export default function ChatsScreen() {
                 {
                   key: 'profile',
                   label: 'Voir le profil',
-                  icon: 'account-circle' as SheetIcon,
+                  icon: UserRound,
                   onPress: () => {
                     setActionTarget(null);
                     if (other) {
@@ -490,7 +502,7 @@ export default function ChatsScreen() {
               {
                 key: 'read',
                 label: 'Marquer comme lu',
-                icon: 'mark-email-read',
+                icon: CheckCheck,
                 onPress: () => {
                   setActionTarget(null);
                   void markConversationRead(actionTarget);
@@ -501,7 +513,7 @@ export default function ChatsScreen() {
         {
           key: 'pin',
           label: actionTarget.pinned ? 'Désépingler' : 'Épingler la discussion',
-          icon: (actionTarget.pinned ? 'fiber-pin' : 'push-pin') as SheetIcon,
+          icon: actionTarget.pinned ? PinOff : Pin,
           onPress: () => {
             setActionTarget(null);
             void applyPreferences(actionTarget, { pinned: !actionTarget.pinned });
@@ -510,7 +522,7 @@ export default function ChatsScreen() {
         {
           key: 'mute',
           label: actionTarget.muted ? 'Réactiver les notifications' : 'Couper les notifications',
-          icon: (actionTarget.muted ? 'notifications' : 'notifications-off') as SheetIcon,
+          icon: actionTarget.muted ? Bell : BellOff,
           onPress: () => {
             setActionTarget(null);
             void applyPreferences(actionTarget, { muted: !actionTarget.muted });
@@ -519,7 +531,7 @@ export default function ChatsScreen() {
         {
           key: 'hide',
           label: actionTarget.hidden ? 'Afficher la discussion' : 'Masquer la discussion',
-          icon: (actionTarget.hidden ? 'visibility' : 'visibility-off') as SheetIcon,
+          icon: actionTarget.hidden ? Eye : EyeOff,
           onPress: () => {
             setActionTarget(null);
             void applyPreferences(actionTarget, { hidden: !actionTarget.hidden });
@@ -530,7 +542,7 @@ export default function ChatsScreen() {
               {
                 key: 'info',
                 label: 'Infos de la discussion',
-                icon: 'info-outline',
+                icon: Info,
                 onPress: () => {
                   const id = actionTarget.id;
                   setActionTarget(null);
@@ -545,7 +557,7 @@ export default function ChatsScreen() {
             actionTarget.type === 'GROUP'
               ? 'Quitter la discussion'
               : 'Supprimer la conversation',
-          icon: 'logout',
+          icon: LogOut,
           destructive: true,
           onPress: () => {
             setActionTarget(null);
@@ -574,13 +586,17 @@ export default function ChatsScreen() {
               <Pressable
                 onPress={() => void markAllRead()}
                 hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Tout marquer comme lu"
                 style={({ pressed }) => pressed && styles.pressed}>
-                <MaterialIcons name="mark-email-read" size={22} color={theme.text} />
+                <CheckCheck size={22} color={theme.text} />
               </Pressable>
             ) : null}
             <Pressable
               onPress={() => router.push('/profile')}
               hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Ouvrir mon profil"
               style={({ pressed }) => pressed && styles.pressed}>
               <Avatar name={user.displayName} uri={user.avatarUrl} size={36} />
             </Pressable>
@@ -666,12 +682,14 @@ export default function ChatsScreen() {
 
         <Pressable
           onPress={() => router.push('/new-chat')}
+          accessibilityRole="button"
+          accessibilityLabel="Nouvelle discussion"
           style={({ pressed }) => [
             styles.fab,
             { bottom: insets.bottom + Spacing.three },
             pressed && styles.pressed,
           ]}>
-          <ThemedText style={styles.fabIcon}>+</ThemedText>
+          <Plus size={28} strokeWidth={2.4} color="#ffffff" />
         </Pressable>
       </SafeAreaView>
     </ThemedView>
@@ -778,13 +796,6 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 5 },
     elevation: 6,
-  },
-  fabIcon: {
-    color: '#ffffff',
-    fontSize: 28,
-    lineHeight: 28,
-    fontWeight: '400',
-    marginTop: -2,
   },
   backdrop: {
     flex: 1,

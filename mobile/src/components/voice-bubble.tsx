@@ -1,9 +1,11 @@
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { Pause, Play } from 'lucide-react-native';
 import { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { formatDuration, type VoiceBubbleProps } from '@/lib/voice';
 
 /**
@@ -15,6 +17,7 @@ import { formatDuration, type VoiceBubbleProps } from '@/lib/voice';
 let playing: ReturnType<typeof useAudioPlayer> | null = null;
 
 export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleProps) {
+  const theme = useTheme();
   const player = useAudioPlayer(uri);
   const status = useAudioPlayerStatus(player);
   const total = Math.max(durationMs, (status.duration ?? 0) * 1000);
@@ -59,9 +62,13 @@ export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleP
       style={[styles.row, mine ? styles.rowMine : null]}
       accessibilityRole="button"
       accessibilityLabel={status.playing ? 'Mettre en pause' : 'Écouter le message vocal'}>
-      <ThemedText style={[styles.glyph, mine ? styles.textMine : null]}>
-        {status.playing ? '❚❚' : '▶'}
-      </ThemedText>
+      <View style={styles.glyph}>
+        {status.playing ? (
+          <Pause size={16} strokeWidth={2.4} color={mine ? '#ffffff' : theme.text} />
+        ) : (
+          <Play size={16} strokeWidth={2.4} color={mine ? '#ffffff' : theme.text} />
+        )}
+      </View>
       <View style={[styles.track, mine ? styles.trackMine : null]}>
         <View style={[styles.filled, { width: `${ratio * 100}%` }, mine ? styles.filledMine : null]} />
       </View>
@@ -84,9 +91,8 @@ const styles = StyleSheet.create({
     minWidth: 190,
   },
   glyph: {
-    fontSize: 13,
     width: 20,
-    textAlign: 'center',
+    alignItems: 'center',
   },
   track: {
     flex: 1,

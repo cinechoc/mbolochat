@@ -1,8 +1,9 @@
 import { Redirect, Stack, useRouter } from 'expo-router';
+import { Ban, ChevronRight, EyeOff, type LucideIcon } from 'lucide-react-native';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -13,7 +14,7 @@ interface PrivacyRow {
   key: string;
   label: string;
   hint: string;
-  icon: React.ComponentProps<typeof MaterialIcons>['name'];
+  icon: LucideIcon;
   onPress: () => void;
 }
 
@@ -33,14 +34,14 @@ export default function PrivacySettingsScreen() {
       key: 'blocked',
       label: 'Comptes bloqués',
       hint: 'Personnes qui ne peuvent plus t’envoyer de messages',
-      icon: 'block',
+      icon: Ban,
       onPress: () => router.push('/settings/blocked'),
     },
     {
       key: 'hidden',
       label: 'Conversations masquées',
       hint: 'Discussions retirées de ta liste principale',
-      icon: 'visibility-off',
+      icon: EyeOff,
       onPress: () => router.push('/settings/hidden'),
     },
   ];
@@ -62,9 +63,9 @@ export default function PrivacySettingsScreen() {
                 },
                 pressed ? { backgroundColor: theme.backgroundSelected } : null,
               ]}>
-              <MaterialIcons name={row.icon} size={22} color={theme.text} />
+              <Icon icon={row.icon} size={22} color={theme.text} />
               <ThemedText style={styles.rowLabel}>{row.label}</ThemedText>
-              <MaterialIcons name="chevron-right" size={22} color={theme.textSecondary} />
+              <ChevronRight size={22} color={theme.textSecondary} />
             </Pressable>
           ))}
         </ThemedView>

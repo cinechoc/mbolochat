@@ -1,10 +1,12 @@
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
+import { SendHorizontal, X } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { formatDuration, type VoiceRecorderProps } from '@/lib/voice';
 
 /** Au-delà, l'enregistrement s'arrête seul : personne n'écoute deux minutes. */
@@ -17,6 +19,7 @@ const MAX_SECONDS = 120;
  * n'est chargé qu'après vérification que l'appareil sait le faire.
  */
 export function VoiceRecorder({ onFinished, onCancel }: VoiceRecorderProps) {
+  const theme = useTheme();
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const insets = useSafeAreaInsets();
   const [seconds, setSeconds] = useState(0);
@@ -87,7 +90,7 @@ export function VoiceRecorder({ onFinished, onCancel }: VoiceRecorderProps) {
         accessibilityRole="button"
         accessibilityLabel="Annuler l’enregistrement"
         style={styles.cancel}>
-        <ThemedText style={styles.cancelText}>✕</ThemedText>
+        <X size={22} color={theme.text} />
       </Pressable>
       <View style={styles.recordingDot} />
       <ThemedText style={styles.timer}>{formatDuration(seconds * 1000)}</ThemedText>
@@ -97,7 +100,7 @@ export function VoiceRecorder({ onFinished, onCancel }: VoiceRecorderProps) {
         accessibilityRole="button"
         accessibilityLabel="Envoyer le message vocal"
         style={styles.send}>
-        <ThemedText style={styles.sendText}>➤</ThemedText>
+        <SendHorizontal size={22} strokeWidth={2.4} color="#ffffff" />
       </Pressable>
     </View>
   );
@@ -120,9 +123,6 @@ const styles = StyleSheet.create({
   cancel: {
     padding: Spacing.one,
   },
-  cancelText: {
-    fontSize: 18,
-  },
   recordingDot: {
     width: 12,
     height: 12,
@@ -141,11 +141,5 @@ const styles = StyleSheet.create({
     backgroundColor: '#e5484d',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  sendText: {
-    color: '#ffffff',
-    fontSize: 18,
-    lineHeight: 20,
-    marginLeft: 2,
   },
 });

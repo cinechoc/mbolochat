@@ -1,7 +1,7 @@
 import { Redirect, Stack, useFocusEffect } from 'expo-router';
+import { Bell, ExternalLink, Smartphone } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/avatar';
@@ -102,7 +102,7 @@ export default function NotificationSettingsScreen() {
         </ThemedText>
         <ThemedView style={styles.group}>
           <View style={[styles.row, { borderBottomColor: theme.backgroundElement }]}>
-            <MaterialIcons name="notifications" size={22} color={theme.text} />
+            <Bell size={22} color={theme.text} />
             <ThemedText style={styles.rowLabel}>Notifications</ThemedText>
             <Switch
               value={user.notificationsEnabled}
@@ -121,7 +121,7 @@ export default function NotificationSettingsScreen() {
         </ThemedText>
         <ThemedView style={styles.group}>
           <View style={[styles.row, { borderBottomColor: theme.backgroundElement }]}>
-            <MaterialIcons name="phone-android" size={22} color={theme.text} />
+            <Smartphone size={22} color={theme.text} />
             <ThemedText style={styles.rowLabel}>Notifications push</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
               {pushStatus === 'granted'
@@ -149,7 +149,7 @@ export default function NotificationSettingsScreen() {
             <ThemedText type="smallBold" style={styles.linkLabel}>
               Ouvrir les réglages Android
             </ThemedText>
-            <MaterialIcons name="open-in-new" size={16} color="#3c87f7" />
+            <ExternalLink size={16} color="#3c87f7" />
           </Pressable>
         ) : null}
 

@@ -1,7 +1,24 @@
-import { MaterialIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, Stack, useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
+import {
+  Check,
+  CheckCheck,
+  ChevronDown,
+  CircleAlert,
+  Clock,
+  Copy,
+  Camera,
+  Image as ImageIcon,
+  ImagePlus,
+  Mic,
+  Reply,
+  SendHorizontal,
+  Trash,
+  Trash2,
+  X,
+  type LucideIcon,
+} from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
@@ -12,8 +29,6 @@ import {
   Pressable,
   StyleSheet,
   View,
-  type StyleProp,
-  type TextStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -173,15 +188,15 @@ function bubbleSize(attachment: { width?: number; height?: number }): { width: n
 }
 
 /**
- * Les coches, en glyphes purs — pas d'icône : ✓ envoyé, ✓✓ reçu, ✓✓ bleu lu,
- * ◷ en file, ! refusé (toucher la bulle pour relancer).
+ * Coches des messages : horloge en file, alerte en cas d'échec, simple coche
+ * envoyée, double coche reçue, double coche bleue lue.
  */
-const TICK_GLYPH: Record<TickState, string> = {
-  pending: '◷',
-  failed: '!',
-  sent: '✓',
-  delivered: '✓✓',
-  read: '✓✓',
+const TICK_ICON: Record<TickState, LucideIcon> = {
+  pending: Clock,
+  failed: CircleAlert,
+  sent: Check,
+  delivered: CheckCheck,
+  read: CheckCheck,
 };
 
 const TICK_LABEL: Record<TickState, string> = {
@@ -192,18 +207,19 @@ const TICK_LABEL: Record<TickState, string> = {
   read: 'Lu',
 };
 
-function Ticks({ state, style }: { state: TickState; style?: StyleProp<TextStyle> }) {
+function Ticks({ state }: { state: TickState }) {
+  const Glyph = TICK_ICON[state];
   return (
-    <ThemedText
+    <View
+      accessible
       accessibilityLabel={TICK_LABEL[state]}
-      style={[
-        style ?? styles.metaText,
-        style ? null : styles.metaTextMine,
-        state === 'read' ? { color: TICK_READ } : null,
-        state === 'pending' ? { opacity: 0.75 } : null,
-      ]}>
-      {TICK_GLYPH[state]}
-    </ThemedText>
+      style={state === 'pending' ? styles.tickPending : null}>
+      <Glyph
+        size={state === 'failed' ? 14 : 16}
+        strokeWidth={2.6}
+        color={state === 'read' ? TICK_READ : state === 'failed' ? '#ffd2d2' : '#d7e6ff'}
+      />
+    </View>
   );
 }
 
@@ -910,7 +926,7 @@ export default function ChatScreen() {
       actions.push({
         key: 'reply',
         label: 'Répondre',
-        icon: 'reply',
+        icon: Reply,
         onPress: () => void startReply(message),
       });
     }
@@ -918,14 +934,14 @@ export default function ChatScreen() {
       actions.push({
         key: 'copy',
         label: 'Copier',
-        icon: 'content-copy',
+        icon: Copy,
         onPress: () => void copyMessage(message),
       });
     }
     actions.push({
       key: 'delete-me',
       label: waiting ? 'Supprimer' : 'Supprimer pour moi',
-      icon: 'delete',
+      icon: Trash2,
       destructive: true,
       onPress: () => void removeMessage(message, false),
     });
@@ -933,7 +949,7 @@ export default function ChatScreen() {
       actions.push({
         key: 'delete-all',
         label: 'Retirer pour tous',
-        icon: 'delete-forever',
+        icon: Trash,
         destructive: true,
         onPress: () => void removeMessage(message, true),
       });
@@ -1030,7 +1046,7 @@ export default function ChatScreen() {
                 <ThemedText style={styles.imageMetaText}>
                   {formatTime(message.createdAt)}
                 </ThemedText>
-                {mine && tick ? <Ticks state={tick} style={styles.imageMetaText} /> : null}
+                {mine && tick ? <Ticks state={tick} /> : null}
               </View>
             </Pressable>
           ) : null}
@@ -1281,7 +1297,7 @@ export default function ChatScreen() {
                 </ThemedText>
               </View>
             ) : null}
-            <MaterialIcons name="expand-more" size={26} color={accentColor} />
+            <ChevronDown size={26} color={accentColor} />
           </Pressable>
         ) : null}
 
@@ -1319,7 +1335,7 @@ export default function ChatScreen() {
               style={styles.replyClose}
               accessibilityRole="button"
               accessibilityLabel="Annuler la réponse">
-              <MaterialIcons name="close" size={20} color={accentColor} />
+              <X size={20} color={accentColor} />
             </Pressable>
           </View>
         ) : null}
@@ -1341,7 +1357,7 @@ export default function ChatScreen() {
               hitSlop={8}
               style={({ pressed }) => [styles.attachButton, pressed && styles.sendDisabled]}
               accessibilityLabel="Envoyer une photo">
-              <MaterialIcons name="add-photo-alternate" size={26} color={accentColor} />
+              <ImagePlus size={26} color={accentColor} />
             </Pressable>
             <TextField
               style={styles.input}
@@ -1357,7 +1373,7 @@ export default function ChatScreen() {
                 style={({ pressed }) => [styles.sendButton, pressed && styles.sendDisabled]}
                 accessibilityRole="button"
                 accessibilityLabel="Enregistrer un message vocal">
-                <MaterialIcons name="mic" size={24} color="#ffffff" />
+                <Mic size={24} color="#ffffff" />
               </Pressable>
             ) : (
               <Pressable
@@ -1368,7 +1384,7 @@ export default function ChatScreen() {
                   (pressed || input.trim().length === 0) && styles.sendDisabled,
                 ]}
                 accessibilityLabel="Envoyer le message">
-                <ThemedText style={styles.sendIcon}>➤</ThemedText>
+                <SendHorizontal size={22} strokeWidth={2.4} color="#ffffff" />
               </Pressable>
             )}
           </ThemedView>
@@ -1382,13 +1398,13 @@ export default function ChatScreen() {
           {
             key: 'library',
             label: 'Galerie',
-            icon: 'photo-library',
+            icon: ImageIcon,
             onPress: () => void pickPhoto('library'),
           },
           {
             key: 'camera',
             label: 'Appareil photo',
-            icon: 'photo-camera',
+            icon: Camera,
             onPress: () => void pickPhoto('camera'),
           },
         ]}
@@ -1411,8 +1427,12 @@ export default function ChatScreen() {
           {viewer ? (
             <Image source={{ uri: viewer }} style={styles.viewerImage} contentFit="contain" />
           ) : null}
-          <Pressable style={styles.viewerClose} onPress={() => setViewer(null)}>
-            <MaterialIcons name="close" size={26} color="#ffffff" />
+          <Pressable
+            style={styles.viewerClose}
+            onPress={() => setViewer(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Fermer la photo">
+            <X size={26} color="#ffffff" />
           </Pressable>
         </View>
       </Modal>
@@ -1748,10 +1768,7 @@ const styles = StyleSheet.create({
   sendDisabled: {
     opacity: 0.45,
   },
-  sendIcon: {
-    color: '#ffffff',
-    fontSize: 18,
-    lineHeight: 20,
-    marginLeft: 2,
+  tickPending: {
+    opacity: 0.75,
   },
 });

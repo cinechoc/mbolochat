@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { Check } from 'lucide-react-native';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -192,7 +193,7 @@ export default function ForgotPasswordScreen() {
           {step === 'done' ? (
             <>
               <ThemedView style={styles.block}>
-                <ThemedText style={styles.checkMark}>✓</ThemedText>
+                <Check size={44} strokeWidth={2.6} color={accentColor} />
                 <ThemedText type="subtitle">Mot de passe modifié</ThemedText>
                 <ThemedText themeColor="textSecondary" style={styles.hint}>
                   Tu peux maintenant te connecter avec ton nouveau mot de passe.
@@ -257,11 +258,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 20,
     letterSpacing: 6,
-  },
-  checkMark: {
-    fontSize: 44,
-    lineHeight: 50,
-    color: accentColor,
-    fontWeight: '800',
   },
 });

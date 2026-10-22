@@ -146,7 +146,7 @@ export interface ConversationPreview {
   read: boolean;
 }
 
-/** Aperçu du dernier message, façon WhatsApp (✓ / ✓✓ + expéditeur). */
+/** Aperçu du dernier message ; les icônes (coche, média) sont rendues par la ligne. */
 export function conversationPreview(
   conversation: ConversationSummary,
   currentUserId: string,
@@ -161,18 +161,17 @@ export function conversationPreview(
   const body = last.deleted
     ? 'Message supprimé'
     : last.attachment
-    ? last.content
-      ? `${last.attachment.type === 'IMAGE' ? '📷' : '🎤'} ${last.content}`
-      : last.attachment.type === 'AUDIO'
-        ? '🎤 Message vocal'
-        : last.attachment.type === 'IMAGE'
-          ? '📷 Photo'
-          : '📎 Pièce jointe'
-    : last.content;
+      ? last.content
+        ? last.content
+        : last.attachment.type === 'AUDIO'
+          ? 'Message vocal'
+          : last.attachment.type === 'IMAGE'
+            ? 'Photo'
+            : 'Pièce jointe'
+      : last.content;
   if (mine) {
     const read = isReadByOthers(conversation, currentUserId, last.createdAt);
-    const tick = read ? '✓✓' : '✓';
-    return { text: `${isGroup ? `${tick} Vous : ` : `${tick} `}${body}`, mine, read };
+    return { text: isGroup ? `Vous : ${body}` : body, mine, read };
   }
   return {
     text: isGroup ? `${last.sender.displayName} : ${body}` : body,

@@ -1,13 +1,14 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import type { LucideIcon } from 'lucide-react-native';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-export type SheetIcon = React.ComponentProps<typeof MaterialIcons>['name'];
+export type SheetIcon = LucideIcon;
 
 export interface SheetAction {
   key: string;
@@ -65,8 +66,8 @@ export function ActionSheet({ visible, title, subtitle, actions, onClose }: Acti
                 pressed && { backgroundColor: theme.backgroundSelected },
               ]}>
               {action.icon ? (
-                <MaterialIcons
-                  name={action.icon}
+                <Icon
+                  icon={action.icon}
                   size={20}
                   color={action.destructive ? '#e5484d' : theme.text}
                   style={styles.actionIcon}

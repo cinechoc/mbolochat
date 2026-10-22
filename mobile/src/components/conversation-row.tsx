@@ -1,4 +1,4 @@
-import { MaterialIcons } from '@expo/vector-icons';
+import { BellOff, Check, CheckCheck, Image as ImageIcon, Mic, Pin } from 'lucide-react-native';
 import { memo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
@@ -89,29 +89,34 @@ function ConversationRowComponent({
             {title}
           </ThemedText>
           {conversation.pinned ? (
-            <MaterialIcons
-              name="push-pin"
-              size={13}
-              color={theme.textSecondary}
-              style={styles.icon}
-            />
+            <Pin size={13} strokeWidth={2.4} color={theme.textSecondary} style={styles.icon} />
           ) : null}
           {conversation.muted ? (
-            <MaterialIcons
-              name="notifications-off"
-              size={13}
-              color={theme.textSecondary}
-              style={styles.icon}
-            />
+            <BellOff size={13} strokeWidth={2.4} color={theme.textSecondary} style={styles.icon} />
           ) : null}
         </View>
-        <ThemedText
-          type="small"
-          themeColor="textSecondary"
-          numberOfLines={1}
-          style={[unread && styles.bold, typing ? styles.typing : null]}>
-          {previewText}
-        </ThemedText>
+        <View style={styles.previewRow}>
+          {!typing && preview.mine ? (
+            preview.read ? (
+              <CheckCheck size={14} strokeWidth={2.4} color={accentColor} />
+            ) : (
+              <Check size={14} strokeWidth={2.4} color={theme.textSecondary} />
+            )
+          ) : !typing && conversation.lastMessage?.attachment ? (
+            conversation.lastMessage.attachment.type === 'IMAGE' ? (
+              <ImageIcon size={14} strokeWidth={2.2} color={theme.textSecondary} />
+            ) : (
+              <Mic size={14} strokeWidth={2.2} color={theme.textSecondary} />
+            )
+          ) : null}
+          <ThemedText
+            type="small"
+            themeColor="textSecondary"
+            numberOfLines={1}
+            style={[styles.previewText, unread && styles.bold, typing ? styles.typing : null]}>
+            {previewText}
+          </ThemedText>
+        </View>
       </View>
       <View style={styles.meta}>
         <ThemedText
@@ -162,6 +167,14 @@ const styles = StyleSheet.create({
   },
   bold: {
     fontWeight: '700',
+  },
+  previewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  previewText: {
+    flexShrink: 1,
   },
   typing: {
     fontStyle: 'italic',
