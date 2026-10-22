@@ -1,7 +1,13 @@
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { Pause, Play } from 'lucide-react-native';
-import { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View, type GestureResponderEvent } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Pressable,
+  StyleSheet,
+  View,
+  type AccessibilityActionEvent,
+  type GestureResponderEvent,
+} from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
@@ -16,9 +22,30 @@ import { formatDuration, type VoiceBubbleProps } from '@/lib/voice';
  */
 let playing: ReturnType<typeof useAudioPlayer> | null = null;
 
+type Player = ReturnType<typeof useAudioPlayer>;
+
+function claimPlayback(player: Player): void {
+  if (playing && playing !== player) {
+    try {
+      playing.pause();
+    } catch {
+      // Le lecteur précédent a déjà été libéré par son composant.
+    }
+  }
+  playing = player;
+}
+
+function releasePlayback(player: Player): void {
+  if (playing === player) {
+    playing = null;
+  }
+}
+
 const BAR_COUNT = 28;
 const BAR_MAX_HEIGHT = 26;
 const PLAYED_COLOR = '#53bdeb';
+const LONG_PRESS_MS = 320;
+const SETTLE_MS = 280;
 
 /** Forme stable par message, en attendant les niveaux réels du micro. */
 function waveform(seed: string): number[] {
@@ -44,55 +71,199 @@ export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleP
   const player = useAudioPlayer(uri);
   const status = useAudioPlayerStatus(player);
   const [waveWidth, setWaveWidth] = useState(0);
+  const [preview, setPreview] = useState<number | null>(null);
   const bars = useMemo(() => waveform(uri), [uri]);
   const total = Math.max(durationMs, (status.duration ?? 0) * 1000);
   const played = Math.min((status.currentTime ?? 0) * 1000, total);
   const ratio = total > 0 ? played / total : 0;
+  const displayedRatio = preview ?? ratio;
+
+  const widthRef = useRef(0);
+  const playerRef = useRef(player);
+  const totalRef = useRef(total);
+  const playingRef = useRef(status.playing);
+  const previewRef = useRef<number | null>(null);
+  const touchRef = useRef<{
+    startX: number;
+    startY: number;
+    at: number;
+    dragging: boolean;
+    moved: boolean;
+    wasPlaying: boolean;
+  } | null>(null);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    playerRef.current = player;
+  }, [player]);
+  useEffect(() => {
+    totalRef.current = total;
+  }, [total]);
+  useEffect(() => {
+    playingRef.current = status.playing;
+  }, [status.playing]);
 
   // La bulle qui a lancé la lecture peut disparaître (message confirmé, liste
   // recyclée) : sa référence ne doit pas rester dans le lecteur global.
   useEffect(
     () => () => {
-      if (playing === player) {
-        playing = null;
-      }
+      releasePlayback(player);
     },
     [player],
   );
 
-  const takeOver = (): void => {
-    if (playing && playing !== player) {
-      try {
-        playing.pause();
-      } catch {
-        // Le lecteur précédent a déjà été libéré par son composant.
+  useEffect(
+    () => () => {
+      if (settleTimerRef.current) {
+        clearTimeout(settleTimerRef.current);
       }
-    }
-    playing = player;
+    },
+    [],
+  );
+
+  const takeOver = (): void => {
+    claimPlayback(player);
   };
 
   const toggle = (): void => {
     if (status.playing) {
       player.pause();
-      if (playing === player) {
-        playing = null;
-      }
+      releasePlayback(player);
       return;
     }
     takeOver();
     player.play();
   };
 
-  const seek = (event: GestureResponderEvent): void => {
-    if (waveWidth <= 0 || total <= 0) {
+  const setPreviewValue = useCallback((value: number | null): void => {
+    previewRef.current = value;
+    setPreview(value);
+  }, []);
+
+  const fractionAt = (x: number): number => {
+    const width = widthRef.current;
+    if (width <= 0) {
+      return 0;
+    }
+    return Math.max(0, Math.min(1, x / width));
+  };
+
+  const finishSeek = useCallback(
+    (fraction: number, resume: boolean): void => {
+      if (totalRef.current <= 0) {
+        return;
+      }
+      void playerRef.current.seekTo((fraction * totalRef.current) / 1000);
+      setPreviewValue(fraction);
+      if (settleTimerRef.current) {
+        clearTimeout(settleTimerRef.current);
+      }
+      // La position du lecteur met un instant à suivre : on garde l'aperçu
+      // pendant ce temps pour éviter un retour visuel en arrière.
+      settleTimerRef.current = setTimeout(() => setPreviewValue(null), SETTLE_MS);
+      if (resume) {
+        claimPlayback(playerRef.current);
+        playerRef.current.play();
+      } else {
+        // Après la fin d'un vocal, ExoPlayer reste en `playWhenReady` : sans
+        // cette pause, un simple déplacement relancerait la lecture.
+        playerRef.current.pause();
+      }
+    },
+    [setPreviewValue],
+  );
+
+  // Le scrub passe par les événements tactiles bruts : sans revendiquer le
+  // responder, la liste garde son défilement vertical natif. Un geste
+  // horizontal met la lecture en pause et l'aperçu suit le doigt.
+  const onWaveTouchStart = (event: GestureResponderEvent): void => {
+    if (settleTimerRef.current) {
+      clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+    }
+    touchRef.current = {
+      startX: event.nativeEvent.locationX,
+      startY: event.nativeEvent.locationY,
+      at: Date.now(),
+      dragging: false,
+      moved: false,
+      wasPlaying: playingRef.current,
+    };
+  };
+
+  const onWaveTouchMove = (event: GestureResponderEvent): void => {
+    const touch = touchRef.current;
+    if (!touch) {
       return;
     }
-    const fraction = Math.max(0, Math.min(1, event.nativeEvent.locationX / waveWidth));
-    void player.seekTo((fraction * total) / 1000);
-    if (!status.playing && fraction < 1) {
-      takeOver();
-      player.play();
+    const dx = event.nativeEvent.locationX - touch.startX;
+    const dy = event.nativeEvent.locationY - touch.startY;
+    if (!touch.dragging) {
+      if (Math.abs(dy) > 4 && Math.abs(dy) > Math.abs(dx)) {
+        touch.moved = true;
+        return;
+      }
+      if (Math.abs(dx) <= 4) {
+        return;
+      }
+      touch.dragging = true;
+      if (touch.wasPlaying) {
+        playerRef.current.pause();
+        releasePlayback(playerRef.current);
+      }
     }
+    setPreviewValue(fractionAt(touch.startX + dx));
+  };
+
+  const onWaveTouchEnd = (event: GestureResponderEvent): void => {
+    const touch = touchRef.current;
+    touchRef.current = null;
+    if (!touch) {
+      return;
+    }
+    if (touch.dragging) {
+      finishSeek(
+        previewRef.current ?? fractionAt(touch.startX),
+        touch.wasPlaying,
+      );
+      return;
+    }
+    if (touch.moved) {
+      return;
+    }
+    const endX = Math.abs(event.nativeEvent.locationX - touch.startX);
+    const endY = Math.abs(event.nativeEvent.locationY - touch.startY);
+    if (endX > 8 || endY > 8) {
+      return;
+    }
+    // Un appui long ouvre le menu : il ne doit pas déplacer la lecture.
+    if (Date.now() - touch.at >= LONG_PRESS_MS) {
+      return;
+    }
+    finishSeek(fractionAt(event.nativeEvent.locationX), playingRef.current);
+  };
+
+  const onWaveTouchCancel = (): void => {
+    const touch = touchRef.current;
+    touchRef.current = null;
+    if (touch?.dragging) {
+      if (touch.wasPlaying) {
+        finishSeek(previewRef.current ?? fractionAt(touch.startX), true);
+      } else {
+        setPreviewValue(null);
+      }
+    }
+  };
+
+  const onWaveLayout = (width: number): void => {
+    widthRef.current = width;
+    setWaveWidth(width);
+  };
+
+  const onSeekAction = (event: AccessibilityActionEvent): void => {
+    const delta = event.nativeEvent.actionName === 'increment' ? 5 : -5;
+    const next = Math.max(0, Math.min(total / 1000, (status.currentTime ?? 0) + delta));
+    void player.seekTo(next);
   };
 
   return (
@@ -100,7 +271,7 @@ export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleP
       <Pressable
         onPress={toggle}
         onLongPress={onLongPress}
-        delayLongPress={320}
+        delayLongPress={LONG_PRESS_MS}
         hitSlop={6}
         style={styles.play}
         accessibilityRole="button"
@@ -111,21 +282,27 @@ export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleP
           <Play size={16} strokeWidth={2.4} color={mine ? '#ffffff' : theme.text} />
         )}
       </Pressable>
-      <Pressable
-        onPress={seek}
-        onLongPress={onLongPress}
-        delayLongPress={320}
-        hitSlop={6}
-        onLayout={(event) => setWaveWidth(event.nativeEvent.layout.width)}
+      <View
+        onTouchStart={onWaveTouchStart}
+        onTouchMove={onWaveTouchMove}
+        onTouchEnd={onWaveTouchEnd}
+        onTouchCancel={onWaveTouchCancel}
+        onLayout={(event) => onWaveLayout(event.nativeEvent.layout.width)}
         style={styles.wave}
+        accessible
         accessibilityRole="adjustable"
         accessibilityLabel="Position de lecture"
-        accessibilityHint="Touche la waveform pour te déplacer dans le message."
-        accessibilityValue={{ min: 0, max: 100, now: Math.round(ratio * 100) }}>
+        accessibilityHint="Glisse pour te déplacer dans le message."
+        accessibilityValue={{ min: 0, max: 100, now: Math.round(displayedRatio * 100) }}
+        accessibilityActions={[
+          { name: 'increment', label: 'Avancer de 5 secondes' },
+          { name: 'decrement', label: 'Reculer de 5 secondes' },
+        ]}
+        onAccessibilityAction={onSeekAction}>
         {bars.map((height, index) => {
-          const playedBar = (index + 0.5) / BAR_COUNT <= ratio;
+          const playedBar = (index + 0.5) / BAR_COUNT <= displayedRatio;
           return (
-            <View key={index} style={styles.barSlot}>
+            <View key={index} pointerEvents="none" style={styles.barSlot}>
               <View
                 style={[
                   styles.bar,
@@ -144,21 +321,23 @@ export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleP
             </View>
           );
         })}
-        {waveWidth > 0 && ratio > 0.005 ? (
+        {waveWidth > 0 && displayedRatio > 0.005 ? (
           <View
             pointerEvents="none"
             style={[
               styles.playhead,
-              {
-                left: Math.min(Math.max(ratio * waveWidth - 1, 0), waveWidth - 2),
-                backgroundColor: mine ? '#ffffff' : PLAYED_COLOR,
-              },
-            ]}
-          />
+              { left: Math.min(Math.max(displayedRatio * waveWidth - 4, 0), waveWidth - 8) },
+            ]}>
+            <View
+              style={[styles.playheadDot, { backgroundColor: mine ? '#ffffff' : PLAYED_COLOR }]}
+            />
+          </View>
         ) : null}
-      </Pressable>
+      </View>
       <ThemedText style={[styles.time, mine ? styles.textMine : null]}>
-        {formatDuration(status.playing && played > 0 ? played : total)}
+        {formatDuration(
+          preview !== null ? preview * total : status.playing && played > 0 ? played : total,
+        )}
       </ThemedText>
     </View>
   );
@@ -197,8 +376,14 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     bottom: 0,
-    width: 2,
-    borderRadius: 1,
+    width: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playheadDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
   },
   time: {
     fontSize: 11,
