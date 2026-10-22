@@ -23,7 +23,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   FlatList,
-  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -1183,24 +1182,23 @@ export default function ChatScreen() {
 
   const startingRecordingRef = useRef(false);
   const startRecording = useCallback(async () => {
-    if (!voice || startingRecordingRef.current) {
+    if (!voice || recording || startingRecordingRef.current) {
       return;
     }
     startingRecordingRef.current = true;
     setError(null);
-    // Le champ disparaît au profit du recorder : on ferme le clavier tout de
-    // suite, sinon il reste au-dessus de l'interface d'enregistrement.
-    Keyboard.dismiss();
     try {
       if (!(await voice.requestMicrophone())) {
         setError('Autorise le micro pour enregistrer un message vocal.');
         return;
       }
+      // Le champ reste monté et garde le clavier ouvert : le recorder le
+      // recouvre pendant l'enregistrement.
       setRecording(true);
     } finally {
       startingRecordingRef.current = false;
     }
-  }, [voice]);
+  }, [voice, recording]);
 
   if (!token || !user) {
     return <Redirect href="/login" />;
@@ -1351,9 +1349,9 @@ export default function ChatScreen() {
           </View>
         ) : null}
 
-        {recording && voice ? (
-          <voice.Recorder onFinished={(take) => void sendVoice(take)} onCancel={() => setRecording(false)} />
-        ) : (
+        {/* Le recorder recouvre le compositeur, qui reste dans le flux et
+            garde le clavier ouvert : le champ n'est pas visible dessous. */}
+        <View style={styles.composerArea}>
           <ThemedView
             style={[
               styles.inputRow,
@@ -1400,7 +1398,18 @@ export default function ChatScreen() {
               </Pressable>
             )}
           </ThemedView>
-        )}
+
+          {recording && voice ? (
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                styles.recordOverlay,
+                { backgroundColor: theme.background, borderTopColor: theme.backgroundElement },
+              ]}>
+              <voice.Recorder onFinished={(take) => void sendVoice(take)} onCancel={() => setRecording(false)} />
+            </View>
+          ) : null}
+        </View>
       </KeyboardAvoidingView>
 
       <ActionSheet
@@ -1753,6 +1762,13 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.two,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  /** Recouvre le compositeur d'un fond opaque pendant l'enregistrement. */
+  composerArea: {
+    position: 'relative',
+  },
+  recordOverlay: {
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   input: {
