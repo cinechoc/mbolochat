@@ -655,7 +655,14 @@ export default function ChatScreen() {
         displayName: user.displayName,
         avatarUrl: user.avatarUrl,
       };
+      const confirmed = new Set(
+        messages.map((message) => message.clientId).filter((clientId): clientId is string => Boolean(clientId)),
+      );
       for (const item of queued) {
+        // L’écho du serveur peut précéder la sortie de la file : une seule bulle.
+        if (confirmed.has(item.clientId)) {
+          continue;
+        }
         all.push(
           pendingMessage(item, sender, (quotedId) => {
             const origin = all.find((row) => row.id === quotedId);
@@ -966,11 +973,13 @@ export default function ChatScreen() {
       const stuck = tick === 'failed' ? queuedById.get(message.id) : undefined;
       const waiting = tick === 'pending';
       const aspect = attachment && attachment.type !== 'AUDIO' ? bubbleSize(attachment) : null;
+      const wideBubble = Boolean(aspect || (attachment?.type === 'AUDIO' && voice));
       const bubble = (
         <View
           style={[
             styles.bubble,
             aspect ? styles.bubbleWithImage : null,
+            attachment?.type === 'AUDIO' && voice ? styles.bubbleVoice : null,
             mine
               ? styles.bubbleMine
               : { backgroundColor: theme.backgroundElement, borderBottomLeftRadius: 6 },
@@ -981,6 +990,13 @@ export default function ChatScreen() {
               mine={mine}
               onPress={() => jumpToMessage(message.replyTo?.id)}
             />
+          ) : null}
+          {!mine && isGroup ? (
+            <ThemedText
+              type="smallBold"
+              style={[styles.senderName, aspect ? styles.senderNameMedia : null]}>
+              {message.sender.displayName}
+            </ThemedText>
           ) : null}
           {attachment?.type === 'AUDIO' ? (
             voice ? (
@@ -1018,11 +1034,6 @@ export default function ChatScreen() {
               </View>
             </Pressable>
           ) : null}
-          {!mine && isGroup ? (
-            <ThemedText type="smallBold" style={styles.senderName}>
-              {message.sender.displayName}
-            </ThemedText>
-          ) : null}
           {message.deleted ? (
             <ThemedText style={[styles.deletedText, mine ? styles.bubbleTextMine : null]}>
               Message supprimé
@@ -1059,6 +1070,7 @@ export default function ChatScreen() {
             onPress={stuck ? () => resend(stuck.clientId) : undefined}
             onLongPress={() => setMenuFor(message)}
             delayLongPress={320}
+            style={[styles.bubblePress, wideBubble ? styles.bubblePressMedia : null]}
             accessibilityRole="button"
             accessibilityLabel={stuck ? 'Renvoyer ce message' : 'Options du message'}>
             {bubble}
@@ -1460,8 +1472,14 @@ const styles = StyleSheet.create({
   rowTheirs: {
     justifyContent: 'flex-start',
   },
-  bubble: {
+  // La limite est portée par le conteneur : en pourcentage sur une bulle auto-dimensionnée, elle se résout mal.
+  bubblePress: {
     maxWidth: '78%',
+  },
+  bubblePressMedia: {
+    maxWidth: '85%',
+  },
+  bubble: {
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -1472,8 +1490,14 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 6,
   },
   bubbleWithImage: {
+    // Largeur de l’image (230) + marges internes, pour que la légende se replie dans le fond.
+    width: 236,
     padding: 3,
     gap: 2,
+  },
+  // La piste et sa durée tiennent dans le fond, même sans texte.
+  bubbleVoice: {
+    width: 230,
   },
   bubbleImage: {
     width: 230,
@@ -1578,6 +1602,10 @@ const styles = StyleSheet.create({
   },
   senderName: {
     color: accentColor,
+  },
+  /** Le nom du groupe borde une photo : la bulle photo n'a que 3 px de marge. */
+  senderNameMedia: {
+    paddingHorizontal: 8,
   },
   metaRow: {
     flexDirection: 'row',
