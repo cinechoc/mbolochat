@@ -1,6 +1,6 @@
 import { Link, Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 
@@ -61,52 +61,57 @@ export default function LoginScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
-        <SafeAreaView style={styles.content}>
-          <Animated.View entering={FadeInUp.duration(520)} style={styles.brandBlock}>
-            <ThemedView style={styles.brandRow}>
-              <LogoMark size={48} />
-              <ThemedText type="subtitle">MboloChat</ThemedText>
-            </ThemedView>
-            <ThemedText themeColor="textSecondary" style={styles.tagline}>
-              Messagerie simple, rapide, en temps réel.
-            </ThemedText>
-          </Animated.View>
+        <SafeAreaView style={styles.flex}>
+          <ScrollView
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
+            <Animated.View entering={FadeInUp.duration(520)} style={styles.brandBlock}>
+              <ThemedView style={styles.brandRow}>
+                <LogoMark size={48} />
+                <ThemedText type="subtitle">MboloChat</ThemedText>
+              </ThemedView>
+              <ThemedText themeColor="textSecondary" style={styles.tagline}>
+                Messagerie simple, rapide, en temps réel.
+              </ThemedText>
+            </Animated.View>
 
-          <Animated.View entering={FadeInUp.duration(520).delay(120)} style={styles.form}>
-            <TextField
-              placeholder="Email ou nom d’utilisateur"
-              autoCapitalize="none"
-              autoCorrect={false}
-              value={identifier}
-              onChangeText={setIdentifier}
-            />
-            <PasswordField
-              placeholder="Mot de passe"
-              value={password}
-              onChangeText={setPassword}
-              onSubmitEditing={onSubmit}
-            />
-            <Pressable
-              onPress={() => router.push('/forgot-password')}
-              hitSlop={8}
-              style={styles.forgot}>
+            <Animated.View entering={FadeInUp.duration(520).delay(120)} style={styles.form}>
+              <TextField
+                placeholder="Email ou nom d’utilisateur"
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={identifier}
+                onChangeText={setIdentifier}
+              />
+              <PasswordField
+                placeholder="Mot de passe"
+                value={password}
+                onChangeText={setPassword}
+                onSubmitEditing={onSubmit}
+              />
+              <Pressable
+                onPress={() => router.push('/forgot-password')}
+                hitSlop={8}
+                style={styles.forgot}>
+                <ThemedText type="link" style={{ color: accentColor }}>
+                  Mot de passe oublié ?
+                </ThemedText>
+              </Pressable>
+              {error ? (
+                <ThemedText type="small" style={{ color: theme.error }}>
+                  {error}
+                </ThemedText>
+              ) : null}
+              <Button title="Se connecter" onPress={onSubmit} loading={submitting} />
+            </Animated.View>
+
+            <Link href="/register" style={styles.link}>
               <ThemedText type="link" style={{ color: accentColor }}>
-                Mot de passe oublié ?
+                Pas encore de compte ? Créer un compte
               </ThemedText>
-            </Pressable>
-            {error ? (
-              <ThemedText type="small" style={{ color: theme.error }}>
-                {error}
-              </ThemedText>
-            ) : null}
-            <Button title="Se connecter" onPress={onSubmit} loading={submitting} />
-          </Animated.View>
-
-          <Link href="/register" style={styles.link}>
-            <ThemedText type="link" style={{ color: accentColor }}>
-              Pas encore de compte ? Créer un compte
-            </ThemedText>
-          </Link>
+            </Link>
+          </ScrollView>
         </SafeAreaView>
       </KeyboardAvoidingView>
     </ThemedView>
@@ -121,8 +126,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.four,
     justifyContent: 'center',
     gap: Spacing.three,
   },
