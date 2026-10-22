@@ -28,6 +28,9 @@ export interface VoiceBubbleProps {
   /** Durée connue avant le chargement du fichier, en millisecondes. */
   durationMs: number;
   mine: boolean;
+  /** Photo et nom de l'expéditeur, affichés sur le bouton de lecture. */
+  avatarUrl?: string | null;
+  senderName?: string;
   /** Appui long : menu du message (répondre, supprimer…). */
   onLongPress?: () => void;
 }

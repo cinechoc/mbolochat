@@ -1021,6 +1021,8 @@ export default function ChatScreen() {
                 uri={mediaUrl(attachment.url)}
                 durationMs={attachment.duration ?? 0}
                 mine={mine}
+                avatarUrl={message.sender.avatarUrl}
+                senderName={message.sender.displayName}
                 onLongPress={() => setMenuFor(message)}
               />
             ) : (
@@ -1504,9 +1506,10 @@ const styles = StyleSheet.create({
     padding: 3,
     gap: 2,
   },
-  // La piste et sa durée tiennent dans le fond, même sans texte.
+  // La piste et sa durée tiennent dans le fond, même sans texte ; la largeur
+  // laisse la place à l'avatar qui sert de bouton de lecture.
   bubbleVoice: {
-    width: 230,
+    width: 246,
   },
   bubbleImage: {
     width: 230,

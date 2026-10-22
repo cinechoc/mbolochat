@@ -9,9 +9,9 @@ import {
   type GestureResponderEvent,
 } from 'react-native';
 
+import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
 import { lockSwipe, unlockSwipe } from '@/lib/swipe-lock';
 import { formatDuration, type VoiceBubbleProps } from '@/lib/voice';
 
@@ -67,8 +67,14 @@ function waveform(seed: string): number[] {
   });
 }
 
-export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleProps) {
-  const theme = useTheme();
+export function VoiceBubble({
+  uri,
+  durationMs,
+  mine,
+  avatarUrl,
+  senderName,
+  onLongPress,
+}: VoiceBubbleProps) {
   const player = useAudioPlayer(uri);
   const status = useAudioPlayerStatus(player);
   const [waveWidth, setWaveWidth] = useState(0);
@@ -287,11 +293,14 @@ export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleP
         style={styles.play}
         accessibilityRole="button"
         accessibilityLabel={status.playing ? 'Mettre en pause' : 'Écouter le message vocal'}>
-        {status.playing ? (
-          <Pause size={16} strokeWidth={2.4} color={mine ? '#ffffff' : theme.text} />
-        ) : (
-          <Play size={16} strokeWidth={2.4} color={mine ? '#ffffff' : theme.text} />
-        )}
+        <Avatar name={senderName ?? ''} uri={avatarUrl} size={36} />
+        <View style={styles.playBadge}>
+          {status.playing ? (
+            <Pause size={8} strokeWidth={3} color="#ffffff" fill="#ffffff" />
+          ) : (
+            <Play size={8} strokeWidth={3} color="#ffffff" fill="#ffffff" />
+          )}
+        </View>
       </Pressable>
       <View
         onTouchStart={onWaveTouchStart}
@@ -366,8 +375,21 @@ const styles = StyleSheet.create({
     minWidth: 190,
   },
   play: {
-    width: 20,
+    width: 36,
+    height: 36,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playBadge: {
+    position: 'absolute',
+    right: -1,
+    bottom: -1,
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   wave: {
     flex: 1,
