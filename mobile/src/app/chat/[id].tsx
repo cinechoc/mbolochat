@@ -1502,8 +1502,11 @@ const styles = StyleSheet.create({
   },
   bubbleWithImage: {
     // Largeur de l’image (230) + marges internes, pour que la légende se replie dans le fond.
+    // Les variantes horizontale/verticale sont explicites : le `padding` seul
+    // ne remplace pas celles de la bulle de base, et l’image serait comprimée.
     width: 236,
-    padding: 3,
+    paddingHorizontal: 3,
+    paddingVertical: 3,
     gap: 2,
   },
   // La piste et sa durée tiennent dans le fond, même sans texte ; la largeur
