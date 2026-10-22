@@ -59,23 +59,27 @@ export function kindForExtension(extension: string): MediaKind | undefined {
  * tomber d'accord : c'est le seul contrôle qui tienne quand l'expéditeur écrit
  * ce qu'il veut dans l'en-tête de sa requête. Un désaccord est un refus, même
  * si l'un des deux indices paraît sincère.
+ *
+ * Plusieurs types peuvent être annoncés (la partie multipart, puis le champ
+ * explicite du formulaire). Un seul concordant suffit : certains clients
+ * déduisent un type erroné du nom de fichier — expo-file-system annonce par
+ * exemple `audio/mpeg` pour un `.m4a`. Si aucun ne concorde, on refuse.
  */
 export function detectKind(
   originalName: string | undefined,
   declaredMimes: Array<string | undefined>,
 ): MediaKind | null {
   const fromExtension = BY_EXTENSION.get(extname(originalName ?? '').toLowerCase());
-  let fromMime: MediaKind | undefined;
+  const resolved: MediaKind[] = [];
   for (const declared of declaredMimes) {
     const mime = (declared ?? '').split(';')[0].trim().toLowerCase();
-    const resolved = BY_MIME.get(mime) ?? BY_EXTENSION.get(MIME_ALIASES[mime] ?? '');
-    if (!resolved) {
-      continue;
+    const kind = BY_MIME.get(mime) ?? BY_EXTENSION.get(MIME_ALIASES[mime] ?? '');
+    if (kind) {
+      resolved.push(kind);
     }
-    if (fromExtension && resolved.extension !== fromExtension.extension) {
-      return null;
-    }
-    fromMime ??= resolved;
   }
-  return fromExtension ?? fromMime ?? null;
+  if (fromExtension) {
+    return resolved.find((kind) => kind.extension === fromExtension.extension) ?? null;
+  }
+  return resolved[0] ?? null;
 }
