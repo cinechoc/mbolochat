@@ -1,4 +1,5 @@
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -11,7 +12,7 @@ import { formatDuration, type VoiceBubbleProps } from '@/lib/voice';
  * Un seul appareil de lecture à la fois dans la conversation — sinon deux voix
  * se superposeraient, ce que personne ne réécoute jamais deux fois.
  */
-let playing: { pause: () => void } | null = null;
+let playing: ReturnType<typeof useAudioPlayer> | null = null;
 
 export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleProps) {
   const player = useAudioPlayer(uri);
@@ -20,12 +21,32 @@ export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleP
   const played = Math.min((status.currentTime ?? 0) * 1000, total);
   const ratio = total > 0 ? played / total : 0;
 
+  // La bulle qui a lancé la lecture peut disparaître (message confirmé, liste
+  // recyclée) : sa référence ne doit pas rester dans le lecteur global.
+  useEffect(
+    () => () => {
+      if (playing === player) {
+        playing = null;
+      }
+    },
+    [player],
+  );
+
   const toggle = (): void => {
     if (status.playing) {
       player.pause();
+      if (playing === player) {
+        playing = null;
+      }
       return;
     }
-    playing?.pause();
+    if (playing && playing !== player) {
+      try {
+        playing.pause();
+      } catch {
+        // Le lecteur précédent a déjà été libéré par son composant.
+      }
+    }
     playing = player;
     player.play();
   };

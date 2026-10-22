@@ -1,6 +1,7 @@
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
@@ -17,16 +18,26 @@ const MAX_SECONDS = 120;
  */
 export function VoiceRecorder({ onFinished, onCancel }: VoiceRecorderProps) {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const insets = useSafeAreaInsets();
   const [seconds, setSeconds] = useState(0);
   // `stop()` remet la position à zéro : la durée doit être prise pendant.
   const longestRef = useRef(0);
   const finishedRef = useRef(false);
   /** L'arrêt complet, appelé depuis la temporisation sans la relancer. */
   const finishRef = useRef<(send: boolean) => void>(() => undefined);
+  const onCancelRef = useRef(onCancel);
 
   useEffect(() => {
-    void setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-    recorder.record();
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
+
+  useEffect(() => {
+    void (async () => {
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      // `record()` sans préparation ne démarre rien : le chrono resterait à zéro.
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+    })().catch(() => onCancelRef.current());
     const tick = setInterval(() => {
       const current = Math.round(recorder.currentTime);
       if (current > longestRef.current) {
@@ -69,7 +80,7 @@ export function VoiceRecorder({ onFinished, onCancel }: VoiceRecorderProps) {
   }, [finish]);
 
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
       <Pressable
         onPress={() => void finish(false)}
         hitSlop={10}

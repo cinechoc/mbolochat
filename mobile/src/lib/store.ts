@@ -124,22 +124,22 @@ create table if not exists sync_state (
 );
 `;
 
-const toRow = (item: OutboxItem): Row => ({
-  client_id: item.clientId,
-  conversation_id: item.conversationId,
-  content: item.content,
-  reply_to: item.replyTo,
-  local_uri: item.localUri,
-  kind: item.kind,
-  duration_ms: item.durationMs,
-  mime: item.mime,
-  width: item.width,
-  height: item.height,
-  upload_id: item.uploadId,
-  status: item.status,
-  attempts: item.attempts,
-  error: item.error,
-  created_at: item.createdAt,
+const toParams = (item: OutboxItem): Record<string, string | number | null> => ({
+  $client_id: item.clientId,
+  $conversation_id: item.conversationId,
+  $content: item.content,
+  $reply_to: item.replyTo,
+  $local_uri: item.localUri,
+  $kind: item.kind,
+  $duration_ms: item.durationMs,
+  $mime: item.mime,
+  $width: item.width,
+  $height: item.height,
+  $upload_id: item.uploadId,
+  $status: item.status,
+  $attempts: item.attempts,
+  $error: item.error,
+  $created_at: item.createdAt,
 });
 
 const fromRow = (row: Row): OutboxItem => ({
@@ -188,7 +188,6 @@ async function openSqlite(): Promise<Database> {
 function sqliteStore(db: Database): LocalStore {
   return {
     async save(item) {
-      const row = toRow(item);
       await db.runAsync(
         `insert into outbox (client_id, conversation_id, content, reply_to, local_uri, kind, duration_ms, mime, width, height, upload_id, status, attempts, error, created_at)
          values ($client_id, $conversation_id, $content, $reply_to, $local_uri, $kind, $duration_ms, $mime, $width, $height, $upload_id, $status, $attempts, $error, $created_at)
@@ -202,17 +201,17 @@ function sqliteStore(db: Database): LocalStore {
            status = excluded.status,
            attempts = excluded.attempts,
            error = excluded.error`,
-        row,
+        toParams(item),
       );
     },
     async list(conversationId) {
       const rows = conversationId
-        ? await db.getAllAsync<Row>('select * from outbox where conversation_id = $1 order by created_at asc', conversationId)
+        ? await db.getAllAsync<Row>('select * from outbox where conversation_id = ? order by created_at asc', conversationId)
         : await db.getAllAsync<Row>('select * from outbox order by created_at asc');
       return rows.map(fromRow);
     },
     async remove(clientId) {
-      const result = await db.runAsync('delete from outbox where client_id = $1', clientId);
+      const result = await db.runAsync('delete from outbox where client_id = ?', clientId);
       return result.changes > 0;
     },
     async readCursor() {
@@ -223,7 +222,7 @@ function sqliteStore(db: Database): LocalStore {
     },
     async advanceCursor(ms) {
       await db.runAsync(
-        'insert into sync_state (id, since_ms) values (1, $1) on conflict (id) do update set since_ms = max(sync_state.since_ms, excluded.since_ms)',
+        'insert into sync_state (id, since_ms) values (1, ?) on conflict (id) do update set since_ms = max(sync_state.since_ms, excluded.since_ms)',
         ms,
       );
     },
