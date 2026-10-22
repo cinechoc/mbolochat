@@ -12,6 +12,7 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { lockSwipe, unlockSwipe } from '@/lib/swipe-lock';
 import { formatDuration, type VoiceBubbleProps } from '@/lib/voice';
 
 /**
@@ -117,6 +118,7 @@ export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleP
       if (settleTimerRef.current) {
         clearTimeout(settleTimerRef.current);
       }
+      unlockSwipe();
     },
     [],
   );
@@ -177,6 +179,10 @@ export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleP
   // responder, la liste garde son défilement vertical natif. Un geste
   // horizontal met la lecture en pause et l'aperçu suit le doigt.
   const onWaveTouchStart = (event: GestureResponderEvent): void => {
+    // La waveform a son propre geste horizontal : il ne doit pas se cumuler
+    // avec le glissement de la bulle pour répondre.
+    event.stopPropagation();
+    lockSwipe();
     if (settleTimerRef.current) {
       clearTimeout(settleTimerRef.current);
       settleTimerRef.current = null;
@@ -192,6 +198,7 @@ export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleP
   };
 
   const onWaveTouchMove = (event: GestureResponderEvent): void => {
+    event.stopPropagation();
     const touch = touchRef.current;
     if (!touch) {
       return;
@@ -216,6 +223,8 @@ export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleP
   };
 
   const onWaveTouchEnd = (event: GestureResponderEvent): void => {
+    event.stopPropagation();
+    unlockSwipe();
     const touch = touchRef.current;
     touchRef.current = null;
     if (!touch) {
@@ -243,7 +252,9 @@ export function VoiceBubble({ uri, durationMs, mine, onLongPress }: VoiceBubbleP
     finishSeek(fractionAt(event.nativeEvent.locationX), playingRef.current);
   };
 
-  const onWaveTouchCancel = (): void => {
+  const onWaveTouchCancel = (event: GestureResponderEvent): void => {
+    event.stopPropagation();
+    unlockSwipe();
     const touch = touchRef.current;
     touchRef.current = null;
     if (touch?.dragging) {

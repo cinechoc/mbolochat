@@ -34,6 +34,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ActionSheet, type SheetAction } from '@/components/action-sheet';
 import { Avatar } from '@/components/avatar';
+import { SwipeableBubble } from '@/components/swipeable-bubble';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TextField, accentColor } from '@/components/ui';
@@ -1081,20 +1082,18 @@ export default function ChatScreen() {
         </View>
       );
       return (
-        <View style={[styles.bubbleRow, mine ? styles.rowMine : styles.rowTheirs]}>
-          <Pressable
-            onPress={stuck ? () => resend(stuck.clientId) : undefined}
-            onLongPress={() => setMenuFor(message)}
-            delayLongPress={320}
-            style={[styles.bubblePress, wideBubble ? styles.bubblePressMedia : null]}
-            accessibilityRole="button"
-            accessibilityLabel={stuck ? 'Renvoyer ce message' : 'Options du message'}>
-            {bubble}
-          </Pressable>
-        </View>
+        <SwipeableBubble
+          mine={mine}
+          onReply={() => startReply(message)}
+          onPress={stuck ? () => resend(stuck.clientId) : undefined}
+          onLongPress={() => setMenuFor(message)}
+          style={[styles.bubblePress, wideBubble ? styles.bubblePressMedia : null]}
+          accessibilityLabel={stuck ? 'Renvoyer ce message' : 'Options du message'}>
+          {bubble}
+        </SwipeableBubble>
       );
     },
-    [user?.id, theme, isGroup, tickById, queuedById, resend, voice, jumpToMessage],
+    [user?.id, theme, isGroup, tickById, queuedById, resend, startReply, voice, jumpToMessage],
   );
 
   /**
@@ -1481,16 +1480,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     flexGrow: 1,
-  },
-  bubbleRow: {
-    flexDirection: 'row',
-    marginVertical: Spacing.half,
-  },
-  rowMine: {
-    justifyContent: 'flex-end',
-  },
-  rowTheirs: {
-    justifyContent: 'flex-start',
   },
   // La limite est portée par le conteneur : en pourcentage sur une bulle auto-dimensionnée, elle se résout mal.
   bubblePress: {
