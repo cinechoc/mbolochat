@@ -48,6 +48,11 @@ export function formatTime(iso: string): string {
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}`;
 }
 
+/** Heure seule (HH:MM), même pour un message d'un autre jour. */
+export function formatClock(iso: string): string {
+  return clock(new Date(iso));
+}
+
 export function formatListTimestamp(iso: string): string {
   const date = new Date(iso);
   const days = daysAgo(date);
@@ -167,7 +172,13 @@ export function conversationPreview(
           ? 'Message vocal'
           : last.attachment.type === 'IMAGE'
             ? 'Photo'
-            : 'Pièce jointe'
+            : last.attachment.type === 'VIDEO'
+              ? 'Vidéo'
+              : last.attachment.type === 'GIF'
+                ? 'GIF'
+                : last.attachment.type === 'STICKER'
+                  ? 'Sticker'
+                  : (last.attachment.name ?? 'Document')
       : last.content;
   if (mine) {
     const read = isReadByOthers(conversation, currentUserId, last.createdAt);

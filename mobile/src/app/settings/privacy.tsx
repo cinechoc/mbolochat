@@ -1,5 +1,5 @@
 import { Redirect, Stack, useRouter } from 'expo-router';
-import { Ban, ChevronRight, EyeOff, type LucideIcon } from 'lucide-react-native';
+import { Ban, ChevronRight, Clock, EyeOff, type LucideIcon } from 'lucide-react-native';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -30,6 +30,13 @@ export default function PrivacySettingsScreen() {
   }
 
   const rows: PrivacyRow[] = [
+    {
+      key: 'presence',
+      label: 'Dernière connexion et en ligne',
+      hint: 'Qui peut voir ta dernière connexion et ton statut en ligne',
+      icon: Clock,
+      onPress: () => router.push('/settings/presence'),
+    },
     {
       key: 'blocked',
       label: 'Comptes bloqués',

@@ -96,6 +96,7 @@ export default function ProfileScreen() {
         {profile ? (
           <ProfileHeader
             profile={profile}
+            showUsername
             actions={
               <ProfileAction
                 label="Modifier le profil"

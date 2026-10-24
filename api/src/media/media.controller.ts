@@ -8,6 +8,9 @@ import { MediaService } from './media.service.js';
 /** Préfixe sous lequel les fichiers sont rangés sur le disque. */
 const STORAGE_PREFIX = '/uploads/';
 
+/** Formats texte servis en pièce jointe, jamais interprétés par un navigateur. */
+const ATTACHMENT_EXTENSIONS = new Set(['.md', '.json', '.log']);
+
 @Controller('media')
 export class MediaController {
   constructor(private readonly media: MediaService) {}
@@ -49,7 +52,8 @@ export class MediaController {
     }
 
     // Ce que l'import ne sait pas écrire n'a rien à être servi : une seule table.
-    const type = kindForExtension(extname(target).toLowerCase())?.mime;
+    const extension = extname(target).toLowerCase();
+    const type = kindForExtension(extension)?.mime;
     if (!type) {
       throw new UnauthorizedException('Type de média non servi');
     }
@@ -58,6 +62,9 @@ export class MediaController {
     res.setHeader('Content-Type', type);
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (ATTACHMENT_EXTENSIONS.has(extension)) {
+      res.setHeader('Content-Disposition', `attachment; filename="${basename(target)}"`);
+    }
     res.sendFile(target, (error?: unknown) => {
       if (error) {
         res.status(404).end();

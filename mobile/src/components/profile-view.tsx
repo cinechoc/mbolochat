@@ -15,6 +15,8 @@ interface ProfileHeaderProps {
   onPressAvatar?: () => void;
   /** Affiche un voile pendant un changement de photo. */
   avatarBusy?: boolean;
+  /** Le pseudo n'est visible que par le propriétaire, sur son propre profil. */
+  showUsername?: boolean;
 }
 
 /** En-tête de profil façon Instagram : photo à gauche, informations à droite sur la même ligne. */
@@ -23,6 +25,7 @@ export function ProfileHeader({
   actions,
   onPressAvatar,
   avatarBusy = false,
+  showUsername = false,
 }: ProfileHeaderProps) {
   return (
     <View style={styles.header}>
@@ -39,10 +42,14 @@ export function ProfileHeader({
         </Pressable>
 
         <View style={styles.topRight}>
-          <ThemedText style={styles.username} numberOfLines={1}>
-            {profile.username}
-          </ThemedText>
-          <ThemedText style={styles.displayName} numberOfLines={1}>
+          {showUsername ? (
+            <ThemedText style={styles.username} numberOfLines={1}>
+              {profile.username}
+            </ThemedText>
+          ) : null}
+          <ThemedText
+            style={showUsername ? styles.displayName : styles.primaryName}
+            numberOfLines={1}>
             {profile.displayName}
           </ThemedText>
           {profile.bio ? (
@@ -187,6 +194,11 @@ const styles = StyleSheet.create({
   },
   bioBlock: {
     gap: 2,
+  },
+  primaryName: {
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 26,
   },
   displayName: {
     fontSize: 14,

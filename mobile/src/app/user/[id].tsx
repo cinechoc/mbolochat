@@ -113,7 +113,7 @@ export default function UserProfileScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen options={{ title: profile?.username ?? 'Profil' }} />
+      <Stack.Screen options={{ title: profile?.displayName ?? name ?? 'Profil' }} />
       <ScrollView
         contentContainerStyle={[
           styles.content,
@@ -122,6 +122,7 @@ export default function UserProfileScreen() {
         {profile ? (
           <ProfileHeader
             profile={profile}
+            showUsername={profile.isMe}
             actions={
               profile.isMe ? (
                 <ProfileAction

@@ -14,6 +14,16 @@ import {
 
 export const conversationTypeEnum = pgEnum('conversation_type', ['DIRECT', 'GROUP']);
 
+export const lastSeenVisibilityEnum = pgEnum('last_seen_visibility', [
+  'everyone',
+  'contacts',
+  'nobody',
+]);
+export const onlineVisibilityEnum = pgEnum('online_visibility', [
+  'everyone',
+  'same_as_last_seen',
+]);
+
 export const users = pgTable('users', {
   id: text('id')
     .primaryKey()
@@ -28,6 +38,14 @@ export const users = pgTable('users', {
   avatarUrl: text('avatar_url'),
   birthday: date('birthday'),
   gender: text('gender'),
+  /** Dernier passage en ligne → hors ligne, en UTC. */
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+  lastSeenVisibility: lastSeenVisibilityEnum('last_seen_visibility')
+    .notNull()
+    .default('contacts'),
+  onlineVisibility: onlineVisibilityEnum('online_visibility')
+    .notNull()
+    .default('same_as_last_seen'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -110,12 +128,13 @@ export const pushTokens = pgTable(
   ],
 );
 
-export type MessageAttachmentType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
+export type MessageAttachmentType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE' | 'GIF' | 'STICKER';
 
 /** Pièce jointe d'un message (photo pour l'instant, extensible). */
 export interface MessageAttachment {
   type: MessageAttachmentType;
-  /** Chemin relatif servi par l'API (« /uploads/… »). */
+  /** Chemin relatif servi par l'API (« /uploads/… »), ou URL absolue externe
+   *  (GIPHY : `https://media*.giphy.com/…`) chargée directement par l'app. */
   url: string;
   mime: string;
   size: number;
@@ -125,6 +144,22 @@ export interface MessageAttachment {
   duration?: number;
   /** Nom d'origine (fichiers). */
   name?: string;
+  /** GIF GIPHY : sticker animé transparent (sinon GIF plein cadre). */
+  sticker?: boolean;
+  /** Identifiant du GIF côté GIPHY. */
+  giphyId?: string;
+  /** Compte GIPHY source (attribution). */
+  username?: string;
+  /** Titre du GIF GIPHY. */
+  title?: string;
+  /** Aperçu statique (lenteur réseau) — même domaine allowlisté que `url`. */
+  stillUrl?: string;
+  /** Sticker Mbolo : identifiant stable dans le catalogue local. */
+  stickerId?: string;
+  /** Pack d'origine du sticker (local, personnel, futur pack téléchargé). */
+  stickerPackId?: string;
+  /** Nom accessible du sticker, affiché par les lecteurs d'écran. */
+  stickerName?: string;
 }
 
 /** Fichier importé par un utilisateur, avant (ou après) son envoi. */
@@ -140,9 +175,11 @@ export const uploads = pgTable(
     url: text('url').notNull(),
     mime: text('mime').notNull(),
     size: integer('size').notNull(),
+    /** Nom d'origine du fichier, affiché pour les documents. */
+    name: text('name'),
     width: integer('width'),
     height: integer('height'),
-    /** Durée d'un message vocal importé, en millisecondes. */
+    /** Durée d'un vocal ou d'une vidéo importée, en millisecondes. */
     durationMs: integer('duration_ms'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

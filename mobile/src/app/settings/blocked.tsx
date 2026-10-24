@@ -81,9 +81,6 @@ export default function BlockedUsersScreen() {
                 <Avatar name={item.displayName} uri={item.avatarUrl} size={40} />
                 <View style={styles.rowBody}>
                   <ThemedText style={styles.rowName}>{item.displayName}</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    @{item.username}
-                  </ThemedText>
                 </View>
                 <ThemedText style={styles.unblock}>Débloquer</ThemedText>
               </Pressable>

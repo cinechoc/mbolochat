@@ -196,9 +196,6 @@ export default function NewChatScreen() {
               </Pressable>
               <View style={styles.rowBody}>
                 <ThemedText style={styles.rowTitle}>{item.displayName}</ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  @{item.username}
-                </ThemedText>
               </View>
               {mode === 'group' ? (
                 isSelected ? (

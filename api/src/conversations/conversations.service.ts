@@ -13,6 +13,7 @@ import {
 } from '../db/schema.js';
 import { UploadsService } from '../uploads/uploads.service.js';
 import { UsersService } from '../users/users.service.js';
+import type { StickerAttachmentMeta } from '../chat/sticker-attachment.js';
 
 export interface SenderInfo {
   id: string;
@@ -783,6 +784,10 @@ export class ConversationsService {
     attachmentId?: string,
     clientId?: string,
     replyToId?: string,
+    // Pièce jointe GIF externe déjà normalisée par le gateway (allowlist GIPHY).
+    gifAttachment?: MessageAttachment | null,
+    // Métadonnées d'un sticker importé comme image ; le type final est STICKER.
+    sticker?: StickerAttachmentMeta | null,
   ): Promise<MessageDto> {
     if (!(await this.isMember(conversationId, senderId))) {
       throw new ForbiddenException('You are not a member of this conversation');
@@ -805,21 +810,36 @@ export class ConversationsService {
     }
 
     // La pièce jointe doit avoir été importée par l'expéditeur lui-même.
+    // Le GIF GIPHY, lui, n'est pas importé : son URL externe validée est
+    // stockée telle quelle (jamais re-hébergée ni altérée, exigence GIPHY).
     let attachment: MessageAttachment | null = null;
     if (attachmentId) {
       const upload = await this.uploadsService.findOwned(attachmentId, senderId);
       if (!upload) {
         throw new BadRequestException('Pièce jointe introuvable');
       }
+      if (sticker && !upload.mime.startsWith('image/')) {
+        throw new BadRequestException('Un sticker doit être une image');
+      }
       attachment = {
-        type: upload.type,
+        type: sticker ? 'STICKER' : upload.type,
         url: upload.url,
         mime: upload.mime,
         size: upload.size,
         width: upload.width,
         height: upload.height,
-        duration: upload.duration,
+        duration: sticker ? undefined : upload.duration,
+        name: sticker ? (sticker.name ?? upload.name) : upload.name,
+        ...(sticker
+          ? {
+              stickerId: sticker.id,
+              stickerPackId: sticker.packId,
+              ...(sticker.name !== undefined ? { stickerName: sticker.name } : {}),
+            }
+          : {}),
       };
+    } else if (gifAttachment) {
+      attachment = gifAttachment;
     }
 
     // Une réponse ne peut citer qu'un message de la même discussion.

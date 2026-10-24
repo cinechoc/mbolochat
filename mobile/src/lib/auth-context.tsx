@@ -1,9 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { cache } from './cache';
+import { resetEmojiStore } from '@/features/emoji/emoji-store';
+import { resetStickerStore } from '@/features/stickers/sticker-store';
 import { resetLocalStore } from './store';
 import { syncPushToken } from './push';
 import { disconnectSocket } from './socket';
+import { announcePresenceLogout } from '@/features/presence/presenceStore';
 import {
   clearStoredTokens,
   getCachedAccessToken,
@@ -100,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           // ignore
         }
+        await announcePresenceLogout();
         await clearStoredTokens();
         disconnectSocket();
         setToken(null);
@@ -107,8 +111,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         cache.flush();
         void cache.clear();
         // La file d'envoi et le curseur appartiennent à ce compte : ils ne
-        // doivent pas passer sur le suivant.
+        // doivent pas passer sur le suivant. L'historique d'émojis et les
+        // stickers personnels suivent la même règle.
         void resetLocalStore();
+        void resetEmojiStore();
+        void resetStickerStore();
       },
     }),
     [token, user, loading],

@@ -13,8 +13,11 @@ export interface MediaKind {
   extension: string;
   mime: string;
   type: MessageAttachmentType;
-  /** Ce qui accompagne le fichier : dimensions pour l'image, durée pour la voix. */
-  measures: 'image' | 'duration';
+  /**
+   * Ce qui accompagne le fichier : dimensions, durée, les deux (vidéo), ou rien
+   * (document).
+   */
+  measures: 'image' | 'duration' | 'video' | 'none';
 }
 
 const KINDS: MediaKind[] = [
@@ -24,13 +27,60 @@ const KINDS: MediaKind[] = [
   { extension: '.gif', mime: 'image/gif', type: 'IMAGE', measures: 'image' },
   { extension: '.heic', mime: 'image/heic', type: 'IMAGE', measures: 'image' },
   { extension: '.heif', mime: 'image/heif', type: 'IMAGE', measures: 'image' },
+  { extension: '.mp4', mime: 'video/mp4', type: 'VIDEO', measures: 'video' },
+  { extension: '.mov', mime: 'video/quicktime', type: 'VIDEO', measures: 'video' },
+  { extension: '.m4v', mime: 'video/x-m4v', type: 'VIDEO', measures: 'video' },
   { extension: '.m4a', mime: 'audio/mp4', type: 'AUDIO', measures: 'duration' },
   { extension: '.aac', mime: 'audio/aac', type: 'AUDIO', measures: 'duration' },
   { extension: '.mp3', mime: 'audio/mpeg', type: 'AUDIO', measures: 'duration' },
   { extension: '.ogg', mime: 'audio/ogg', type: 'AUDIO', measures: 'duration' },
   { extension: '.opus', mime: 'audio/opus', type: 'AUDIO', measures: 'duration' },
+  // .webm reste audio : une extension ne peut pas désigner deux formats servis.
   { extension: '.webm', mime: 'audio/webm', type: 'AUDIO', measures: 'duration' },
   { extension: '.wav', mime: 'audio/wav', type: 'AUDIO', measures: 'duration' },
+  { extension: '.pdf', mime: 'application/pdf', type: 'FILE', measures: 'none' },
+  { extension: '.doc', mime: 'application/msword', type: 'FILE', measures: 'none' },
+  {
+    extension: '.docx',
+    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    type: 'FILE',
+    measures: 'none',
+  },
+  { extension: '.xls', mime: 'application/vnd.ms-excel', type: 'FILE', measures: 'none' },
+  {
+    extension: '.xlsx',
+    mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    type: 'FILE',
+    measures: 'none',
+  },
+  { extension: '.ppt', mime: 'application/vnd.ms-powerpoint', type: 'FILE', measures: 'none' },
+  {
+    extension: '.pptx',
+    mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    type: 'FILE',
+    measures: 'none',
+  },
+  { extension: '.zip', mime: 'application/zip', type: 'FILE', measures: 'none' },
+  { extension: '.txt', mime: 'text/plain', type: 'FILE', measures: 'none' },
+  { extension: '.csv', mime: 'text/csv', type: 'FILE', measures: 'none' },
+  { extension: '.md', mime: 'text/markdown', type: 'FILE', measures: 'none' },
+  { extension: '.json', mime: 'application/json', type: 'FILE', measures: 'none' },
+  // MIME propre à .log : text/plain est déjà pris par .txt dans cette table.
+  { extension: '.log', mime: 'text/x-log', type: 'FILE', measures: 'none' },
+  { extension: '.rtf', mime: 'application/rtf', type: 'FILE', measures: 'none' },
+  { extension: '.odt', mime: 'application/vnd.oasis.opendocument.text', type: 'FILE', measures: 'none' },
+  {
+    extension: '.ods',
+    mime: 'application/vnd.oasis.opendocument.spreadsheet',
+    type: 'FILE',
+    measures: 'none',
+  },
+  {
+    extension: '.odp',
+    mime: 'application/vnd.oasis.opendocument.presentation',
+    type: 'FILE',
+    measures: 'none',
+  },
 ];
 
 const BY_EXTENSION = new Map(KINDS.map((kind) => [kind.extension, kind]));
@@ -48,6 +98,18 @@ const MIME_ALIASES: Record<string, string> = {
   'audio/x-pn-realaudio': '.wav',
   'audio/x-mpeg-3': '.mp3',
   'audio/x-caf': '.m4a',
+  'video/mov': '.mov',
+  'video/x-quicktime': '.mov',
+  'video/m4v': '.m4v',
+  'application/x-zip-compressed': '.zip',
+  'application/x-pdf': '.pdf',
+  'text/x-csv': '.csv',
+  'text/x-markdown': '.md',
+  'application/x-markdown': '.md',
+  'text/json': '.json',
+  'application/x-json': '.json',
+  'text/log': '.log',
+  'application/rtf': '.rtf',
 };
 
 export function kindForExtension(extension: string): MediaKind | undefined {

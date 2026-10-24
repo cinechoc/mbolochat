@@ -71,3 +71,22 @@ export function useKeyboardHeight(): number {
 
   return height;
 }
+
+/**
+ * Visibilité réelle du clavier. Sert à basculer entre le clavier et le panneau
+ * d'expression sans se fier à une hauteur calculée par le layout.
+ */
+export function useKeyboardVisible(): boolean {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setVisible(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setVisible(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  return visible;
+}

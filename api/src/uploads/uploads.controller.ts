@@ -29,7 +29,8 @@ export class UploadsController {
   upload(
     @CurrentUser() current: JwtPayload,
     @UploadedFile() file: Express.Multer.File | undefined,
-    @Body() body: { width?: string; height?: string; duration?: string; mime?: string },
+    @Body()
+    body: { width?: string; height?: string; duration?: string; mime?: string; name?: string },
   ) {
     const width = UploadsController.parseNumber(body?.width, 'largeur');
     const height = UploadsController.parseNumber(body?.height, 'hauteur');
@@ -39,6 +40,7 @@ export class UploadsController {
       height,
       durationMs,
       mime: body?.mime,
+      name: body?.name,
     });
   }
 

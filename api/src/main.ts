@@ -12,6 +12,9 @@ import { DRIZZLE, type Database } from './db/db.module.js';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Sans ceci, SIGTERM ne déclencherait pas onApplicationShutdown : la
+  // dernière présence ne serait pas écrite en base avant l'arrêt.
+  app.enableShutdownHooks();
   const config = app.get(ConfigService);
 
   // En-têtes de sécurité. La CSP reste fermée : le client web servi par la même

@@ -7,15 +7,28 @@ import { DRIZZLE, type Database } from '../db/db.module.js';
 import { uploads, type MessageAttachment, type MessageAttachmentType } from '../db/schema.js';
 import { detectKind, type MediaKind } from './media-kinds.js';
 
-/** Taille maximale d'un fichier importé (15 Mo). */
-export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+/** Plafond multer ; les limites par type, plus basses, sont vérifiées ensuite. */
+export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
-/** Ce que l'appareil joint à l'import : dimensions d'image ou durée de voix. */
+const KIND_MAX_BYTES: Record<MessageAttachmentType, number> = {
+  IMAGE: 25 * 1024 * 1024,
+  VIDEO: 50 * 1024 * 1024,
+  AUDIO: 15 * 1024 * 1024,
+  FILE: 25 * 1024 * 1024,
+  // Les GIF externes ne passent pas par l'import ; cette entrée garde la table
+  // exhaustive vis-à-vis du type partagé.
+  GIF: 15 * 1024 * 1024,
+  // Un sticker est une petite image PNG/JPEG : la limite IMAGE s'applique.
+  STICKER: 25 * 1024 * 1024,
+};
+
+/** Ce que l'appareil joint à l'import : dimensions, durée, nom d'origine. */
 export interface UploadMeta {
   width?: number;
   height?: number;
   durationMs?: number;
   mime?: string;
+  name?: string;
 }
 
 export interface UploadDto extends MessageAttachment {
@@ -36,12 +49,15 @@ export class UploadsService {
     }
     // Le type déclaré dans le formulaire ne sert que d'indice : c'est le nom du
     // fichier qui tranche, et le type canonique qui est retenu.
-    const kind = detectKind(file.originalname, [file.mimetype, meta.mime]);
+    const kind = detectKind(file.originalname || meta.name, [file.mimetype, meta.mime]);
     if (!kind) {
       throw new BadRequestException('Format non pris en charge');
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      throw new BadRequestException('Fichier trop volumineux (15 Mo maximum)');
+    const maxBytes = KIND_MAX_BYTES[kind.type];
+    if (file.size > maxBytes) {
+      throw new BadRequestException(
+        `Fichier trop volumineux (${Math.round(maxBytes / (1024 * 1024))} Mo maximum)`,
+      );
     }
 
     // Range les fichiers par mois : uploads/2026/10/<uuid>.m4a
@@ -53,9 +69,12 @@ export class UploadsService {
     await writeFile(join(directory, fileName), file.buffer);
 
     const relativeUrl = `/uploads/${folder}/${fileName}`;
-    const width = kind.measures === 'image' ? this.round(meta.width) : null;
-    const height = kind.measures === 'image' ? this.round(meta.height) : null;
-    const durationMs = kind.measures === 'duration' ? this.round(meta.durationMs) : null;
+    const hasDimensions = kind.measures === 'image' || kind.measures === 'video';
+    const hasDuration = kind.measures === 'duration' || kind.measures === 'video';
+    const width = hasDimensions ? this.round(meta.width) : null;
+    const height = hasDimensions ? this.round(meta.height) : null;
+    const durationMs = hasDuration ? this.round(meta.durationMs) : null;
+    const name = this.cleanName(meta.name || file.originalname, kind);
 
     const [row] = await this.db
       .insert(uploads)
@@ -64,13 +83,14 @@ export class UploadsService {
         url: relativeUrl,
         mime: kind.mime,
         size: file.size,
+        name,
         width,
         height,
         durationMs,
       })
       .returning();
 
-    return this.toDto(row.id, relativeUrl, kind, row.size, width, height, durationMs);
+    return this.toDto(row.id, relativeUrl, kind, row.size, width, height, durationMs, name);
   }
 
   /** Le fichier appartient-il bien à cet utilisateur ? */
@@ -89,11 +109,12 @@ export class UploadsService {
       row.url,
       // Un fichier déjà en base garde sa nature, même si la table des formats
       // changeait entre-temps : le type stocké prime sur la déduction.
-      kind ?? { extension: '', mime: row.mime, type: typeOf(row.mime), measures: 'image' },
+      kind ?? { extension: '', mime: row.mime, type: typeOf(row.mime), measures: 'none' },
       row.size,
       row.width,
       row.height,
       row.durationMs,
+      row.name,
     );
   }
 
@@ -105,6 +126,7 @@ export class UploadsService {
     width: number | null,
     height: number | null,
     durationMs: number | null,
+    name: string | null,
   ): UploadDto {
     return {
       id,
@@ -115,7 +137,32 @@ export class UploadsService {
       width: width ?? undefined,
       height: height ?? undefined,
       duration: durationMs ?? undefined,
+      name: name ?? undefined,
     };
+  }
+
+  private cleanName(raw: string | undefined, kind: MediaKind): string {
+    const leaf = (raw ?? '').split(/[\\/]/).pop() ?? '';
+    const base = Array.from(leaf)
+      .filter((char) => {
+        const code = char.codePointAt(0) ?? 0;
+        return code >= 32 && code !== 127;
+      })
+      .join('')
+      .trim();
+    if (base && base !== '.' && base !== '..') {
+      return base.slice(0, 200);
+    }
+    switch (kind.type) {
+      case 'IMAGE':
+        return `photo${kind.extension}`;
+      case 'VIDEO':
+        return `video${kind.extension}`;
+      case 'AUDIO':
+        return `audio${kind.extension}`;
+      default:
+        return `fichier${kind.extension}`;
+    }
   }
 
   private round(value: number | undefined): number | null {
@@ -125,6 +172,9 @@ export class UploadsService {
 
 /** La nature d'un fichier importé se lit dans son type MIME. */
 function typeOf(mime: string): MessageAttachmentType {
-  return mime.startsWith('audio/') ? 'AUDIO' : 'IMAGE';
+  if (mime.startsWith('audio/')) return 'AUDIO';
+  if (mime.startsWith('video/')) return 'VIDEO';
+  if (mime.startsWith('image/')) return 'IMAGE';
+  return 'FILE';
 }
 

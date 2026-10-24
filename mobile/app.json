@@ -62,10 +62,13 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "MboloChat utilise le micro pour enregistrer les messages vocaux que tu envoies."
+          "microphonePermission": "Cette app utilise le micro pour enregistrer vos messages vocaux."
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "expo-video",
+      "expo-sharing",
+      "react-native-blob-util"
     ],
     "experiments": {
       "typedRoutes": true,

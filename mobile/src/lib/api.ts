@@ -8,6 +8,8 @@ import type {
   Gender,
   Message,
   MessageReceipt,
+  PresenceSettings,
+  PresenceSnapshot,
   ResetPasswordResult,
   UploadResult,
   User,
@@ -192,46 +194,110 @@ export const api = {
       height?: number;
       durationMs?: number;
     },
+    onProgress?: (fraction: number, uploadedBytes: number, totalBytes: number) => void,
   ): Promise<UploadResult> {
-    const post = (accessToken: string) => {
+    const buildForm = () => {
       const form = new FormData();
-      // `fetch` d'Expo (implémentation WinterCG) n'accepte pas l'objet
-      // propriétaire de React Native ({ uri, name, type }) : il faut un Blob.
-      // `File` d'expo-file-system en implémente l'interface et lit le fichier
-      // à la demande.
+      // `File` d'expo-file-system implémente Blob et lit le fichier à la
+      // demande ; le boundary multipart reste géré par la plateforme.
       form.append('file', new File(asset.uri) as unknown as Blob);
       if (asset.mimeType) form.append('mime', asset.mimeType);
+      if (asset.fileName) form.append('name', asset.fileName);
       if (asset.width) form.append('width', String(Math.round(asset.width)));
       if (asset.height) form.append('height', String(Math.round(asset.height)));
       if (asset.durationMs) form.append('duration', String(Math.round(asset.durationMs)));
-      return fetch(`${API_URL}/uploads`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
-        body: form,
-      });
+      return form;
     };
 
-    let response = await post(token).catch((error: unknown) => {
-      console.warn('UPLOAD_FAIL', error);
-      throw new ApiError(0, "Impossible d'envoyer le fichier. Vérifie ta connexion.");
-    });
-    if (response.status === 401) {
-      const fresh = await refreshAccessToken();
-      response = await post(fresh);
-    }
-    if (!response.ok) {
-      let message = `Envoi impossible (${response.status})`;
+    // XHR est le seul transport RN qui expose la progression d'un FormData.
+    const post = (accessToken: string) =>
+      new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_URL}/uploads`);
+        xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
+        xhr.timeout = 120_000;
+        if (onProgress && xhr.upload) {
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable && event.total > 0) {
+              onProgress(event.loaded / event.total, event.loaded, event.total);
+            }
+          };
+        }
+        xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText });
+        xhr.onerror = () => reject(new Error('network'));
+        xhr.ontimeout = () => reject(new Error('timeout'));
+        xhr.onabort = () => reject(new Error('aborted'));
+        xhr.send(buildForm());
+      });
+
+    // Certains builds natifs gèrent mal FormData/File avec XHR : le transport
+    // fetch historique reste le repli sans progression.
+    const postWithFetch = async (accessToken: string): Promise<UploadResult> => {
+      const send = (tokenToUse: string) =>
+        fetch(`${API_URL}/uploads`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${tokenToUse}` },
+          body: buildForm(),
+        });
+      let response = await send(accessToken);
+      if (response.status === 401) {
+        response = await send(await refreshAccessToken());
+      }
+      if (!response.ok) {
+        let message = `Envoi impossible (${response.status})`;
+        try {
+          const data = (await response.json()) as { message?: string | string[] };
+          if (data.message) {
+            message = Array.isArray(data.message) ? data.message.join(', ') : data.message;
+          }
+        } catch {
+          // garde le message par défaut
+        }
+        throw new ApiError(response.status, message);
+      }
+      return (await response.json()) as UploadResult;
+    };
+
+    const networkError = new ApiError(
+      0,
+      "Impossible d'envoyer le fichier. Vérifie ta connexion.",
+    );
+    let result: { status: number; body: string };
+    try {
+      result = await post(token);
+    } catch {
       try {
-        const data = (await response.json()) as { message?: string | string[] };
+        return await postWithFetch(token);
+      } catch (fallbackError) {
+        if (fallbackError instanceof ApiError) throw fallbackError;
+        throw networkError;
+      }
+    }
+    if (result.status === 401) {
+      const fresh = await refreshAccessToken();
+      try {
+        result = await post(fresh);
+      } catch {
+        throw networkError;
+      }
+    }
+    if (result.status < 200 || result.status >= 300) {
+      let message = `Envoi impossible (${result.status})`;
+      try {
+        const data = JSON.parse(result.body) as { message?: string | string[] };
         if (data.message) {
           message = Array.isArray(data.message) ? data.message.join(', ') : data.message;
         }
       } catch {
         // garde le message par défaut
       }
-      throw new ApiError(response.status, message);
+      throw new ApiError(result.status, message);
     }
-    return (await response.json()) as UploadResult;
+    try {
+      return JSON.parse(result.body) as UploadResult;
+    } catch {
+      throw new ApiError(result.status, 'Réponse du serveur invalide.');
+    }
   },
 
   forgotPassword(body: { emailOrUsername: string }) {
@@ -361,5 +427,24 @@ export const api = {
       token,
       body: { token: pushToken },
     });
+  },
+
+  getPresenceSettings(token: string) {
+    return request<PresenceSettings>('/me/presence-settings', { token });
+  },
+
+  updatePresenceSettings(token: string, body: Partial<PresenceSettings>) {
+    return request<PresenceSettings>('/me/presence-settings', {
+      method: 'PATCH',
+      token,
+      body,
+    });
+  },
+
+  getPresence(token: string, ids: string[]) {
+    return request<PresenceSnapshot>(
+      `/presence?ids=${encodeURIComponent(ids.join(','))}`,
+      { token },
+    );
   },
 };

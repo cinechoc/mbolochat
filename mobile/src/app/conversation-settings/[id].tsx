@@ -181,9 +181,6 @@ export default function ConversationSettingsScreen() {
                     </ThemedText>
                   ) : null}
                 </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  @{m.username}
-                </ThemedText>
               </ThemedView>
               {m.id === user.id ? (
                 <Pressable onPress={() => removeMember(m.id)}>
@@ -222,9 +219,6 @@ export default function ConversationSettingsScreen() {
                 <Avatar name={u.displayName} uri={u.avatarUrl} size={36} />
                 <ThemedView style={styles.memberBody}>
                   <ThemedText>{u.displayName}</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    @{u.username}
-                  </ThemedText>
                 </ThemedView>
                 {adding === u.id ? <ActivityIndicator /> : <Plus size={20} color={accentColor} />}
               </Pressable>

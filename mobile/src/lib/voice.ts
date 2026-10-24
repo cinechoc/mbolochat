@@ -1,5 +1,5 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
-import type { ComponentType } from 'react';
+import type { ComponentType, Ref } from 'react';
 
 /**
  * Capacités audio : enregistrer et réécouter un message vocal.
@@ -17,9 +17,17 @@ export interface VoiceTake {
   mime: string;
 }
 
+export interface VoiceRecorderHandle {
+  /** Termine l'enregistrement en cours : `true` envoie, `false` annule. */
+  finish: (send: boolean) => void;
+}
+
 export interface VoiceRecorderProps {
+  /** Verrouillé : le relâchement n'arrête plus la capture, les boutons reviennent. */
+  locked: boolean;
   onFinished: (take: VoiceTake) => void;
   onCancel: () => void;
+  ref?: Ref<VoiceRecorderHandle>;
 }
 
 export interface VoiceBubbleProps {

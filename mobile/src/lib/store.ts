@@ -17,21 +17,32 @@ export interface OutboxItem {
   content: string;
   /** Message cité par une réponse. */
   replyTo: string | null;
-  /** Photo ou message vocal en attente d'import : chemin local, pas sur le serveur. */
+  /** Média en attente d'import : chemin local, pas sur le serveur. */
   localUri: string | null;
-  /** Ce que porte ce fichier local. */
-  kind: 'image' | 'audio';
-  /** Durée d'un message vocal, en millisecondes. */
+  /** Ce que porte ce fichier local. GIF : pièce jointe externe sans import. */
+  kind: 'image' | 'video' | 'file' | 'audio' | 'gif' | 'sticker';
+  /** Durée d'un vocal ou d'une vidéo, en millisecondes. */
   durationMs: number | null;
   mime: string | null;
   width: number | null;
   height: number | null;
+  /** Nom affiché, notamment pour les documents. */
+  name: string | null;
+  /** Taille du fichier local, en octets. */
+  size: number | null;
+  /** Pièce jointe GIF GIPHY (JSON sérialisé) : aucun fichier local. */
+  external: string | null;
   /** Identifiant d'import déjà réussi : une reprise ne retélécharge pas. */
   uploadId: string | null;
   status: OutboxStatus;
   attempts: number;
   error: string | null;
   createdAt: number;
+  /** Progression locale (0..100), volontairement non persistée. */
+  progress: number | null;
+  /** Octets d'upload pour l'UI, volontairement non persistés. */
+  uploadedBytes: number | null;
+  totalBytes: number | null;
 }
 
 export interface LocalStore {
@@ -91,7 +102,10 @@ type Row = {
   mime: string | null;
   width: number | null;
   height: number | null;
+  name: string | null;
+  size: number | null;
   upload_id: string | null;
+  external: string | null;
   status: string;
   attempts: number;
   error: string | null;
@@ -110,7 +124,10 @@ create table if not exists outbox (
   mime text,
   width integer,
   height integer,
+  name text,
+  size integer,
   upload_id text,
+  external text,
   status text not null,
   attempts integer not null default 0,
   error text,
@@ -135,7 +152,10 @@ const toParams = (item: OutboxItem): Record<string, string | number | null> => (
   $mime: item.mime,
   $width: item.width,
   $height: item.height,
+  $name: item.name,
+  $size: item.size,
   $upload_id: item.uploadId,
+  $external: item.external,
   $status: item.status,
   $attempts: item.attempts,
   $error: item.error,
@@ -148,16 +168,29 @@ const fromRow = (row: Row): OutboxItem => ({
   content: row.content,
   replyTo: row.reply_to,
   localUri: row.local_uri,
-  kind: row.kind === 'audio' ? 'audio' : 'image',
+  kind:
+    row.kind === 'audio' ||
+    row.kind === 'video' ||
+    row.kind === 'file' ||
+    row.kind === 'gif' ||
+    row.kind === 'sticker'
+      ? row.kind
+      : 'image',
   durationMs: row.duration_ms,
   mime: row.mime,
   width: row.width,
   height: row.height,
+  name: row.name,
+  size: row.size,
   uploadId: row.upload_id,
+  external: row.external,
   status: row.status as OutboxStatus,
   attempts: row.attempts,
   error: row.error,
   createdAt: row.created_at,
+  progress: null,
+  uploadedBytes: null,
+  totalBytes: null,
 });
 
 interface Database {
@@ -182,6 +215,12 @@ async function openSqlite(): Promise<Database> {
   const instance = await SQLite.openDatabaseAsync('mbolochat.db');
   await instance.execAsync('pragma journal_mode = wal;');
   await instance.execAsync(SCHEMA);
+  const columns = await instance.getAllAsync<{ name: string }>('pragma table_info(outbox)');
+  const names = new Set(columns.map((column) => column.name));
+  if (!names.has('name')) await instance.execAsync('alter table outbox add column name text;');
+  if (!names.has('size')) await instance.execAsync('alter table outbox add column size integer;');
+  if (!names.has('external'))
+    await instance.execAsync('alter table outbox add column external text;');
   return instance;
 }
 
@@ -189,15 +228,21 @@ function sqliteStore(db: Database): LocalStore {
   return {
     async save(item) {
       await db.runAsync(
-        `insert into outbox (client_id, conversation_id, content, reply_to, local_uri, kind, duration_ms, mime, width, height, upload_id, status, attempts, error, created_at)
-         values ($client_id, $conversation_id, $content, $reply_to, $local_uri, $kind, $duration_ms, $mime, $width, $height, $upload_id, $status, $attempts, $error, $created_at)
+        `insert into outbox (client_id, conversation_id, content, reply_to, local_uri, kind, duration_ms, mime, width, height, name, size, upload_id, external, status, attempts, error, created_at)
+         values ($client_id, $conversation_id, $content, $reply_to, $local_uri, $kind, $duration_ms, $mime, $width, $height, $name, $size, $upload_id, $external, $status, $attempts, $error, $created_at)
          on conflict (client_id) do update set
            content = excluded.content,
+           reply_to = excluded.reply_to,
            local_uri = excluded.local_uri,
+           kind = excluded.kind,
+           duration_ms = excluded.duration_ms,
            mime = excluded.mime,
            width = excluded.width,
            height = excluded.height,
+           name = excluded.name,
+           size = excluded.size,
            upload_id = excluded.upload_id,
+           external = excluded.external,
            status = excluded.status,
            attempts = excluded.attempts,
            error = excluded.error`,

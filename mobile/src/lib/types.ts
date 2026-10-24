@@ -36,13 +36,14 @@ export interface UserProfile extends User {
   };
 }
 
-export type MessageAttachmentType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
+export type MessageAttachmentType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE' | 'GIF' | 'STICKER';
 
 /** Pièce jointe d'un message (photo pour l'instant). */
 export interface MessageAttachment {
   type: MessageAttachmentType;
   /** Chemin relatif signé et éphémère renvoyé par l'API (« /media?f=… »), ou
-   *  URI locale pendant l'envoi optimiste. */
+   *  URI locale pendant l'envoi optimiste, ou URL absolue externe (GIPHY :
+   *  `https://media*.giphy.com/…`) chargée directement depuis les CDN. */
   url: string;
   mime: string;
   size: number;
@@ -51,6 +52,48 @@ export interface MessageAttachment {
   /** Durée d'un message vocal, en millisecondes. */
   duration?: number;
   name?: string;
+  /** GIF GIPHY : sticker animé transparent (sinon GIF plein cadre). */
+  sticker?: boolean;
+  /** Identifiant du GIF côté GIPHY. */
+  giphyId?: string;
+  /** Compte GIPHY source (attribution). */
+  username?: string;
+  /** Titre du GIF GIPHY. */
+  title?: string;
+  /** Aperçu statique remplaçant l'animation le temps du chargement. */
+  stillUrl?: string;
+  /** Sticker Mbolo : identifiant stable dans le catalogue. */
+  stickerId?: string;
+  /** Pack d'origine (catalogue local ou stickers personnels). */
+  stickerPackId?: string;
+  /** Nom accessible du sticker. */
+  stickerName?: string;
+}
+
+/** Métadonnées envoyées avec un sticker importé comme image. */
+export interface StickerSendPayload {
+  id: string;
+  packId: string;
+  name?: string;
+  /** Dimensions de l'image locale, pour un aperçu optimiste fidèle. */
+  width?: number;
+  height?: number;
+}
+
+/** Payload GIF GIPHY transmis du panneau à la file d'attente puis au serveur.
+ *  Le serveur revalide l'URL (allowlist media*.giphy.com) avant stockage. */
+export interface GifSendPayload {
+  /** Rendu d'envoi (`fixed_width`, WebP) — URL GIPHY jamais altérée. */
+  url: string;
+  width?: number;
+  height?: number;
+  /** Sticker animé transparent. */
+  sticker?: boolean;
+  giphyId?: string;
+  username?: string;
+  title?: string;
+  /** Aperçu statique (mêmes règles d'allowlist). */
+  stillUrl?: string;
 }
 
 export interface UploadResult extends MessageAttachment {
@@ -106,6 +149,26 @@ export interface ConversationSummary {
   hidden: boolean;
   /** Mon rôle : seuls les administrateurs pilotent un groupe. */
   myRole: 'admin' | 'member';
+}
+
+export type LastSeenVisibility = 'everyone' | 'contacts' | 'nobody';
+export type OnlineVisibility = 'everyone' | 'same_as_last_seen';
+
+export interface PresenceSettings {
+  lastSeenVisibility: LastSeenVisibility;
+  onlineVisibility: OnlineVisibility;
+}
+
+/** Un champ absent signifie que le serveur ne l'a pas autorisé. */
+export interface PresenceEntry {
+  userId: string;
+  online?: boolean;
+  lastSeenAt?: string | null;
+}
+
+export interface PresenceSnapshot {
+  serverNow: string;
+  presence: PresenceEntry[];
 }
 
 export interface AuthResult {

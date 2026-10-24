@@ -2,7 +2,9 @@ import { DarkTheme, DefaultTheme, Stack, ThemeProvider, router } from 'expo-rout
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import { PresenceProvider } from '@/features/presence/PresenceProvider';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
@@ -21,14 +23,17 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <AuthProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <StatusBar style="auto" />
-        <RootNavigator />
-        <NotificationRouter />
-        <ReliabilityLoop />
-      </ThemeProvider>
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <StatusBar style="auto" />
+          <RootNavigator />
+          <NotificationRouter />
+          <ReliabilityLoop />
+          <PresenceProvider />
+        </ThemeProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -124,6 +129,7 @@ function RootNavigator() {
       <Stack.Screen name="chats" options={{ headerShown: false }} />
       <Stack.Screen name="new-chat" options={{ title: 'Nouvelle discussion' }} />
       <Stack.Screen name="chat/[id]" options={{ title: '' }} />
+      <Stack.Screen name="document-viewer" options={{ headerShown: false }} />
       <Stack.Screen name="profile" options={{ title: 'Profil' }} />
       <Stack.Screen name="profile/edit" options={{ title: 'Modifier le profil' }} />
       <Stack.Screen name="user/[id]" options={{ title: 'Profil' }} />

@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module.js';
 import { ChatModule } from './chat/chat.module.js';
+import { AppThrottlerGuard } from './common/app-throttler.guard.js';
 import { ConversationsModule } from './conversations/conversations.module.js';
 import { DbModule } from './db/db.module.js';
 import { MediaModule } from './media/media.module.js';
+import { PresenceModule } from './presence/presence.module.js';
 import { UploadsModule } from './uploads/uploads.module.js';
 import { UsersModule } from './users/users.module.js';
 
@@ -33,8 +35,9 @@ import { UsersModule } from './users/users.module.js';
     ConversationsModule,
     UploadsModule,
     MediaModule,
+    PresenceModule,
     ChatModule,
   ],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }],
 })
 export class AppModule {}

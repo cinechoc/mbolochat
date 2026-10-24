@@ -1,5 +1,6 @@
 import { Redirect, Stack, useRouter } from 'expo-router';
 import {
+  AtSign,
   Ban,
   Bell,
   CircleUserRound,
@@ -41,6 +42,12 @@ export default function SettingsScreen() {
   }
 
   const accountRows: SettingRow[] = [
+    {
+      key: 'username',
+      label: 'Nom d’utilisateur',
+      icon: AtSign,
+      value: `@${user.username}`,
+    },
     {
       key: 'edit-profile',
       label: 'Modifier le profil',

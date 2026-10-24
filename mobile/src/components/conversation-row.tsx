@@ -1,4 +1,15 @@
-import { BellOff, Check, CheckCheck, Image as ImageIcon, Mic, Pin } from 'lucide-react-native';
+import {
+  BellOff,
+  Check,
+  CheckCheck,
+  FileText,
+  Film,
+  Image as ImageIcon,
+  Mic,
+  Pin,
+  Sticker,
+  Video,
+} from 'lucide-react-native';
 import { memo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
@@ -13,6 +24,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { accentColor } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
+import { PresenceDot } from '@/features/presence/PresenceDot';
 import { useTheme } from '@/hooks/use-theme';
 import { conversationPreview, conversationTitle, formatListTimestamp } from '@/lib/format';
 import type { ConversationSummary } from '@/lib/types';
@@ -82,7 +94,10 @@ function ConversationRowComponent({
         pressProgress.value = withTiming(0, { duration: 160 });
       }}
       style={[styles.row, rowAnimatedStyle]}>
-      <Avatar name={title} uri={avatarUri} size={52} />
+      <View>
+        <Avatar name={title} uri={avatarUri} size={52} />
+        {!isGroup && other ? <PresenceDot userId={other.id} /> : null}
+      </View>
       <View style={styles.body}>
         <View style={styles.titleRow}>
           <ThemedText numberOfLines={1} style={[styles.title, unread && styles.bold]}>
@@ -105,8 +120,16 @@ function ConversationRowComponent({
           ) : !typing && conversation.lastMessage?.attachment ? (
             conversation.lastMessage.attachment.type === 'IMAGE' ? (
               <ImageIcon size={14} strokeWidth={2.2} color={theme.textSecondary} />
-            ) : (
+            ) : conversation.lastMessage.attachment.type === 'VIDEO' ? (
+              <Video size={14} strokeWidth={2.2} color={theme.textSecondary} />
+            ) : conversation.lastMessage.attachment.type === 'AUDIO' ? (
               <Mic size={14} strokeWidth={2.2} color={theme.textSecondary} />
+            ) : conversation.lastMessage.attachment.type === 'GIF' ? (
+              <Film size={14} strokeWidth={2.2} color={theme.textSecondary} />
+            ) : conversation.lastMessage.attachment.type === 'STICKER' ? (
+              <Sticker size={14} strokeWidth={2.2} color={theme.textSecondary} />
+            ) : (
+              <FileText size={14} strokeWidth={2.2} color={theme.textSecondary} />
             )
           ) : null}
           <ThemedText

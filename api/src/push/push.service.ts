@@ -156,7 +156,15 @@ export class PushService {
           ? previewOf(message.content)
           : message.attachment.type === 'AUDIO'
             ? '🎤 Message vocal'
-            : '📷 Photo'
+            : message.attachment.type === 'VIDEO'
+              ? '🎬 Vidéo'
+              : message.attachment.type === 'FILE'
+                ? '📎 Fichier'
+                : message.attachment.type === 'GIF'
+                  ? '🎞️ GIF'
+                  : message.attachment.type === 'STICKER'
+                    ? '✨ Sticker'
+                    : '📷 Photo'
         : previewOf(message.content);
       const body = conversation.type === 'GROUP' ? `${message.sender.displayName} : ${text}` : text;
 

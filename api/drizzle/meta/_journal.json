@@ -120,6 +120,20 @@
       "when": 1792538104808,
       "tag": "0016_voice_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792725259624,
+      "tag": "0017_rapid_bullseye",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792756338856,
+      "tag": "0018_presence",
+      "breakpoints": true
     }
   ]
 }

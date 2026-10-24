@@ -1,6 +1,6 @@
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { SendHorizontal, X } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   runOnJS,
@@ -158,7 +158,7 @@ const WaveTrack = memo(function WaveTrack({
  * Ce fichier est le seul à importer `expo-audio` pour l'enregistrement, et il
  * n'est chargé qu'après vérification que l'appareil sait le faire.
  */
-export function VoiceRecorder({ onFinished, onCancel }: VoiceRecorderProps) {
+export function VoiceRecorder({ locked, onFinished, onCancel, ref }: VoiceRecorderProps) {
   const theme = useTheme();
   const recorder = useAudioRecorder(RECORDING_OPTIONS);
   const [seconds, setSeconds] = useState(0);
@@ -178,7 +178,11 @@ export function VoiceRecorder({ onFinished, onCancel }: VoiceRecorderProps) {
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       // `record()` sans préparation ne démarre rien : le chrono resterait à zéro.
       await recorder.prepareToRecordAsync();
-      recorder.record();
+      // Un relâchement immédiat a pu terminer la capture avant la fin de la
+      // préparation : ne rallume pas le micro pour un take déjà jeté.
+      if (!finishedRef.current) {
+        recorder.record();
+      }
     })().catch(() => onCancelRef.current());
     const tick = setInterval(() => {
       const current = Math.round(recorder.currentTime);
@@ -192,6 +196,10 @@ export function VoiceRecorder({ onFinished, onCancel }: VoiceRecorderProps) {
     }, 400);
     return () => {
       clearInterval(tick);
+      if (!finishedRef.current) {
+        // Quitter l'écran en pleine capture ne doit pas laisser le micro ouvert.
+        void recorder.stop().catch(() => undefined);
+      }
       void setAudioModeAsync({ allowsRecording: false });
     };
   }, [recorder]);
@@ -203,9 +211,20 @@ export function VoiceRecorder({ onFinished, onCancel }: VoiceRecorderProps) {
       }
       finishedRef.current = true;
       void (async () => {
-        await recorder.stop();
-        const durationMs = longestRef.current * 1000;
-        const uri = recorder.uri;
+        let durationMs = Math.round(longestRef.current * 1000);
+        let uri: string | null = null;
+        try {
+          // `stop()` remet la position à zéro : la durée doit être lue avant.
+          durationMs = Math.round(
+            Math.max(longestRef.current, recorder.currentTime) * 1000
+          );
+          await recorder.stop();
+          uri = recorder.uri;
+        } catch {
+          // Arrêt demandé pendant la préparation : la capture n'a jamais démarré.
+          onCancel();
+          return;
+        }
         if (!send || !uri || durationMs < 500) {
           onCancel();
           return;
@@ -216,6 +235,8 @@ export function VoiceRecorder({ onFinished, onCancel }: VoiceRecorderProps) {
     [onCancel, onFinished, recorder],
   );
 
+  useImperativeHandle(ref, () => ({ finish }), [finish]);
+
   // La temporisation appelle toujours la dernière version, sans relancer l'enregistrement.
   useEffect(() => {
     finishRef.current = finish;
@@ -223,25 +244,29 @@ export function VoiceRecorder({ onFinished, onCancel }: VoiceRecorderProps) {
 
   return (
     <View style={styles.row}>
-      <Pressable
-        onPress={() => void finish(false)}
-        hitSlop={10}
-        accessibilityRole="button"
-        accessibilityLabel="Annuler l’enregistrement"
-        style={styles.cancel}>
-        <X size={22} color={theme.text} />
-      </Pressable>
+      {locked ? (
+        <Pressable
+          onPress={() => void finish(false)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Annuler l’enregistrement"
+          style={styles.cancel}>
+          <X size={22} color={theme.text} />
+        </Pressable>
+      ) : null}
       <View style={styles.recordingDot} />
       <ThemedText style={styles.timer}>{formatDuration(seconds * 1000)}</ThemedText>
       <WaveTrack recorder={recorder} />
-      <Pressable
-        onPress={() => void finish(true)}
-        hitSlop={10}
-        accessibilityRole="button"
-        accessibilityLabel="Envoyer le message vocal"
-        style={styles.send}>
-        <SendHorizontal size={22} strokeWidth={2.4} color="#ffffff" />
-      </Pressable>
+      {locked ? (
+        <Pressable
+          onPress={() => void finish(true)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Envoyer le message vocal"
+          style={styles.send}>
+          <SendHorizontal size={22} strokeWidth={2.4} color="#ffffff" />
+        </Pressable>
+      ) : null}
     </View>
   );
 }

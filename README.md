@@ -119,6 +119,8 @@ WebSocket (Socket.IO, auth par `auth.token` avec access token 15 min) :
 - Profil : avatar uploadé sur disque, servi par URL signée, édition du nom affiché
 - Groupes : création, renommage, ajout/retrait de membres, **rôles administrateur/membre** (seul un admin pilote le groupe, et le dernier admin qui part en promeut un autre)
 - Messages : photos (galerie ou appareil photo), **messages vocaux** (enregistrement, durée, lecture), citations/réponses, copie
+- Émojis : sélecteur Unicode natif (catalogue emojibase, recherche FR, récents et favoris persistés)
+- **GIPHY : stickers animés et GIFs** (section « Stickers & GIFs » du panneau de pièces jointes) — recherche, tendances, aperçu avant envoi, envoi dans la conversation ; détails ci-dessous
 - Modération : suppression pour soi (masquée de la seule vue de l'auteur de la demande) ou pour tous (auteur uniquement, tombstone « Message supprimé »)
 - Fiabilité : **file d'envoi persistée sur l'appareil** (SQLite, survit à la coupure et à la fermeture de l'app), `clientId` idempotent côté serveur, rattrapage `GET /conversations/sync`
 - Accusés de réception message par message : reçu (double coche grise) et lu (double coche bleue), diffusés en temps réel
@@ -126,6 +128,21 @@ WebSocket (Socket.IO, auth par `auth.token` avec access token 15 min) :
 - Liste de conversations façon WhatsApp : sections, filtres, non-lus, épinglage, sourdine, **masquage**, actions sur appui long
 - Sécurité : URLs de médias signées et expirantes, rate limiting, en-têtes Helmet, CORS restreint par `CORS_ORIGINS`, jetons push liés à leur compte, blocage/déblocage d'utilisateurs
 - Paramètres : compte, notifications, confidentialité, utilisateurs bloqués, conversations masquées
+
+## GIPHY (stickers animés & GIFs)
+
+Intégration du catalogue GIPHY **pendant le développement** (clé bêta gratuite) :
+
+1. Créer une clé bêta sur [developers.giphy.com](https://developers.giphy.com/dashboard/) (une clé *par plateforme et par section* — ici « messagerie mobile »).
+2. Copier `mobile/.env.example` vers `mobile/.env` et renseigner `EXPO_PUBLIC_GIPHY_API_KEY=…`, puis redémarrer `npx expo start`.
+3. Dans une conversation : « + » → **Stickers & GIFs** → onglets *Stickers* / *GIF*, recherche (déboucée 300 ms) et *Trending* ; tap = aperçu, bouton **Envoyer**.
+
+Conformité aux **GIPHY API Terms of Service** (vérifiées oct. 2026) :
+
+- Appels API et chargements de médias **directement depuis le client** — GIPHY interdit le proxy des deux ; la clé vit donc dans le bundle et **n'est pas un secret** (révocable, plafonnée à 100 appels/h en bêta). Le backend n'appelle jamais GIPHY.
+- L'URL du rendu choisi (`fixed_width` WebP du bundle `messaging_non_clips`) est stockée **telle quelle** puis validée par le serveur à l'envoi (allowlist `media*.giphy.com`, HTTPS) : jamais re-hébergée, modifiée ni proxifiée — les chargements partent directement vers les CDN GIPHY.
+- Résultats affichés dans l'ordre de l'API (aucun filtre ni réordonnement), **grille dédiée** (aucun mélange avec les packs locaux), attribution **« Powered By GIPHY »** avec les logos officiels du pack d'attribution (dans le panneau et l'aperçu), pingbacks analytics `onclick`/`onsent` avec `customer_id`.
+- États gérés : chargement, vide, erreur réseau/quota (429 → « 100 appels/h »), coupure ; le panneau reste utilisable hors ligne via les autres sources.
 
 ## Limites du MVP / prochaines étapes
 

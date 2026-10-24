@@ -1,0 +1,240 @@
+[
+  {
+    "id": "joyeux",
+    "name": "Joyeux",
+    "category": "expressions",
+    "tags": [
+      "joie",
+      "bonheur",
+      "sourire",
+      "content",
+      "happy"
+    ]
+  },
+  {
+    "id": "fou-rire",
+    "name": "Fou rire",
+    "category": "expressions",
+    "tags": [
+      "rire",
+      "drôle",
+      "lol",
+      "mdr",
+      "hilarant"
+    ]
+  },
+  {
+    "id": "amour",
+    "name": "Amour",
+    "category": "expressions",
+    "tags": [
+      "coeur",
+      "amour",
+      "aime",
+      "love"
+    ]
+  },
+  {
+    "id": "surprise",
+    "name": "Surprise",
+    "category": "expressions",
+    "tags": [
+      "surprise",
+      "choc",
+      "wow",
+      "étonné",
+      "oh"
+    ]
+  },
+  {
+    "id": "triste",
+    "name": "Triste",
+    "category": "expressions",
+    "tags": [
+      "triste",
+      "pleure",
+      "peine",
+      "chagrin",
+      "sad"
+    ]
+  },
+  {
+    "id": "en-colere",
+    "name": "En colère",
+    "category": "expressions",
+    "tags": [
+      "colère",
+      "fâché",
+      "rage",
+      "grrr",
+      "angry"
+    ]
+  },
+  {
+    "id": "timide",
+    "name": "Timide",
+    "category": "expressions",
+    "tags": [
+      "timide",
+      "gêné",
+      "rouge",
+      "pudeur",
+      "shy"
+    ]
+  },
+  {
+    "id": "clin-doeil",
+    "name": "Clin d’œil",
+    "category": "expressions",
+    "tags": [
+      "clin",
+      "oeil",
+      "complicité",
+      "wink",
+      "malin"
+    ]
+  },
+  {
+    "id": "fatigue",
+    "name": "Fatigué",
+    "category": "expressions",
+    "tags": [
+      "fatigue",
+      "sommeil",
+      "crevé",
+      "dodo",
+      "tired"
+    ]
+  },
+  {
+    "id": "bravo",
+    "name": "Bravo",
+    "category": "expressions",
+    "tags": [
+      "bravo",
+      "félicitations",
+      "gagné",
+      "youpi",
+      "victoire"
+    ]
+  },
+  {
+    "id": "chat-calin",
+    "name": "Chat câlin",
+    "category": "animaux",
+    "tags": [
+      "chat",
+      "minou",
+      "câlin",
+      "mignon",
+      "cat"
+    ]
+  },
+  {
+    "id": "chien-content",
+    "name": "Chien content",
+    "category": "animaux",
+    "tags": [
+      "chien",
+      "toutou",
+      "content",
+      "mignon",
+      "dog"
+    ]
+  },
+  {
+    "id": "panda-dodo",
+    "name": "Panda dodo",
+    "category": "animaux",
+    "tags": [
+      "panda",
+      "dormir",
+      "dodo",
+      "nuit",
+      "sleep"
+    ]
+  },
+  {
+    "id": "lapin-amour",
+    "name": "Lapin amoureux",
+    "category": "animaux",
+    "tags": [
+      "lapin",
+      "amour",
+      "coeur",
+      "mignon",
+      "bunny"
+    ]
+  },
+  {
+    "id": "grenouille-ok",
+    "name": "Grenouille OK",
+    "category": "animaux",
+    "tags": [
+      "grenouille",
+      "ok",
+      "d’accord",
+      "oui",
+      "frog"
+    ]
+  },
+  {
+    "id": "perroquet-salut",
+    "name": "Perroquet salut",
+    "category": "animaux",
+    "tags": [
+      "perroquet",
+      "salut",
+      "bonjour",
+      "coucou",
+      "mbolo"
+    ]
+  },
+  {
+    "id": "merci",
+    "name": "Merci",
+    "category": "reactions",
+    "tags": [
+      "merci",
+      "remercier",
+      "reconnaissance",
+      "thanks"
+    ]
+  },
+  {
+    "id": "courage",
+    "name": "Courage",
+    "category": "reactions",
+    "tags": [
+      "courage",
+      "force",
+      "encouragement",
+      "bravo",
+      "fonce"
+    ]
+  },
+  {
+    "id": "bonne-nuit",
+    "name": "Bonne nuit",
+    "category": "reactions",
+    "tags": [
+      "nuit",
+      "bonne nuit",
+      "dormir",
+      "rêve",
+      "bye"
+    ]
+  },
+  {
+    "id": "cafe",
+    "name": "Café",
+    "category": "reactions",
+    "tags": [
+      "café",
+      "pause",
+      "boire",
+      "réveil",
+      "coffee"
+    ]
+  }
+]

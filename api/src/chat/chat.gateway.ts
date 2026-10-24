@@ -1,3 +1,4 @@
+import { OnModuleDestroy } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -10,6 +11,7 @@ import {
 } from '@nestjs/websockets';
 import { JwtService } from '@nestjs/jwt';
 import type { Server, Socket } from 'socket.io';
+import type { Subscription } from 'rxjs';
 import type { JwtPayload } from '../auth/jwt-payload.js';
 import {
   ConversationsService,
@@ -18,13 +20,21 @@ import {
 } from '../conversations/conversations.service.js';
 import { PushService } from '../push/push.service.js';
 import { MediaService } from '../media/media.service.js';
+import { PresenceService, type PresenceChange } from '../presence/presence.service.js';
+import { SocketRateLimiter } from './socket-rate-limit.js';
+import { InvalidGifAttachmentError, normalizeGifAttachment } from './gif-attachment.js';
+import {
+  InvalidStickerAttachmentError,
+  normalizeStickerAttachment,
+  type StickerAttachmentMeta,
+} from './sticker-attachment.js';
 
 const roomOf = (conversationId: string) => `conv:${conversationId}`;
 /** Salon personnel : la liste des discussions reçoit aussi les nouveaux messages. */
 const userRoomOf = (userId: string) => `user:${userId}`;
 
 @WebSocketGateway({ cors: { origin: true } })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   @WebSocketServer()
   server: Server;
 
@@ -32,12 +42,29 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    *  quelqu'un qui est déjà en train de lire la discussion). */
   private readonly viewing = new Map<string, { userId: string; conversationId: string }>();
 
+  /** Utilisateurs dont ce socket suit la présence (50 au maximum par socket). */
+  private readonly presenceSubscriptions = new Map<
+    string,
+    { userId: string; targets: Set<string> }
+  >();
+  private readonly presenceChanges: Subscription;
+
   constructor(
     private readonly jwtService: JwtService,
     private readonly conversationsService: ConversationsService,
     private readonly pushService: PushService,
     private readonly media: MediaService,
-  ) {}
+    private readonly presence: PresenceService,
+    private readonly rateLimiter: SocketRateLimiter,
+  ) {
+    this.presenceChanges = this.presence.changes$.subscribe((change) => {
+      void this.broadcastPresenceChange(change);
+    });
+  }
+
+  onModuleDestroy(): void {
+    this.presenceChanges.unsubscribe();
+  }
 
   async handleConnection(client: Socket) {
     const token = (client.handshake.auth as { token?: string } | undefined)?.token;
@@ -56,7 +83,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleDisconnect(client: Socket) {
+    const userId = client.data.userId as string | undefined;
     this.viewing.delete(client.id);
+    this.presenceSubscriptions.delete(client.id);
+    if (userId) this.presence.disconnect(userId, client.id);
   }
 
   /** La discussion est à l'écran : les nouveaux messages ne sont pas notifiés. */
@@ -96,6 +126,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       conversationId?: string;
       content?: string;
       attachmentId?: string;
+      /** GIF GIPHY externe : URL média + métadonnées, validée côté serveur. */
+      gif?: unknown;
+      /** Sticker Mbolo : identifiants opaques, l'image arrive par attachmentId. */
+      sticker?: unknown;
       clientId?: string;
       replyToId?: string;
     },
@@ -117,10 +151,40 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       typeof body?.replyToId === 'string' && body.replyToId.length > 0 && body.replyToId.length <= 64
         ? body.replyToId
         : undefined;
+    // Pièce jointe GIF externe (GIPHY) : le client a choisi l'URL dans l'API
+    // GIPHY ; le serveur se contente de vérifier l'allowlist des CDN.
+    let gifAttachment: ReturnType<typeof normalizeGifAttachment> | null = null;
+    if (body?.gif != null) {
+      try {
+        gifAttachment = normalizeGifAttachment(body.gif);
+      } catch (error) {
+        if (error instanceof InvalidGifAttachmentError) {
+          throw new WsException(error.message);
+        }
+        throw error;
+      }
+    }
     if (!userId) {
       throw new WsException('Not authenticated');
     }
-    if (!conversationId || (!content && !attachmentId)) {
+    let stickerAttachment: StickerAttachmentMeta | null = null;
+    if (body?.sticker != null) {
+      if (!attachmentId) {
+        throw new WsException("L'image du sticker doit être importée");
+      }
+      try {
+        stickerAttachment = normalizeStickerAttachment(body.sticker);
+      } catch (error) {
+        if (error instanceof InvalidStickerAttachmentError) {
+          throw new WsException(error.message);
+        }
+        throw error;
+      }
+    }
+    if (!this.rateLimiter.allowMessage(userId)) {
+      return { error: 'Trop de messages envoyés. Réessaie dans un instant.' };
+    }
+    if (!conversationId || (!content && !attachmentId && !gifAttachment)) {
       throw new WsException('conversationId and content or attachmentId are required');
     }
     if (content.length > 4000) {
@@ -128,7 +192,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const message = await this.conversationsService
-      .createMessage(conversationId, userId, content, attachmentId, clientId, replyToId)
+      .createMessage(
+        conversationId,
+        userId,
+        content,
+        attachmentId,
+        clientId,
+        replyToId,
+        gifAttachment,
+        stickerAttachment,
+      )
       .catch((error: unknown) => {
         // L'acquittement porte l'erreur : le client peut l'afficher
         // (message bloqué, quota atteint, etc.) au lieu d'attendre indéfiniment.
@@ -265,6 +338,163 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const changes = await this.conversationsService.markRead(conversationId, userId);
     this.server.to(roomOf(conversationId)).emit('read', { conversationId, userId, at: new Date().toISOString() });
     this.emitReceipts(changes);
+  }
+
+  /**
+   * Présence : le socket est l'appareil. Un utilisateur ne peut signaler que
+   * sa propre présence, jamais celle d'un autre identifiant.
+   */
+  @SubscribeMessage('presence:foreground')
+  foreground(@ConnectedSocket() client: Socket) {
+    const userId = client.data.userId as string | undefined;
+    if (!userId) return { online: false };
+    if (!this.rateLimiter.allowPresence(userId)) {
+      return { error: 'Trop d’événements de présence. Réessaie dans un instant.' };
+    }
+    this.presence.foreground(userId, client.id);
+    return { online: true };
+  }
+
+  @SubscribeMessage('presence:background')
+  background(@ConnectedSocket() client: Socket) {
+    const userId = client.data.userId as string | undefined;
+    if (!userId) return { online: false };
+    if (!this.rateLimiter.allowPresence(userId)) {
+      return { error: 'Trop d’événements de présence. Réessaie dans un instant.' };
+    }
+    void this.presence.background(userId, client.id);
+    return { online: false };
+  }
+
+  @SubscribeMessage('presence:heartbeat')
+  heartbeat(@ConnectedSocket() client: Socket) {
+    const userId = client.data.userId as string | undefined;
+    if (!userId) return { ok: false };
+    if (!this.rateLimiter.allowPresence(userId)) {
+      return { error: 'Trop d’événements de présence. Réessaie dans un instant.' };
+    }
+    this.presence.heartbeat(userId, client.id);
+    return { ok: true };
+  }
+
+  @SubscribeMessage('presence:logout')
+  async presenceLogout(@ConnectedSocket() client: Socket) {
+    const userId = client.data.userId as string | undefined;
+    if (!userId) return { ok: false };
+    if (!this.rateLimiter.allowPresence(userId)) {
+      return { error: 'Trop d’événements de présence. Réessaie dans un instant.' };
+    }
+    this.presenceSubscriptions.delete(client.id);
+    await this.presence.logout(userId, client.id);
+    return { ok: true };
+  }
+
+  /**
+   * Abonnement aux utilisateurs visibles à l'écran. Le plafond de 50 est
+   * appliqué par socket, et chaque état renvoyé est déjà filtré.
+   */
+  @SubscribeMessage('presence:subscribe')
+  async subscribePresence(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { userIds?: unknown },
+  ) {
+    const userId = client.data.userId as string | undefined;
+    const ids = Array.isArray(body?.userIds)
+      ? body.userIds.filter(
+          (id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 64,
+        )
+      : [];
+    if (!userId || ids.length === 0) return { subscribed: 0 };
+    if (!this.rateLimiter.allowPresence(userId)) {
+      return { error: 'Trop d’événements de présence. Réessaie dans un instant.' };
+    }
+
+    const entry =
+      this.presenceSubscriptions.get(client.id) ?? {
+        userId,
+        targets: new Set<string>(),
+      };
+    for (const id of ids) {
+      if (entry.targets.size >= 50) break;
+      entry.targets.add(id);
+    }
+    this.presenceSubscriptions.set(client.id, entry);
+
+    try {
+      const snapshot = await this.presence.getPresenceForViewer(userId, [...entry.targets]);
+      client.emit('presence:update', snapshot);
+    } catch {
+      // Une base momentanément indisponible ne doit pas tuer le socket.
+    }
+    return { subscribed: entry.targets.size };
+  }
+
+  @SubscribeMessage('presence:unsubscribe')
+  unsubscribePresence(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { userIds?: unknown },
+  ) {
+    const userId = client.data.userId as string | undefined;
+    if (!userId) return { subscribed: 0 };
+    if (!this.rateLimiter.allowPresence(userId)) {
+      return { error: 'Trop d’événements de présence. Réessaie dans un instant.' };
+    }
+    const entry = this.presenceSubscriptions.get(client.id);
+    if (!entry) return { subscribed: 0 };
+    const ids = Array.isArray(body?.userIds) ? body.userIds : [];
+    for (const id of ids) {
+      if (typeof id === 'string') entry.targets.delete(id);
+    }
+    if (entry.targets.size === 0) {
+      this.presenceSubscriptions.delete(client.id);
+    }
+    return { subscribed: entry.targets.size };
+  }
+
+  /**
+   * Diffusion ciblée : uniquement les sockets abonnés à la cible, avec le
+   * filtrage propre à chaque spectateur.
+   */
+  private async broadcastPresenceChange(change: PresenceChange): Promise<void> {
+    if (!this.server) return;
+    await this.broadcastToSubscribers(change.userId);
+    if (change.settings) {
+      await this.broadcastViewerSubscriptions(change.userId);
+    }
+  }
+
+  private async broadcastToSubscribers(targetId: string): Promise<void> {
+    const byViewer = new Map<string, string[]>();
+    for (const [socketId, entry] of this.presenceSubscriptions) {
+      if (!entry.targets.has(targetId)) continue;
+      const list = byViewer.get(entry.userId);
+      if (list) list.push(socketId);
+      else byViewer.set(entry.userId, [socketId]);
+    }
+    for (const [viewerId, socketIds] of byViewer) {
+      const snapshot = await this.presence
+        .getPresenceForViewer(viewerId, [targetId])
+        .catch(() => null);
+      if (!snapshot) continue;
+      for (const socketId of socketIds) {
+        this.server.to(socketId).emit('presence:update', snapshot);
+      }
+    }
+  }
+
+  /**
+   * Les réglages d'un utilisateur changent aussi ce qu'il voit des autres
+   * (réciprocité) : on recalcule les abonnements de chacun de ses appareils.
+   */
+  private async broadcastViewerSubscriptions(viewerId: string): Promise<void> {
+    for (const [socketId, entry] of this.presenceSubscriptions) {
+      if (entry.userId !== viewerId || entry.targets.size === 0) continue;
+      const snapshot = await this.presence
+        .getPresenceForViewer(viewerId, [...entry.targets])
+        .catch(() => null);
+      if (!snapshot) continue;
+      this.server.to(socketId).emit('presence:update', snapshot);
+    }
   }
 
   /**
