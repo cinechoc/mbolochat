@@ -1,0 +1,390 @@
+// FICHIER GÉNÉRÉ par scripts/generate-panther-2d-catalog.mjs : ne pas modifier à la main.
+export type Panther2DStickerId =
+  | 'bonjour'
+  | 'salut'
+  | 'au-revoir'
+  | 'merci'
+  | 'sil-te-plait'
+  | 'ok'
+  | 'oui'
+  | 'non'
+  | 'amour'
+  | 'bisous'
+  | 'calin'
+  | 'je-taime'
+  | 'fou-rire'
+  | 'sourire'
+  | 'tristesse'
+  | 'chagrin'
+  | 'colere'
+  | 'surprise'
+  | 'choc'
+  | 'timidite'
+  | 'reflexion'
+  | 'confusion'
+  | 'fatigue'
+  | 'sommeil'
+  | 'bonne-nuit'
+  | 'fete'
+  | 'bravo'
+  | 'courage'
+  | 'pouce-leve'
+  | 'yeux-en-coeur';
+
+export type Panther2DStickerMeta = {
+  id: Panther2DStickerId;
+  name: string;
+  tags: string[];
+  alt: string;
+};
+
+export const PANTHER_2D_STICKERS: Panther2DStickerMeta[] = [
+  {
+    "id": "bonjour",
+    "name": "Bonjour",
+    "tags": [
+      "bonjour",
+      "salut",
+      "hello",
+      "coucou",
+      "mbolo"
+    ],
+    "alt": "Panthère Mbolo : Bonjour"
+  },
+  {
+    "id": "salut",
+    "name": "Salut",
+    "tags": [
+      "salut",
+      "coucou",
+      "hello",
+      "wave",
+      "main"
+    ],
+    "alt": "Panthère Mbolo : Salut"
+  },
+  {
+    "id": "au-revoir",
+    "name": "Au revoir",
+    "tags": [
+      "au revoir",
+      "bye",
+      "salut",
+      "depart",
+      "a bientot"
+    ],
+    "alt": "Panthère Mbolo : Au revoir"
+  },
+  {
+    "id": "merci",
+    "name": "Merci",
+    "tags": [
+      "merci",
+      "remercier",
+      "thanks",
+      "reconnaissance"
+    ],
+    "alt": "Panthère Mbolo : Merci"
+  },
+  {
+    "id": "sil-te-plait",
+    "name": "S'il te plaît",
+    "tags": [
+      "s il te plait",
+      "please",
+      "demande",
+      "faveur"
+    ],
+    "alt": "Panthère Mbolo : S'il te plaît"
+  },
+  {
+    "id": "ok",
+    "name": "OK",
+    "tags": [
+      "ok",
+      "d accord",
+      "oui",
+      "valide",
+      "parfait"
+    ],
+    "alt": "Panthère Mbolo : OK"
+  },
+  {
+    "id": "oui",
+    "name": "Oui",
+    "tags": [
+      "oui",
+      "yes",
+      "accord",
+      "valide"
+    ],
+    "alt": "Panthère Mbolo : Oui"
+  },
+  {
+    "id": "non",
+    "name": "Non",
+    "tags": [
+      "non",
+      "no",
+      "refus",
+      "pas d accord"
+    ],
+    "alt": "Panthère Mbolo : Non"
+  },
+  {
+    "id": "amour",
+    "name": "Amour",
+    "tags": [
+      "amour",
+      "coeur",
+      "love",
+      "aime"
+    ],
+    "alt": "Panthère Mbolo : Amour"
+  },
+  {
+    "id": "bisous",
+    "name": "Bisous",
+    "tags": [
+      "bisou",
+      "bisous",
+      "kiss",
+      "coeur",
+      "amour"
+    ],
+    "alt": "Panthère Mbolo : Bisous"
+  },
+  {
+    "id": "calin",
+    "name": "Câlin",
+    "tags": [
+      "calin",
+      "câlin",
+      "hug",
+      "tendresse",
+      "bras"
+    ],
+    "alt": "Panthère Mbolo : Câlin"
+  },
+  {
+    "id": "je-taime",
+    "name": "Je t'aime",
+    "tags": [
+      "je t aime",
+      "amour",
+      "love",
+      "coeur"
+    ],
+    "alt": "Panthère Mbolo : Je t'aime"
+  },
+  {
+    "id": "fou-rire",
+    "name": "Fou rire",
+    "tags": [
+      "rire",
+      "fou rire",
+      "lol",
+      "mdr",
+      "hilarant"
+    ],
+    "alt": "Panthère Mbolo : Fou rire"
+  },
+  {
+    "id": "sourire",
+    "name": "Petit sourire",
+    "tags": [
+      "sourire",
+      "smile",
+      "content",
+      "doux"
+    ],
+    "alt": "Panthère Mbolo : Petit sourire"
+  },
+  {
+    "id": "tristesse",
+    "name": "Tristesse",
+    "tags": [
+      "triste",
+      "sad",
+      "chagrin",
+      "peine"
+    ],
+    "alt": "Panthère Mbolo : Tristesse"
+  },
+  {
+    "id": "chagrin",
+    "name": "Gros chagrin",
+    "tags": [
+      "chagrin",
+      "pleurs",
+      "pleure",
+      "cry",
+      "larmes"
+    ],
+    "alt": "Panthère Mbolo : Gros chagrin"
+  },
+  {
+    "id": "colere",
+    "name": "Colère",
+    "tags": [
+      "colere",
+      "angry",
+      "fache",
+      "boude",
+      "grrr"
+    ],
+    "alt": "Panthère Mbolo : Colère"
+  },
+  {
+    "id": "surprise",
+    "name": "Surprise",
+    "tags": [
+      "surprise",
+      "wow",
+      "etonne",
+      "oh"
+    ],
+    "alt": "Panthère Mbolo : Surprise"
+  },
+  {
+    "id": "choc",
+    "name": "Choc",
+    "tags": [
+      "choc",
+      "shock",
+      "stupeur",
+      "incroyable"
+    ],
+    "alt": "Panthère Mbolo : Choc"
+  },
+  {
+    "id": "timidite",
+    "name": "Timidité",
+    "tags": [
+      "timide",
+      "shy",
+      "gene",
+      "rouge",
+      "pudeur"
+    ],
+    "alt": "Panthère Mbolo : Timidité"
+  },
+  {
+    "id": "reflexion",
+    "name": "Réflexion",
+    "tags": [
+      "reflexion",
+      "pense",
+      "think",
+      "idee"
+    ],
+    "alt": "Panthère Mbolo : Réflexion"
+  },
+  {
+    "id": "confusion",
+    "name": "Confusion",
+    "tags": [
+      "confusion",
+      "perdu",
+      "question",
+      "comprends pas"
+    ],
+    "alt": "Panthère Mbolo : Confusion"
+  },
+  {
+    "id": "fatigue",
+    "name": "Fatigue",
+    "tags": [
+      "fatigue",
+      "tired",
+      "creve",
+      "cafe",
+      "reveil"
+    ],
+    "alt": "Panthère Mbolo : Fatigue"
+  },
+  {
+    "id": "sommeil",
+    "name": "Sommeil",
+    "tags": [
+      "sommeil",
+      "dodo",
+      "dormir",
+      "sleep",
+      "nuit"
+    ],
+    "alt": "Panthère Mbolo : Sommeil"
+  },
+  {
+    "id": "bonne-nuit",
+    "name": "Bonne nuit",
+    "tags": [
+      "bonne nuit",
+      "nuit",
+      "dodo",
+      "sleep",
+      "lune"
+    ],
+    "alt": "Panthère Mbolo : Bonne nuit"
+  },
+  {
+    "id": "fete",
+    "name": "Fête",
+    "tags": [
+      "fete",
+      "party",
+      "anniversaire",
+      "celebration",
+      "youpi"
+    ],
+    "alt": "Panthère Mbolo : Fête"
+  },
+  {
+    "id": "bravo",
+    "name": "Bravo",
+    "tags": [
+      "bravo",
+      "felicitations",
+      "applaudissement",
+      "super",
+      "bien joue"
+    ],
+    "alt": "Panthère Mbolo : Bravo"
+  },
+  {
+    "id": "courage",
+    "name": "Courage",
+    "tags": [
+      "courage",
+      "force",
+      "encouragement",
+      "fonce",
+      "vas y"
+    ],
+    "alt": "Panthère Mbolo : Courage"
+  },
+  {
+    "id": "pouce-leve",
+    "name": "Pouce levé",
+    "tags": [
+      "pouce leve",
+      "thumb up",
+      "super",
+      "ok",
+      "bravo"
+    ],
+    "alt": "Panthère Mbolo : Pouce levé"
+  },
+  {
+    "id": "yeux-en-coeur",
+    "name": "Yeux en cœur",
+    "tags": [
+      "yeux en coeur",
+      "amour",
+      "love",
+      "coeur",
+      "admiratif"
+    ],
+    "alt": "Panthère Mbolo : Yeux en cœur"
+  }
+];

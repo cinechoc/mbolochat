@@ -1,10 +1,12 @@
 import type { ImageSourcePropType } from 'react-native';
 
+import { PANTHER_2D_SOURCES } from './panther2dAssets.generated';
+import { PANTHER_2D_STICKERS } from './panther2dCatalog.generated';
 import { PANTHER_SOURCES } from './pantherAssets.generated';
 import { PANTHER_STICKERS } from './pantherCatalog.generated';
 
 /**
- * Un sticker est identifié par une RÉFÉRENCE « idPack/idSticker » (ex. "mbolo-panther/bonjour").
+ * Un sticker est identifié par une RÉFÉRENCE « idPack/idSticker » (ex. "mbolo-panther-2d/bonjour").
  * Seule cette référence voyage dans le message : aucun fichier n'est envoyé.
  */
 export type TextSticker = {
@@ -43,11 +45,30 @@ export type StickerPack = {
   stickers: Sticker[];
 };
 
-/** Collection originale de la mascotte panthère noire. */
-const PANTHER_PACK: StickerPack = {
-  id: 'mbolo-panther',
+/** Collection active : 30 illustrations originales de la mascotte panthère noire. */
+const PANTHER_2D_PACK: StickerPack = {
+  id: 'mbolo-panther-2d',
   name: 'Panthère Mbolo',
-  description: 'La mascotte panthère noire de Mbolo — 26 expressions originales.',
+  description: 'La mascotte panthère noire de Mbolo — 30 expressions originales.',
+  iconEmoji: '🐾',
+  stickers: PANTHER_2D_STICKERS.map((sticker) => ({
+    id: sticker.id,
+    kind: 'image',
+    source: PANTHER_2D_SOURCES[sticker.id],
+    alt: sticker.alt,
+    name: sticker.name,
+    tags: sticker.tags,
+  })),
+};
+
+/**
+ * Première collection de la mascotte, retirée du sélecteur mais conservée dans
+ * l'index : les messages déjà envoyés (ex. « mbolo-panther/bonjour ») gardent
+ * l'illustration avec laquelle ils ont été envoyés.
+ */
+const LEGACY_PANTHER_PACK: StickerPack = {
+  id: 'mbolo-panther',
+  name: 'Panthère Mbolo (historique)',
   iconEmoji: '🐾',
   stickers: PANTHER_STICKERS.map((sticker) => ({
     id: sticker.id,
@@ -84,7 +105,7 @@ const LEGACY_MBOLO_PACK: StickerPack = {
 };
 
 /** Packs proposés dans le sélecteur. */
-export const STICKER_PACKS: StickerPack[] = [PANTHER_PACK];
+export const STICKER_PACKS: StickerPack[] = [PANTHER_2D_PACK];
 
 const REF_PATTERN = /^[a-z0-9_-]{1,40}\/[a-z0-9_-]{1,60}$/;
 
@@ -104,8 +125,8 @@ const STICKER_INDEX = new Map<string, Sticker>(
 );
 
 const LEGACY_STICKER_INDEX = new Map<string, Sticker>(
-  LEGACY_MBOLO_PACK.stickers.map(
-    (sticker) => [stickerRef(LEGACY_MBOLO_PACK.id, sticker.id), sticker] as const,
+  [LEGACY_MBOLO_PACK, LEGACY_PANTHER_PACK].flatMap((pack) =>
+    pack.stickers.map((sticker) => [stickerRef(pack.id, sticker.id), sticker] as const),
   ),
 );
 

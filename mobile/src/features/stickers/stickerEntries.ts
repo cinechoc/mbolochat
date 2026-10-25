@@ -11,7 +11,7 @@ export { searchStickerEntries };
 
 export type CatalogStickerEntry = {
   kind: 'catalog';
-  /** Référence envoyée dans le message (`mbolo-panther/amour`). */
+  /** Référence envoyée dans le message (`mbolo-panther-2d/amour`). */
   key: string;
   name: string;
   tags: string[];

@@ -30,7 +30,7 @@ export interface PersonalSticker {
 }
 
 export interface StickerLibraryState {
-  /** Références de catalogue (`mbolo-panther/amour`) ou identifiants personnels. */
+  /** Références de catalogue (`mbolo-panther-2d/amour`) ou identifiants personnels. */
   recents: string[];
   favorites: string[];
   personal: PersonalSticker[];

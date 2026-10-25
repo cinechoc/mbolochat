@@ -15,20 +15,32 @@ Le panneau est séparé en trois sections explicites :
 
 ## Panthère Mbolo
 
-Le pack visible est `mbolo-panther` : 26 illustrations originales de la mascotte panthère noire,
-une par expression (bonjour, merci, amour, fou rire, pleurs, etc.).
+Le pack visible est `mbolo-panther-2d` : 30 illustrations originales de la mascotte panthère noire,
+une par expression (bonjour, salut, au revoir, merci, s'il te plaît, OK, oui, non, amour, bisous,
+câlin, je t'aime, fou rire, petit sourire, tristesse, gros chagrin, colère, surprise, choc,
+timidité, réflexion, confusion, fatigue, sommeil, bonne nuit, fête, bravo, courage, pouce levé,
+yeux en cœur).
 
-- Fichiers : `mobile/assets/stickers/mbolo-panther/<sticker>.png`
-- Métadonnées : `pantherCatalog.generated.ts` et `pantherAssets.generated.ts`
-- Génération : `cd mobile && node scripts/generate-panther-stickers.mjs`
+- Référence de style : `mobile/assets/stickers/reference/panthere-reference.png`
+- Fichiers : `mobile/assets/stickers/mbolo-panther-2d/<sticker>.png`
+- Métadonnées : `panther2dCatalog.generated.ts` et `panther2dAssets.generated.ts`
+- Enregistrement du catalogue : `cd mobile && node scripts/generate-panther-2d-catalog.mjs`
 
-Le script dessine chaque pose en SVG (même visage, mêmes proportions, même palette), puis les
-rasterise avec `sharp` en **PNG 512 × 512 à fond transparent**. Le rendu est volontairement 2D :
-aplats, ombres et reflets dessinés, contours sombres, **sans halo ni contour blanc**. Les fichiers
-sont optimisés en palette (environ 32 Ko chacun). Aucune image externe n'est utilisée.
+Les illustrations sont peintes en 2D avec le même personnage, le même visage, les mêmes
+proportions et la même palette que la référence. Chaque fichier est un **PNG 512 × 512 à vrai canal
+alpha** (coins transparents, marges de 20 px), détouré et defringué par
+`prepare-sticker-image.mjs`, puis optimisé en palette (**moins de 100 Ko** chacun). Le fond, l'ombre
+au sol et les poches de fond résiduelles sont retirés ; chaque fichier est contrôlé sur fond clair
+et sombre. Aucune bordure blanche automatique n'est ajoutée.
 
-Pour ajouter une expression : ajoute une entrée dans `STICKERS` (script), relance la génération,
-puis vérifie que l'identifiant respecte la règle ci-dessous.
+Pour ajouter une expression : génère l'illustration sur fond blanc uniforme, passe-la dans
+`node scripts/prepare-sticker-image.mjs <entrée.png> <sortie.png>`, vérifie le résultat sur fond
+clair et sombre (ombres et poches de fond éventuelles), ajoute l'entrée dans
+`scripts/generate-panther-2d-catalog.mjs`, relance l'enregistrement du catalogue, puis vérifie
+l'identifiant avec la règle ci-dessous.
+
+Le pack historique `mbolo-panther` (26 illustrations) n'est plus proposé dans le sélecteur, mais
+reste livré pour les anciens messages (voir « Compatibilité des anciens messages »).
 
 ## Stickers personnels
 
@@ -45,10 +57,13 @@ puis vérifie que l'identifiant respecte la règle ci-dessous.
 
 Un appui long sur un sticker reçu propose « Ajouter aux favoris » ou « Retirer des favoris » :
 
-- sticker de catalogue : la référence `mbolo-panther/*` est conservée ;
+- sticker de catalogue : la référence `mbolo-panther-2d/*` est conservée ;
 - sticker joint reçu : l'image est **téléchargée localement** dans le dossier privé puis ajoutée
   à « Mes stickers » et aux favoris. Un identifiant stable évite les doublons ; un téléchargement
   en échec n'ajoute rien.
+
+Les favoris existants qui pointent vers l'ancien pack `mbolo-panther/*` restent résolus et
+conservent leur illustration d'origine. Les nouveaux favoris utilisent `mbolo-panther-2d/*`.
 
 Les favoris survivent au redémarrage et sont réutilisables dans n'importe quelle conversation.
 
@@ -83,18 +98,19 @@ const MON_PACK: StickerPack = {
   ],
 };
 
-export const STICKER_PACKS: StickerPack[] = [PANTHER_PACK, MON_PACK];
+export const STICKER_PACKS: StickerPack[] = [PANTHER_2D_PACK, MON_PACK];
 ```
 
-La référence envoyée dans les messages est `pack/sticker` (ex. `mbolo-panther/bonjour`) et doit
+La référence envoyée dans les messages est `pack/sticker` (ex. `mbolo-panther-2d/bonjour`) et doit
 respecter `^[a-z0-9_-]{1,40}\/[a-z0-9_-]{1,60}$` — la même règle est validée par l'API.
 
 ## Compatibilité des anciens messages
 
-L'ancien pack typographique `mbolo` n'apparaît plus dans le sélecteur, mais il reste dans
-`LEGACY_STICKER_INDEX`. Les messages déjà persistés (par exemple `mbolo/merci`) continuent donc
-d'afficher exactement la même carte qu'avant. Ne réutilise jamais un ancien identifiant pour une
-nouvelle illustration : ajoute un nouvel identifiant dans le nouveau pack.
+L'ancien pack typographique `mbolo` et l'ancien pack illustré `mbolo-panther` n'apparaissent plus
+dans le sélecteur, mais ils restent dans `LEGACY_STICKER_INDEX`. Les messages déjà persistés
+(par exemple `mbolo/merci` ou `mbolo-panther/bonjour`) continuent donc d'afficher exactement la
+même carte qu'avant. Ne réutilise jamais un ancien identifiant pour une nouvelle illustration :
+ajoute un nouvel identifiant dans le nouveau pack.
 
 ## Diffusion
 
