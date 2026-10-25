@@ -19,6 +19,10 @@ export type { OutboxItem, OutboxStatus };
 
 export interface NewOutboxItem {
   conversationId: string;
+  /** Texte normal ou sticker référencé (jamais de fichier pour un sticker). */
+  type?: 'text' | 'sticker';
+  /** Référence de catalogue d'un sticker. */
+  stickerRef?: string;
   content: string;
   /** Message cité par une réponse. */
   replyTo?: string | null;
@@ -74,6 +78,8 @@ export async function enqueue(input: NewOutboxItem): Promise<OutboxItem> {
   const item: OutboxItem = {
     clientId,
     conversationId: input.conversationId,
+    messageType: input.type === 'sticker' ? 'sticker' : 'text',
+    stickerRef: input.type === 'sticker' ? (input.stickerRef ?? null) : null,
     content: input.content,
     replyTo: input.replyTo ?? null,
     localUri: input.attachment?.localUri ?? null,
@@ -331,6 +337,8 @@ async function deliver(token: string, item: OutboxItem): Promise<boolean> {
       .timeout(15000)
       .emitWithAck('message:send', {
         conversationId: item.conversationId,
+        type: item.messageType === 'sticker' ? 'sticker' : undefined,
+        stickerRef: item.messageType === 'sticker' ? (item.stickerRef ?? undefined) : undefined,
         content: item.content,
         attachmentId: uploadId ?? undefined,
         // GIF GIPHY : le serveur revalide l'URL (allowlist) avant stockage.
@@ -442,6 +450,8 @@ export function pendingMessage(
   return {
     id: item.clientId,
     conversationId: item.conversationId,
+    type: item.messageType,
+    stickerRef: item.stickerRef,
     content: item.content,
     attachment,
     clientId: item.clientId,

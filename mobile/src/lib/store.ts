@@ -14,6 +14,10 @@ export type OutboxStatus = 'pending' | 'sending' | 'failed';
 export interface OutboxItem {
   clientId: string;
   conversationId: string;
+  /** Texte normal ou sticker référencé. */
+  messageType: 'text' | 'sticker';
+  /** Référence de catalogue du sticker, sinon null. */
+  stickerRef: string | null;
   content: string;
   /** Message cité par une réponse. */
   replyTo: string | null;
@@ -94,6 +98,8 @@ const memoryStore: LocalStore = {
 type Row = {
   client_id: string;
   conversation_id: string;
+  message_type: string;
+  sticker_ref: string | null;
   content: string;
   reply_to: string | null;
   local_uri: string | null;
@@ -116,6 +122,8 @@ const SCHEMA = `
 create table if not exists outbox (
   client_id text primary key,
   conversation_id text not null,
+  message_type text not null default 'text',
+  sticker_ref text,
   content text not null default '',
   reply_to text,
   local_uri text,
@@ -144,6 +152,8 @@ create table if not exists sync_state (
 const toParams = (item: OutboxItem): Record<string, string | number | null> => ({
   $client_id: item.clientId,
   $conversation_id: item.conversationId,
+  $message_type: item.messageType,
+  $sticker_ref: item.stickerRef,
   $content: item.content,
   $reply_to: item.replyTo,
   $local_uri: item.localUri,
@@ -165,6 +175,8 @@ const toParams = (item: OutboxItem): Record<string, string | number | null> => (
 const fromRow = (row: Row): OutboxItem => ({
   clientId: row.client_id,
   conversationId: row.conversation_id,
+  messageType: row.message_type === 'sticker' ? 'sticker' : 'text',
+  stickerRef: row.sticker_ref,
   content: row.content,
   replyTo: row.reply_to,
   localUri: row.local_uri,
@@ -221,6 +233,10 @@ async function openSqlite(): Promise<Database> {
   if (!names.has('size')) await instance.execAsync('alter table outbox add column size integer;');
   if (!names.has('external'))
     await instance.execAsync('alter table outbox add column external text;');
+  if (!names.has('message_type'))
+    await instance.execAsync("alter table outbox add column message_type text not null default 'text';");
+  if (!names.has('sticker_ref'))
+    await instance.execAsync('alter table outbox add column sticker_ref text;');
   return instance;
 }
 
@@ -228,9 +244,11 @@ function sqliteStore(db: Database): LocalStore {
   return {
     async save(item) {
       await db.runAsync(
-        `insert into outbox (client_id, conversation_id, content, reply_to, local_uri, kind, duration_ms, mime, width, height, name, size, upload_id, external, status, attempts, error, created_at)
-         values ($client_id, $conversation_id, $content, $reply_to, $local_uri, $kind, $duration_ms, $mime, $width, $height, $name, $size, $upload_id, $external, $status, $attempts, $error, $created_at)
+        `insert into outbox (client_id, conversation_id, message_type, sticker_ref, content, reply_to, local_uri, kind, duration_ms, mime, width, height, name, size, upload_id, external, status, attempts, error, created_at)
+         values ($client_id, $conversation_id, $message_type, $sticker_ref, $content, $reply_to, $local_uri, $kind, $duration_ms, $mime, $width, $height, $name, $size, $upload_id, $external, $status, $attempts, $error, $created_at)
          on conflict (client_id) do update set
+           message_type = excluded.message_type,
+           sticker_ref = excluded.sticker_ref,
            content = excluded.content,
            reply_to = excluded.reply_to,
            local_uri = excluded.local_uri,

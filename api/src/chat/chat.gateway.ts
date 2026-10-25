@@ -28,6 +28,7 @@ import {
   normalizeStickerAttachment,
   type StickerAttachmentMeta,
 } from './sticker-attachment.js';
+import { isMessageType, isValidStickerRef, type MessageType } from './sticker-ref.js';
 
 const roomOf = (conversationId: string) => `conv:${conversationId}`;
 /** Salon personnel : la liste des discussions reçoit aussi les nouveaux messages. */
@@ -125,6 +126,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     body: {
       conversationId?: string;
       content?: string;
+      /** Type applicatif : « text » par défaut, ou « sticker » avec stickerRef. */
+      type?: string;
+      /** Référence de catalogue d'un sticker (« pack/sticker »). */
+      stickerRef?: string;
       attachmentId?: string;
       /** GIF GIPHY externe : URL média + métadonnées, validée côté serveur. */
       gif?: unknown;
@@ -137,6 +142,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     const userId = client.data.userId as string | undefined;
     const conversationId = body?.conversationId;
     const content = body?.content?.trim() ?? '';
+    if (body?.type !== undefined && !isMessageType(body.type)) {
+      throw new WsException('Type de message invalide');
+    }
+    const messageType: MessageType = body?.type === 'sticker' ? 'sticker' : 'text';
+    const hasStickerRef = body?.stickerRef !== undefined && body?.stickerRef !== null;
+    const stickerRef =
+      typeof body?.stickerRef === 'string' ? body.stickerRef : undefined;
     const attachmentId =
       typeof body?.attachmentId === 'string' && body.attachmentId.length > 0
         ? body.attachmentId
@@ -181,10 +193,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         throw error;
       }
     }
+    if (messageType === 'sticker') {
+      if (!isValidStickerRef(stickerRef)) {
+        throw new WsException('Référence de sticker invalide');
+      }
+      if (attachmentId || gifAttachment || stickerAttachment) {
+        throw new WsException('Un sticker ne porte pas de pièce jointe');
+      }
+    } else if (hasStickerRef) {
+      throw new WsException('stickerRef n’est valide que pour un sticker');
+    }
     if (!this.rateLimiter.allowMessage(userId)) {
       return { error: 'Trop de messages envoyés. Réessaie dans un instant.' };
     }
-    if (!conversationId || (!content && !attachmentId && !gifAttachment)) {
+    if (
+      !conversationId ||
+      (!content && !attachmentId && !gifAttachment && messageType !== 'sticker')
+    ) {
       throw new WsException('conversationId and content or attachmentId are required');
     }
     if (content.length > 4000) {
@@ -201,6 +226,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         replyToId,
         gifAttachment,
         stickerAttachment,
+        messageType,
+        stickerRef,
       )
       .catch((error: unknown) => {
         // L'acquittement porte l'erreur : le client peut l'afficher

@@ -92,6 +92,110 @@ describe('MboloChat API (e2e)', () => {
     expect(messages.body[0].sender.id).toBe(alice.user.id);
   });
 
+  it('envoie et cite un sticker sans pièce jointe', async () => {
+    const alice = (await register('Sara', 'Sticker')).body;
+    const bob = (await register('Tom', 'Sticker')).body;
+    const conversation = await request(app.getHttpServer())
+      .post('/conversations')
+      .set('Authorization', `Bearer ${alice.accessToken}`)
+      .send({ memberIds: [bob.user.id] })
+      .expect(201);
+    const conversationId = conversation.body.id;
+    const conversationsService = app.get(ConversationsService);
+
+    const sticker = await conversationsService.createMessage(
+      conversationId,
+      alice.user.id,
+      '',
+      undefined,
+      undefined,
+      undefined,
+      null,
+      null,
+      'sticker',
+      'mbolo/merci',
+    );
+    expect(sticker.type).toBe('sticker');
+    expect(sticker.stickerRef).toBe('mbolo/merci');
+    expect(sticker.attachment).toBeNull();
+
+    const list = await request(app.getHttpServer())
+      .get(`/conversations/${conversationId}/messages`)
+      .set('Authorization', `Bearer ${bob.accessToken}`)
+      .expect(200);
+    expect(list.body.at(-1)).toMatchObject({
+      type: 'sticker',
+      stickerRef: 'mbolo/merci',
+      content: '',
+    });
+
+    const summary = await request(app.getHttpServer())
+      .get(`/conversations/${conversationId}`)
+      .set('Authorization', `Bearer ${bob.accessToken}`)
+      .expect(200);
+    expect(summary.body.lastMessage).toMatchObject({
+      type: 'sticker',
+      stickerRef: 'mbolo/merci',
+    });
+
+    const reply = await conversationsService.createMessage(
+      conversationId,
+      bob.user.id,
+      'Bien reçu',
+      undefined,
+      undefined,
+      sticker.id,
+    );
+    expect(reply.replyTo).toMatchObject({
+      type: 'sticker',
+      content: '',
+      deleted: false,
+    });
+
+    await expect(
+      conversationsService.createMessage(
+        conversationId,
+        alice.user.id,
+        '',
+        undefined,
+        undefined,
+        undefined,
+        null,
+        null,
+        'sticker',
+        'Mbolo/Merci',
+      ),
+    ).rejects.toThrow('Référence de sticker invalide');
+    await expect(
+      conversationsService.createMessage(
+        conversationId,
+        alice.user.id,
+        'texte',
+        undefined,
+        undefined,
+        undefined,
+        null,
+        null,
+        'text',
+        'mbolo/merci',
+      ),
+    ).rejects.toThrow('stickerRef');
+    await expect(
+      conversationsService.createMessage(
+        conversationId,
+        alice.user.id,
+        '',
+        'fake-upload',
+        undefined,
+        undefined,
+        null,
+        null,
+        'sticker',
+        'mbolo/merci',
+      ),
+    ).rejects.toThrow('pièce jointe');
+  });
+
   it('pins, mutes and unpins a conversation for the current user only', async () => {
     const alice = (await register('Lucie', 'Perez')).body;
     const bob = (await register('Marc', 'Petit')).body;

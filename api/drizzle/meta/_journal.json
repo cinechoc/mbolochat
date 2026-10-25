@@ -134,6 +134,13 @@
       "when": 1792756338856,
       "tag": "0018_presence",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792896291914,
+      "tag": "0019_gigantic_masque",
+      "breakpoints": true
     }
   ]
 }

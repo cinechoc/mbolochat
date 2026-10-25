@@ -24,6 +24,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { accentColor } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
+import { EmojiText } from '@/features/emoji/EmojiText';
 import { PresenceDot } from '@/features/presence/PresenceDot';
 import { useTheme } from '@/hooks/use-theme';
 import { conversationPreview, conversationTitle, formatListTimestamp } from '@/lib/format';
@@ -117,28 +118,35 @@ function ConversationRowComponent({
             ) : (
               <Check size={14} strokeWidth={2.4} color={theme.textSecondary} />
             )
-          ) : !typing && conversation.lastMessage?.attachment ? (
-            conversation.lastMessage.attachment.type === 'IMAGE' ? (
+          ) : !typing &&
+            (conversation.lastMessage?.type === 'sticker' ||
+              conversation.lastMessage?.attachment) ? (
+            conversation.lastMessage.type === 'sticker' ? (
+              <Sticker size={14} strokeWidth={2.2} color={theme.textSecondary} />
+            ) : conversation.lastMessage.attachment?.type === 'IMAGE' ? (
               <ImageIcon size={14} strokeWidth={2.2} color={theme.textSecondary} />
-            ) : conversation.lastMessage.attachment.type === 'VIDEO' ? (
+            ) : conversation.lastMessage.attachment?.type === 'VIDEO' ? (
               <Video size={14} strokeWidth={2.2} color={theme.textSecondary} />
-            ) : conversation.lastMessage.attachment.type === 'AUDIO' ? (
+            ) : conversation.lastMessage.attachment?.type === 'AUDIO' ? (
               <Mic size={14} strokeWidth={2.2} color={theme.textSecondary} />
-            ) : conversation.lastMessage.attachment.type === 'GIF' ? (
+            ) : conversation.lastMessage.attachment?.type === 'GIF' ? (
               <Film size={14} strokeWidth={2.2} color={theme.textSecondary} />
-            ) : conversation.lastMessage.attachment.type === 'STICKER' ? (
+            ) : conversation.lastMessage.attachment?.type === 'STICKER' ? (
               <Sticker size={14} strokeWidth={2.2} color={theme.textSecondary} />
             ) : (
               <FileText size={14} strokeWidth={2.2} color={theme.textSecondary} />
             )
           ) : null}
-          <ThemedText
-            type="small"
-            themeColor="textSecondary"
+          <EmojiText
             numberOfLines={1}
-            style={[styles.previewText, unread && styles.bold, typing ? styles.typing : null]}>
+            style={[
+              styles.previewText,
+              { color: theme.textSecondary },
+              unread && styles.bold,
+              typing ? styles.typing : null,
+            ]}>
             {previewText}
-          </ThemedText>
+          </EmojiText>
         </View>
       </View>
       <View style={styles.meta}>

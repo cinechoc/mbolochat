@@ -199,6 +199,10 @@ export const messages = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     content: text('content').notNull(),
+    /** Texte Unicode normal, ou sticker référencé par son catalogue local. */
+    type: text('type').notNull().default('text'),
+    /** Référence de catalogue d'un sticker (« pack/sticker »), null sinon. */
+    stickerRef: text('sticker_ref'),
     /** Pièce jointe (photo, vidéo…), null pour un message texte. */
     attachment: jsonb('attachment').$type<MessageAttachment>(),
     /**

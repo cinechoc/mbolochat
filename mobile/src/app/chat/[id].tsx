@@ -17,9 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   Alert,
   Animated,
-  BackHandler,
   FlatList,
-  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -27,14 +25,12 @@ import {
   StyleSheet,
   View,
   useWindowDimensions,
-  type TextInputInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ActionSheet, type SheetAction } from '@/components/action-sheet';
 import { AttachPanel } from '@/components/attach-panel';
 import { Avatar } from '@/components/avatar';
-import { MessageComposer } from '@/components/message-composer';
 import { SwipeableBubble } from '@/components/swipeable-bubble';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -44,12 +40,11 @@ import { Spacing } from '@/constants/theme';
 import { PresenceSubtitle } from '@/features/presence/PresenceSubtitle';
 import { VoiceMessageBubble, voiceBubbleWidth } from '@/features/voice-notes/VoiceMessageBubble';
 import { VoiceRecordButton } from '@/features/voice-notes/VoiceRecordButton';
-import { previousClusterIndex } from '@/features/emoji/emoji-text';
-import { GifMessageBubble } from '@/features/giphy/GifMessageBubble';
-import { ExpressionPanel, type ExpressionTab } from '@/features/stickers/ExpressionPanel';
+import { ChatComposer, type ComposerTheme } from '@/features/composer/ChatComposer';
+import { EmojiText, MessageText } from '@/features/emoji/EmojiText';
+import { GifMessageBubble } from '@/features/media/GifMessageBubble';
 import { StickerMessageBubble } from '@/features/stickers/StickerMessageBubble';
-import { resolveStickerUri } from '@/features/stickers/sticker-service';
-import type { Sticker } from '@/features/stickers/sticker-catalog';
+import { StickerMessage } from '@/features/stickers/StickerView';
 import { albumGridWidth, clusterMessages } from '@/features/media/album';
 import { AlbumMessageBubble } from '@/features/media/AlbumMessage';
 import {
@@ -79,13 +74,12 @@ import {
 } from '@/features/media/pickMedia';
 import { stopVoicePlayback } from '@/features/voice-notes/voicePlayback';
 import type { VoiceNote } from '@/features/voice-notes/useVoiceRecorder';
-import { useKeyboardHeight, useKeyboardVisible } from '@/hooks/use-keyboard-height';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { cache } from '@/lib/cache';
 import { conversationTitle, formatClock, formatDateLabel, tickState, type TickState } from '@/lib/format';
-import { GIPHY_API_KEY } from '@/lib/giphy';
 import {
   discard,
   drain,
@@ -102,7 +96,6 @@ import { connectSocket, deleteMessage, getSocket, onConnection, reportDelivered 
 import { advanceCursor, onMissedMessages } from '@/lib/sync';
 import type {
   ConversationSummary,
-  GifSendPayload,
   Message,
   MessageAttachment,
   MessageQuote,
@@ -119,9 +112,6 @@ type ListRow =
 const TYPING_STEP_MS = 170;
 /** Au-delà de ce défilement, la pastille de retour en bas apparaît. */
 const JUMP_AFTER_PX = 320;
-/** Espace minimal laissé à la conversation quand un panneau est ouvert. */
-const CONVERSATION_RESERVE_DP = 120;
-const MIN_EXPRESSION_HEIGHT_DP = 150;
 /** Double coche bleue : le message a été lu. */
 const TICK_READ = '#53bdeb';
 /** Le backend n'a pas de « playedBy » : l'écoute des vocaux reste locale. */
@@ -297,6 +287,9 @@ function quoteText(quote: MessageQuote): string {
   if (quote.deleted) {
     return 'Message supprimé';
   }
+  if (quote.type === 'sticker') {
+    return 'Sticker';
+  }
   if (quote.content) {
     return quote.content;
   }
@@ -324,6 +317,7 @@ function quoteOfMessage(message: Message): MessageQuote {
     id: message.id,
     senderName: message.sender.displayName,
     content: message.deleted ? '' : message.content,
+    type: message.type ?? 'text',
     attachmentType: message.deleted ? null : (message.attachment?.type ?? null),
     deleted: message.deleted,
   };
@@ -348,9 +342,9 @@ function QuoteBlock({ quote, mine, onPress }: { quote: MessageQuote; mine: boole
         <ThemedText type="smallBold" style={tone.name}>
           {quote.senderName}
         </ThemedText>
-        <ThemedText type="small" numberOfLines={1} style={tone.text}>
+        <EmojiText numberOfLines={1} style={[styles.quotePreviewText, tone.text]}>
           {quoteText(quote)}
-        </ThemedText>
+        </EmojiText>
       </View>
     </View>
   );
@@ -471,7 +465,6 @@ export default function ChatScreen() {
   const { width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
-  const keyboardVisible = useKeyboardVisible();
   const bubbleMaxWidth = useMemo(
     () => ({ maxWidth: Math.round(windowWidth * 0.7) }),
     [windowWidth],
@@ -506,6 +499,8 @@ export default function ChatScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState<{ userId: string; text: string } | null>(null);
+  /** Anti-double-appui : deux stickers identiques ne partent pas en rafale. */
+  const lastStickerSendAt = useRef(0);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingFlushRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingEmitRef = useRef(0);
@@ -515,13 +510,8 @@ export default function ChatScreen() {
   const [ready, setReady] = useState(() => (id ? cache.getMessages(id) !== null : false));
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [attachPanelOpen, setAttachPanelOpen] = useState(false);
-  /** Panneau d'expression : stickers locaux, émojis, GIF (si configuré). */
-  const [expressionOpen, setExpressionOpen] = useState(false);
-  const [expressionTab, setExpressionTab] = useState<ExpressionTab>('stickers');
-  const giphyEnabled = GIPHY_API_KEY.length > 0;
-  /** Anti-double-appui : deux stickers identiques ne partent pas en rafale. */
-  const lastStickerSendAt = useRef(0);
+  /** Compteur qui remonte ChatComposer après l'envoi d'une pièce jointe. */
+  const [composerKey, setComposerKey] = useState(0);
   const [imageViewer, setImageViewer] = useState<{ urls: string[]; index: number } | null>(null);
   const [albumViewer, setAlbumViewer] = useState<{ items: MediaViewerItem[]; index: number } | null>(
     null,
@@ -529,56 +519,13 @@ export default function ChatScreen() {
   const [videoViewer, setVideoViewer] = useState<string | null>(null);
   /** Message cité par la réponse en cours de composition. */
   const [replyTo, setReplyTo] = useState<Message | null>(null);
-  /**
-   * Mesures réelles du bas de l'écran. Le clavier peut rétrécir la fenêtre
-   * (adjustResize) ou être compensé par un padding racine (edge-to-edge) :
-   * mesurer le conteneur évite de dépendre de l'un ou de l'autre.
-   */
-  const [chatAreaHeight, setChatAreaHeight] = useState(0);
-  const [composerHeight, setComposerHeight] = useState(0);
-  const [replyBarHeight, setReplyBarHeight] = useState(0);
-  /**
-   * Espace clavier rendu au panneau mais pas encore reflété par le layout du
-   * KAV. Il évite que le panneau naisse avec la hauteur « clavier ouvert ».
-   */
-  const [pendingKeyboardHeight, setPendingKeyboardHeight] = useState(0);
-  const pendingKeyboardBaseRef = useRef(0);
-  const expressionMaxHeight = useMemo(
-    () =>
-      chatAreaHeight > 0
-        ? Math.max(
-            MIN_EXPRESSION_HEIGHT_DP,
-            chatAreaHeight +
-              pendingKeyboardHeight -
-              composerHeight -
-              (replyTo ? replyBarHeight : 0) -
-              CONVERSATION_RESERVE_DP,
-          )
-        : undefined,
-    [chatAreaHeight, pendingKeyboardHeight, composerHeight, replyBarHeight, replyTo],
-  );
-  useEffect(() => {
-    if (
-      pendingKeyboardHeight > 0 &&
-      !keyboardVisible &&
-      chatAreaHeight !== pendingKeyboardBaseRef.current
-    ) {
-      setPendingKeyboardHeight(0);
-    }
-  }, [pendingKeyboardHeight, keyboardVisible, chatAreaHeight]);
   /** Bulle dont le menu d'appui long est ouvert. */
   const [menuFor, setMenuFor] = useState<Message | null>(null);
-  /** Le compositeur montre le clavier ou le bouton « maintenir pour parler ». */
-  const [inputMode, setInputMode] = useState<'keyboard' | 'voice'>('keyboard');
   /** Waveforms des vocaux de cette session, indexées par clientId/URI locale. */
   const [voiceWaveforms, setVoiceWaveforms] = useState<Record<string, number[]>>({});
   const [playedVoiceIds, setPlayedVoiceIds] = useState<Set<string>>(() => new Set());
   const playedLoadedRef = useRef(false);
   const listRef = useRef<FlatList<ListRow>>(null);
-  /** Champ de saisie, pour rendre le clavier au panneau puis le rouvrir. */
-  const composerInputRef = useRef<TextInputInstance>(null);
-  /** Action différée jusqu'à la fermeture effective du clavier. */
-  const pendingExpressionRef = useRef<null | (() => void)>(null);
   /** Le dernier message est-il à l'écran ? Décide si on doit y recoller. */
   const atBottomRef = useRef(true);
   /** Séparateur de non-lus, figé à l'ouverture : il ne suit pas les arrivages. */
@@ -591,150 +538,34 @@ export default function ChatScreen() {
   /** L'historique est-il à l'écran ? Ce n'est qu'alors que la lecture se signale. */
   const historyLoadedRef = useRef(false);
 
-  const cancelPendingExpression = useCallback(() => {
-    pendingExpressionRef.current = null;
-    setPendingKeyboardHeight(0);
-  }, []);
-  const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), []);
-  const closePanels = useCallback(() => {
-    cancelPendingExpression();
-    setAttachPanelOpen(false);
-    setExpressionOpen(false);
-  }, [cancelPendingExpression]);
-  const toggleAttachPanel = useCallback(() => {
-    cancelPendingExpression();
-    setExpressionOpen(false);
-    // Le sélecteur de pièces jointes est un panneau d'actions plein : on libère
-    // le clavier et le focus pour pouvoir le rouvrir proprement ensuite.
-    composerInputRef.current?.blur();
-    Keyboard.dismiss();
-    setAttachPanelOpen((open) => !open);
-  }, [cancelPendingExpression]);
-  /**
-   * Ouvre un onglet. Si le clavier est visible, on attend sa fermeture
-   * effective (keyboardDidHide) avant de monter le panneau, afin qu'il soit
-   * dimensionné directement pour l'espace libéré.
-   */
-  const openExpression = useCallback(
-    (tab: ExpressionTab) => {
-      setAttachPanelOpen(false);
-      // Le panneau prend le relais du clavier : le champ perd le focus pour
-      // que le bouton clavier puisse rouvrir l'IME de façon fiable.
-      composerInputRef.current?.blur();
-      if (!keyboardVisible) {
-        setPendingKeyboardHeight(0);
-        setExpressionTab(tab);
-        setExpressionOpen(true);
-        return;
-      }
-      if (pendingExpressionRef.current) {
-        return;
-      }
-      pendingKeyboardBaseRef.current = chatAreaHeight;
-      setPendingKeyboardHeight(keyboardHeight);
-      pendingExpressionRef.current = () => {
-        setExpressionTab(tab);
-        setExpressionOpen(true);
-      };
-      Keyboard.dismiss();
-    },
-    [chatAreaHeight, keyboardHeight, keyboardVisible],
+  /** Vide le brouillon et remonte le compositeur (après une pièce jointe). */
+  const resetComposer = useCallback(() => {
+    setInput('');
+    setComposerKey((key) => key + 1);
+    if (token && id) {
+      connectSocket(token).emit('typing', { conversationId: id, text: '' });
+    }
+  }, [token, id]);
+
+  const composerTheme = useMemo<ComposerTheme>(
+    () => ({
+      barBg: chat.composer,
+      inputBg: chat.input,
+      inputText: chat.primaryText,
+      placeholder: chat.inputPlaceholder,
+      panelBg: chat.composer,
+      tabBg: chat.input,
+      tabActiveBg: theme.backgroundSelected,
+      text: chat.primaryText,
+      subtle: chat.secondaryText,
+      icon: chat.primaryText,
+      border: chat.border,
+      pressed: theme.backgroundSelected,
+      accent: chat.send,
+      accentText: chat.sendText,
+    }),
+    [chat, theme],
   );
-
-  useEffect(() => {
-    if (!attachPanelOpen && !expressionOpen) {
-      return;
-    }
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      setAttachPanelOpen(false);
-      setExpressionOpen(false);
-      return true;
-    });
-    return () => subscription.remove();
-  }, [attachPanelOpen, expressionOpen]);
-
-  /**
-   * Miroir du texte et suivi du curseur : le panneau d'émojis insère à
-   * l'endroit exact où l'utilisateur s'est arrêté, comme un clavier.
-   */
-  const inputRef = useRef('');
-  const selectionRef = useRef({ start: 0, end: 0 });
-  /** Sélection forcée une fois (après insertion), puis rendue au champ. */
-  const [emojiSelection, setEmojiSelection] = useState<{ start: number; end: number } | null>(null);
-
-  useEffect(() => {
-    inputRef.current = input;
-  }, [input]);
-
-  // Une sélection contrôlée figerait le curseur : on la lâche dès qu'elle est
-  // appliquée, le champ repart en non contrôlé avec sa vraie position.
-  useEffect(() => {
-    if (!emojiSelection) {
-      return;
-    }
-    const timer = setTimeout(() => setEmojiSelection(null), 120);
-    return () => clearTimeout(timer);
-  }, [emojiSelection]);
-
-  /** Ferme le panneau et rend le clavier au champ, curseur restauré. */
-  const showKeyboardFromPanel = useCallback(() => {
-    setExpressionOpen(false);
-    setAttachPanelOpen(false);
-    const { start, end } = selectionRef.current;
-    setEmojiSelection({ start, end });
-    setTimeout(() => composerInputRef.current?.focus(), 0);
-  }, []);
-
-  /** Bascule entre le clavier et les onglets du panneau d'expression. */
-  const toggleExpressionFromComposer = useCallback(() => {
-    if (!expressionOpen) {
-      openExpression('emoji');
-      return;
-    }
-    if (expressionTab === 'emoji') {
-      if (keyboardVisible) {
-        // Clavier de recherche du panneau : on le referme sans quitter Émojis.
-        Keyboard.dismiss();
-        return;
-      }
-      showKeyboardFromPanel();
-      return;
-    }
-    // Stickers/GIF : basculer sur Émojis sans fermer puis rouvrir le panneau.
-    if (keyboardVisible) {
-      Keyboard.dismiss();
-    }
-    setExpressionTab('emoji');
-  }, [expressionOpen, expressionTab, keyboardVisible, openExpression, showKeyboardFromPanel]);
-
-  // Le clavier vient de se fermer : laisser passer la mise en page (le KAV
-  // reprend sa hauteur), puis monter le panneau avec sa taille finale.
-  useEffect(() => {
-    if (keyboardVisible || !pendingExpressionRef.current) {
-      return;
-    }
-    const action = pendingExpressionRef.current;
-    pendingExpressionRef.current = null;
-    action?.();
-  }, [keyboardVisible]);
-
-  // Même événement que la fermeture du clavier : le panneau est monté dans le
-  // rendu qui suit, sans rendu intermédiaire ni attente de frames.
-  useEffect(() => {
-    const subscription = Keyboard.addListener('keyboardDidHide', () => {
-      const action = pendingExpressionRef.current;
-      if (!action) {
-        return;
-      }
-      pendingExpressionRef.current = null;
-      action();
-    });
-    return () => subscription.remove();
-  }, []);
-
-  const onInputSelectionChange = useCallback((event: { nativeEvent: { selection: { start: number; end: number } } }) => {
-    selectionRef.current = event.nativeEvent.selection;
-  }, []);
 
   const emitTyping = useCallback(
     (value: string) => {
@@ -748,7 +579,6 @@ export default function ChatScreen() {
   const onInputChange = useCallback(
     (value: string) => {
       setInput(value);
-      inputRef.current = value;
       if (!token || !id) return;
       const wait = 150 - (Date.now() - lastTypingEmitRef.current);
       if (wait <= 0) {
@@ -771,55 +601,6 @@ export default function ChatScreen() {
     },
     [emitTyping, token, id],
   );
-
-  /** Insère à la position actuelle du curseur, que l'émission de « saisie » suivie. */
-  const insertEmoji = useCallback(
-    (glyph: string) => {
-      const text = inputRef.current;
-      const { start, end } = selectionRef.current;
-      const from = Math.min(start, end, text.length);
-      const to = Math.min(Math.max(start, end), text.length);
-      const next = `${text.slice(0, from)}${glyph}${text.slice(to)}`;
-      onInputChange(next);
-      const caret = from + glyph.length;
-      selectionRef.current = { start: caret, end: caret };
-      setEmojiSelection({ start: caret, end: caret });
-    },
-    [onInputChange],
-  );
-
-  /** ⌫ du panneau : les séquences (famille, ton, drapeau) partent entières. */
-  const backspaceEmoji = useCallback(() => {
-    const text = inputRef.current;
-    if (!text) return;
-    const { start, end } = selectionRef.current;
-    let from: number;
-    let to: number;
-    if (start !== end) {
-      from = Math.min(start, end);
-      to = Math.max(start, end);
-    } else {
-      from = previousClusterIndex(text, Math.min(end, text.length));
-      to = end;
-    }
-    if (from >= to) {
-      return;
-    }
-    onInputChange(`${text.slice(0, from)}${text.slice(to)}`);
-    selectionRef.current = { start: from, end: from };
-    setEmojiSelection({ start: from, end: from });
-  }, [onInputChange]);
-
-  /** Vide le champ et remet le curseur à zéro après un envoi confirmé. */
-  const clearComposer = useCallback(() => {
-    setInput('');
-    inputRef.current = '';
-    selectionRef.current = { start: 0, end: 0 };
-    setEmojiSelection(null);
-    if (token && id) {
-      connectSocket(token).emit('typing', { conversationId: id, text: '' });
-    }
-  }, [token, id]);
 
   useEffect(() => {
     if (!token || !id || !user) {
@@ -1608,6 +1389,73 @@ export default function ChatScreen() {
         </View>
       );
 
+      if (message.type === 'sticker') {
+        return row(
+          <SwipeableBubble
+            mine={mine}
+            onReply={() => startReply(message)}
+            onLongPress={() => setMenuFor(message)}
+            style={bubbleMaxWidth}
+            accessibilityLabel={stuck ? 'Renvoyer ce message' : 'Options du message'}>
+            <View
+              style={[
+                styles.stickerMessageBlock,
+                mine ? styles.stickerMessageBlockMine : null,
+              ]}>
+              {!mine && isGroup ? (
+                <ThemedText type="smallBold" style={[styles.senderName, chatStyles.senderName]}>
+                  {message.sender.displayName}
+                </ThemedText>
+              ) : null}
+              {message.replyTo ? (
+                <View style={styles.stickerReplyQuote}>
+                  <QuoteBlock
+                    quote={message.replyTo}
+                    mine={mine}
+                    onPress={() => jumpToMessage(message.replyTo?.id)}
+                  />
+                </View>
+              ) : null}
+              <View style={{ opacity: waiting ? 0.55 : 1 }}>
+                <StickerMessage stickerRef={message.stickerRef ?? ''} size={140} />
+              </View>
+              {mine && tick && !waiting ? (
+                <View style={styles.mediaTicks}>
+                  <Ticks state={tick} tone={chat.tick} failedTone={chat.error} />
+                </View>
+              ) : null}
+              {stuck ? (
+                <View style={[styles.mediaFailed, mine ? styles.mediaFailedMine : null]}>
+                  <ThemedText style={[styles.failedHint, chatStyles.failed]} numberOfLines={2}>
+                    {stuck.error ?? "Le message n'est pas parti."}
+                  </ThemedText>
+                  <View style={styles.mediaFailedActions}>
+                    <Pressable
+                      onPress={() => void resend(stuck.clientId)}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Réessayer l'envoi">
+                      <ThemedText style={[styles.failedHint, chatStyles.failed]}>
+                        Réessayer
+                      </ThemedText>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => void discard(stuck.clientId)}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Supprimer ce sticker">
+                      <ThemedText style={[styles.failedHint, chatStyles.secondaryText]}>
+                        Supprimer
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
+            </View>
+          </SwipeableBubble>,
+        );
+      }
+
       if (attachment?.type === 'AUDIO') {
         const waveform =
           (message.clientId ? voiceWaveforms[message.clientId] : undefined) ??
@@ -1875,9 +1723,9 @@ export default function ChatScreen() {
                     styles.mediaCaption,
                     mine ? chatStyles.bubbleMine : chatStyles.bubbleTheirs,
                   ]}>
-                  <ThemedText style={[styles.mediaCaptionText, { color: foreground }]}>
+                  <EmojiText style={[styles.mediaCaptionText, { color: foreground }]}>
                     {message.content}
-                  </ThemedText>
+                  </EmojiText>
                 </View>
               ) : null}
               {mine && tick && !waiting ? (
@@ -1942,9 +1790,10 @@ export default function ChatScreen() {
             </ThemedText>
           ) : null}
           {message.content ? (
-            <ThemedText style={[styles.messageText, chatStyles.messageText]}>
-              {message.content}
-            </ThemedText>
+            <MessageText
+              text={message.content}
+              style={[styles.messageText, chatStyles.messageText]}
+            />
           ) : null}
           {mine && tick ? (
             <View style={styles.ticksRow}>
@@ -2023,7 +1872,7 @@ export default function ChatScreen() {
       setError(null);
       // Le texte déjà saisi devient la légende du premier fichier ; les
       // suivants partent sans légende, dans l'ordre de sélection.
-      const caption = inputRef.current.trim();
+      const caption = input.trim();
       for (const [index, file] of files.entries()) {
         await enqueue({
           conversationId: id,
@@ -2040,16 +1889,13 @@ export default function ChatScreen() {
           },
         });
       }
-      if (caption) {
-        clearComposer();
-      }
+      resetComposer();
       void drain(token);
     },
-    [token, id, clearComposer],
+    [token, id, input, resetComposer],
   );
 
   const pickLibrary = useCallback(async () => {
-    closeAttachPanel();
     try {
       const picked = await pickLibraryMedia();
       if (!picked) {
@@ -2067,10 +1913,9 @@ export default function ChatScreen() {
         `${detail}\n\nSi l'accès aux photos est refusé, autorise-le dans les réglages.`,
       );
     }
-  }, [closeAttachPanel, queueAttachments, reportPickerError, showRejected]);
+  }, [queueAttachments, reportPickerError, showRejected]);
 
   const pickCamera = useCallback(async () => {
-    closeAttachPanel();
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
@@ -2093,10 +1938,9 @@ export default function ChatScreen() {
     } catch {
       reportPickerError('Appareil photo indisponible', "Impossible d'ouvrir l'appareil photo.");
     }
-  }, [closeAttachPanel, queueAttachments, reportPickerError, showRejected]);
+  }, [queueAttachments, reportPickerError, showRejected]);
 
   const pickFileDocuments = useCallback(async () => {
-    closeAttachPanel();
     try {
       const picked = await pickDocuments();
       if (!picked) {
@@ -2107,7 +1951,7 @@ export default function ChatScreen() {
     } catch {
       reportPickerError('Fichiers indisponibles', 'Impossible de sélectionner des fichiers.');
     }
-  }, [closeAttachPanel, queueAttachments, reportPickerError, showRejected]);
+  }, [queueAttachments, reportPickerError, showRejected]);
 
   /**
    * Le vocal part par la même file qu'une photo : il survit à une coupure et
@@ -2153,40 +1997,30 @@ export default function ChatScreen() {
   }, []);
 
   /**
-   * Envoi d'un GIF GIPHY : aucun octet ne transite par notre API — l'URL du
-   * rendu messagerie (intacte, exigence GIPHY) est validée par le serveur
-   * (allowlist media*.giphy.com) puis stockée dans la pièce jointe.
+   * Le texte quitte le champ immédiatement et passe par la file : la bulle
+   * horloge reste visible tant que le serveur n'a pas confirmé, et le message
+   * repart tout seul dès que la connexion revient.
    */
-  const sendGif = useCallback(
-    async (gif: GifSendPayload) => {
+  const sendText = useCallback(
+    async (text: string) => {
       if (!token || !id) {
         return;
       }
+      const content = text.trim();
+      if (!content) {
+        return;
+      }
       setError(null);
-      await enqueue({
-        conversationId: id,
-        content: '',
-        attachment: {
-          mime: gif.sticker === true ? 'image/webp' : 'image/gif',
-          width: gif.width ?? null,
-          height: gif.height ?? null,
-          kind: 'gif',
-          external: gif,
-        },
-      });
+      await enqueue({ conversationId: id, content, replyTo: replyTo?.id ?? null });
+      setReplyTo(null);
       void drain(token);
     },
-    [token, id],
+    [token, id, replyTo],
   );
 
-  /**
-   * Envoi d'un sticker local : l'image est d'abord rendue disponible comme
-   * fichier (asset bundlé ou création personnelle), puis confiée à la file
-   * d'attente existante. Le serveur requalifie l'upload en STICKER à partir
-   * des identifiants ci-dessous. Un appui bref et répété est neutralisé.
-   */
+  /** Un sticker ne transporte qu'une référence de catalogue, jamais un fichier. */
   const sendSticker = useCallback(
-    async (sticker: Sticker) => {
+    async (ref: string) => {
       if (!token || !id) {
         return;
       }
@@ -2196,75 +2030,22 @@ export default function ChatScreen() {
       }
       lastStickerSendAt.current = now;
       setError(null);
-      try {
-        const localUri = await resolveStickerUri(sticker);
-        await enqueue({
-          conversationId: id,
-          content: '',
-          replyTo: replyTo?.id ?? null,
-          attachment: {
-            localUri,
-            kind: 'sticker',
-            mime: sticker.mime,
-            name: sticker.name,
-            width: sticker.width,
-            height: sticker.height,
-            external: {
-              id: sticker.id,
-              packId: sticker.packId,
-              name: sticker.name,
-              width: sticker.width,
-              height: sticker.height,
-            },
-          },
-        });
-        setReplyTo(null);
-        void drain(token);
-      } catch (stickerError) {
-        setError(
-          stickerError instanceof Error
-            ? stickerError.message
-            : "Impossible d'envoyer ce sticker.",
-        );
-      }
+      await enqueue({
+        conversationId: id,
+        content: '',
+        replyTo: replyTo?.id ?? null,
+        type: 'sticker',
+        stickerRef: ref,
+      });
+      setReplyTo(null);
+      void drain(token);
     },
     [token, id, replyTo],
   );
 
-  const toggleInputMode = useCallback(() => {
-    cancelPendingExpression();
-    setAttachPanelOpen(false);
-    setExpressionOpen(false);
-    if (inputMode === 'keyboard') {
-      composerInputRef.current?.blur();
-      Keyboard.dismiss();
-      setInputMode('voice');
-      return;
-    }
-    setInputMode('keyboard');
-  }, [cancelPendingExpression, inputMode]);
-
   if (!token || !user) {
     return <Redirect href="/login" />;
   }
-
-  /**
-   * Le texte quitte le champ immédiatement et passe par la file : la bulle
-   * horloge reste visible tant que le serveur n'a pas confirmé, et le message
-   * repart tout seul dès que la connexion revient.
-   */
-  const send = async () => {
-    const content = input.trim();
-    if (!content || !token || !id) {
-      return;
-    }
-    setError(null);
-    await enqueue({ conversationId: id, content, replyTo: replyTo?.id ?? null });
-    setAttachPanelOpen(false);
-    clearComposer();
-    setReplyTo(null);
-    void drain(token);
-  };
 
   return (
     <ThemedView
@@ -2272,18 +2053,13 @@ export default function ChatScreen() {
         styles.container,
         chatStyles.screen,
         // Android (edge-to-edge) : la fenêtre n'est pas redimensionnée, on pousse
-        // donc nous-mêmes le contenu au-dessus du clavier. En mode vocal ou avec
-        // le panneau de pièces jointes, le clavier est fermé volontairement :
-        // on libère la réserve immédiatement au lieu d'attendre l'événement.
-        keyboardHeight > 0 && inputMode === 'keyboard' && !attachPanelOpen
-          ? { paddingBottom: keyboardHeight }
-          : null,
+        // donc nous-mêmes le contenu au-dessus du clavier.
+        keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
       ]}>
       <Stack.Screen options={headerOptions} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-        onLayout={(event) => setChatAreaHeight(event.nativeEvent.layout.height)}
         style={styles.flex}>
         <FlatList
           ref={listRef}
@@ -2293,7 +2069,6 @@ export default function ChatScreen() {
           onEndReached={loadOlder}
           onEndReachedThreshold={0.3}
           contentContainerStyle={styles.listContent}
-          onTouchStart={attachPanelOpen || expressionOpen ? closePanels : undefined}
           onScroll={event => {
             // Liste inversée : offset 0 = le dernier message. On n'y recolle un
             // nouvel arrivant que si l'utilisateur y était déjà.
@@ -2356,9 +2131,7 @@ export default function ChatScreen() {
         ) : null}
 
         {replyTo ? (
-          <View
-            onLayout={(event) => setReplyBarHeight(event.nativeEvent.layout.height)}
-            style={[styles.replyBar, chatStyles.replyBar]}>
+          <View style={[styles.replyBar, chatStyles.replyBar]}>
             <View style={styles.replyBarBody}>
               <QuoteBlock quote={quoteOfMessage(replyTo)} mine={false} />
             </View>
@@ -2373,62 +2146,33 @@ export default function ChatScreen() {
           </View>
         ) : null}
 
-        <View onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}>
-          <MessageComposer
-            inputRef={composerInputRef}
-            value={input}
-            onChangeText={onInputChange}
-            onSelectionChange={onInputSelectionChange}
-            selection={emojiSelection ?? undefined}
-            mode={inputMode}
-            onToggleMode={toggleInputMode}
-            voiceRecorder={
-              <VoiceRecordButton
-                onSend={sendVoiceMessage}
-                onPermissionDenied={handleVoicePermissionDenied}
-                onError={handleVoiceError}
-                accentColor={chat.mineBubble}
-                idleColor={chat.input}
-                pressedColor={chat.border}
-                textStyle={chatStyles.voiceButtonText}
-              />
-            }
-            expressionOpen={expressionOpen}
-            expressionTab={expressionTab}
-            keyboardVisible={keyboardVisible}
-            onToggleExpression={toggleExpressionFromComposer}
-            attachOpen={attachPanelOpen}
-            onToggleAttach={toggleAttachPanel}
-            onSend={send}
-            onFocus={closePanels}
-            bottomInset={insets.bottom}
-            compactBottom={keyboardHeight > 0 || attachPanelOpen || expressionOpen}
-          />
-        </View>
-
-        {attachPanelOpen ? (
-          <AttachPanel
-            onPhotos={() => void pickLibrary()}
-            onCamera={() => void pickCamera()}
-            onDocuments={() => void pickFileDocuments()}
-            onStickers={() => openExpression('stickers')}
-          />
-        ) : null}
-
-        {expressionOpen ? (
-          <ExpressionPanel
-            tab={expressionTab}
-            onChangeTab={setExpressionTab}
-            giphyEnabled={giphyEnabled}
-            maxHeight={expressionMaxHeight}
-            compactBottom={keyboardHeight > 0}
-            onSelectEmoji={insertEmoji}
-            onBackspace={backspaceEmoji}
-            onSendSticker={(sticker) => void sendSticker(sticker)}
-            onSendGif={(gif) => void sendGif(gif)}
-            customerId={user.id}
-          />
-        ) : null}
+        <ChatComposer
+          key={composerKey}
+          theme={composerTheme}
+          onSendText={sendText}
+          onSendSticker={(ref) => void sendSticker(ref)}
+          onTextChange={onInputChange}
+          bottomInset={insets.bottom}
+          voiceSlot={
+            <VoiceRecordButton
+              onSend={sendVoiceMessage}
+              onPermissionDenied={handleVoicePermissionDenied}
+              onError={handleVoiceError}
+              accentColor={chat.mineBubble}
+              idleColor={chat.input}
+              pressedColor={chat.border}
+              textStyle={chatStyles.voiceButtonText}
+              style={styles.voiceRecorder}
+            />
+          }
+          plusPanel={
+            <AttachPanel
+              onPhotos={() => void pickLibrary()}
+              onCamera={() => void pickCamera()}
+              onDocuments={() => void pickFileDocuments()}
+            />
+          }
+        />
       </KeyboardAvoidingView>
 
       <ActionSheet
@@ -2467,6 +2211,20 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  voiceRecorder: {
+    flex: 1,
+    height: 40,
+  },
+  stickerMessageBlock: {
+    maxWidth: 160,
+    gap: 4,
+  },
+  stickerMessageBlockMine: {
+    alignItems: 'flex-end',
+  },
+  stickerReplyQuote: {
+    width: 160,
   },
   headerBackground: {
     flex: 1,
@@ -2604,6 +2362,11 @@ const styles = StyleSheet.create({
   },
   quoteBar: {
     width: 3,
+  },
+  quotePreviewText: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '500',
   },
   quoteBody: {
     flex: 1,

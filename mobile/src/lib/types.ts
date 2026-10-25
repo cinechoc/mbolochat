@@ -38,6 +38,9 @@ export interface UserProfile extends User {
 
 export type MessageAttachmentType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE' | 'GIF' | 'STICKER';
 
+/** Texte Unicode normal, ou sticker référencé par son catalogue local. */
+export type MessageType = 'text' | 'sticker';
+
 /** Pièce jointe d'un message (photo pour l'instant). */
 export interface MessageAttachment {
   type: MessageAttachmentType;
@@ -105,6 +108,7 @@ export interface MessageQuote {
   id: string;
   senderName: string;
   content: string;
+  type: MessageType;
   attachmentType: MessageAttachmentType | null;
   /** L'original a été retiré depuis. */
   deleted: boolean;
@@ -113,7 +117,10 @@ export interface MessageQuote {
 export interface Message {
   id: string;
   conversationId: string;
+  type: MessageType;
   content: string;
+  /** Référence de catalogue d'un sticker (« mbolo/merci »), sinon null. */
+  stickerRef: string | null;
   attachment: MessageAttachment | null;
   /** Clé d'idempotence de l'appareil émetteur (null pour l'historique ancien). */
   clientId: string | null;

@@ -13,8 +13,6 @@ interface AttachPanelProps {
   onPhotos: () => void;
   onCamera: () => void;
   onDocuments: () => void;
-  /** Ouvre le sélecteur de stickers local dans le panneau d'expression. */
-  onStickers: () => void;
 }
 
 interface PanelAction {
@@ -34,7 +32,6 @@ export const AttachPanel = memo(function AttachPanel({
   onPhotos,
   onCamera,
   onDocuments,
-  onStickers,
 }: AttachPanelProps) {
   const chat = useChatColors();
   const insets = useSafeAreaInsets();
@@ -59,13 +56,6 @@ export const AttachPanel = memo(function AttachPanel({
       icon: 'document-text-outline',
       tint: '#C77C2B',
       onPress: onDocuments,
-    },
-    {
-      key: 'stickers',
-      label: 'Stickers',
-      icon: 'sparkles-outline',
-      tint: '#8A63D2',
-      onPress: onStickers,
     },
   ];
 

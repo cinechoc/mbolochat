@@ -14,6 +14,7 @@ import {
 import { UploadsService } from '../uploads/uploads.service.js';
 import { UsersService } from '../users/users.service.js';
 import type { StickerAttachmentMeta } from '../chat/sticker-attachment.js';
+import { isValidStickerRef, isMessageType, type MessageType } from '../chat/sticker-ref.js';
 
 export interface SenderInfo {
   id: string;
@@ -34,6 +35,7 @@ export interface MessageQuoteDto {
   id: string;
   senderName: string;
   content: string;
+  type: MessageType;
   attachmentType: MessageAttachment['type'] | null;
   /** Le message cité a été retiré depuis : on l'affiche comme tel. */
   deleted: boolean;
@@ -42,7 +44,10 @@ export interface MessageQuoteDto {
 export interface MessageDto {
   id: string;
   conversationId: string;
+  type: MessageType;
   content: string;
+  /** Référence de catalogue d'un sticker, null pour les autres messages. */
+  stickerRef: string | null;
   /** Pièce jointe (photo…), null pour un message texte. */
   attachment: MessageAttachment | null;
   /** Clé d'idempotence de l'appareil émetteur (null pour l'historique ancien). */
@@ -139,6 +144,8 @@ const UNSEND_WINDOW_MS = 24 * 60 * 60 * 1000;
 const messageColumns = {
   id: messages.id,
   conversationId: messages.conversationId,
+  type: messages.type,
+  stickerRef: messages.stickerRef,
   content: messages.content,
   attachment: messages.attachment,
   clientId: messages.clientId,
@@ -150,6 +157,8 @@ const messageColumns = {
   senderDisplayName: users.displayName,
   senderAvatarUrl: users.avatarUrl,
   quotedContent: quoted.content,
+  quotedType: quoted.type,
+  quotedStickerRef: quoted.stickerRef,
   quotedAttachment: quoted.attachment,
   quotedDeletedAt: quoted.deletedAt,
   quotedSenderName: quotedSender.displayName,
@@ -159,6 +168,8 @@ const messageColumns = {
 interface MessageRow {
   id: string;
   conversationId: string;
+  type: string;
+  stickerRef: string | null;
   content: string;
   attachment: MessageAttachment | null;
   clientId: string | null;
@@ -170,6 +181,8 @@ interface MessageRow {
   senderDisplayName: string;
   senderAvatarUrl: string | null;
   quotedContent: string | null;
+  quotedType: string | null;
+  quotedStickerRef: string | null;
   quotedAttachment: MessageAttachment | null;
   quotedDeletedAt: Date | null;
   quotedSenderName: string | null;
@@ -187,6 +200,7 @@ function toQuoteDto(row: MessageRow): MessageQuoteDto | null {
     id: row.replyToId,
     senderName: row.quotedSenderName ?? 'Message',
     content: preview,
+    type: gone ? 'text' : row.quotedType === 'sticker' ? 'sticker' : 'text',
     attachmentType: gone ? null : (row.quotedAttachment?.type ?? null),
     deleted: gone,
   };
@@ -197,8 +211,10 @@ function toMessageDto(row: MessageRow): MessageDto {
   return {
     id: row.id,
     conversationId: row.conversationId,
+    type: row.type === 'sticker' ? 'sticker' : 'text',
     // « Supprimé pour tous » vide la ligne : rien à renvoyer, juste le témoin.
     content: deleted ? '' : row.content,
+    stickerRef: deleted || row.type !== 'sticker' ? null : (row.stickerRef ?? null),
     attachment: deleted ? null : (row.attachment ?? null),
     clientId: row.clientId ?? null,
     deleted,
@@ -788,7 +804,23 @@ export class ConversationsService {
     gifAttachment?: MessageAttachment | null,
     // Métadonnées d'un sticker importé comme image ; le type final est STICKER.
     sticker?: StickerAttachmentMeta | null,
+    messageType: MessageType = 'text',
+    stickerRef?: string,
   ): Promise<MessageDto> {
+    if (!isMessageType(messageType)) {
+      throw new BadRequestException('Type de message invalide');
+    }
+    if (messageType === 'sticker') {
+      if (!isValidStickerRef(stickerRef)) {
+        throw new BadRequestException('Référence de sticker invalide');
+      }
+      if (attachmentId || gifAttachment || sticker) {
+        throw new BadRequestException('Un sticker ne porte pas de pièce jointe');
+      }
+    } else if (stickerRef !== undefined && stickerRef !== null) {
+      throw new BadRequestException('stickerRef n’est valide que pour un sticker');
+    }
+
     if (!(await this.isMember(conversationId, senderId))) {
       throw new ForbiddenException('You are not a member of this conversation');
     }
@@ -859,6 +891,8 @@ export class ConversationsService {
       .values({
         conversationId,
         senderId,
+        type: messageType,
+        stickerRef: messageType === 'sticker' ? stickerRef : null,
         content,
         attachment,
         clientId: clientId ?? null,
@@ -887,7 +921,9 @@ export class ConversationsService {
     return {
       id: stored.id,
       conversationId: stored.conversationId,
+      type: stored.type === 'sticker' ? 'sticker' : 'text',
       content: stored.content,
+      stickerRef: stored.type === 'sticker' ? (stored.stickerRef ?? null) : null,
       attachment: stored.attachment ?? null,
       clientId: stored.clientId ?? null,
       deleted: stored.deletedAt !== null,
@@ -908,6 +944,7 @@ export class ConversationsService {
     const [row] = await this.db
       .select({
         content: messages.content,
+        type: messages.type,
         attachment: messages.attachment,
         deletedAt: messages.deletedAt,
         senderName: users.displayName,
@@ -924,6 +961,7 @@ export class ConversationsService {
       id: messageId,
       senderName: row.senderName,
       content: gone ? '' : row.content.slice(0, QUOTE_PREVIEW_CHARS),
+      type: row.type === 'sticker' ? 'sticker' : 'text',
       attachmentType: gone ? null : (row.attachment?.type ?? null),
       deleted: gone,
     };
@@ -964,7 +1002,7 @@ export class ConversationsService {
 
     await this.db
       .update(messages)
-      .set({ content: '', attachment: null, deletedAt: new Date() })
+      .set({ content: '', stickerRef: null, attachment: null, deletedAt: new Date() })
       .where(eq(messages.id, messageId));
     return this.messageDto(messageId);
   }
@@ -1032,6 +1070,8 @@ export class ConversationsService {
     const result = await this.db.execute<{
       id: string;
       conversationId: string;
+      type: string;
+      stickerRef: string | null;
       content: string;
       attachment: MessageAttachment | null;
       clientId: string | null;
@@ -1045,6 +1085,8 @@ export class ConversationsService {
       select distinct on (m.conversation_id)
         m.id,
         m.conversation_id as "conversationId",
+        m.type,
+        m.sticker_ref as "stickerRef",
         m.content,
         m.attachment,
         m.client_id as "clientId",
@@ -1070,7 +1112,9 @@ export class ConversationsService {
       map.set(row.conversationId, {
         id: row.id,
         conversationId: row.conversationId,
+        type: row.type === 'sticker' ? 'sticker' : 'text',
         content: deleted ? '' : row.content,
+        stickerRef: deleted || row.type !== 'sticker' ? null : (row.stickerRef ?? null),
         attachment: deleted ? null : (row.attachment ?? null),
         clientId: row.clientId ?? null,
         deleted,

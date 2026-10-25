@@ -76,6 +76,9 @@ export default function HelpScreen() {
             <ThemedText type="small" themeColor="textSecondary" style={styles.answer}>
               Messagerie temps réel — version 1.0.0
             </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.answer}>
+              Emoji : Fluent Emoji (Microsoft), licence MIT.
+            </ThemedText>
           </View>
         </ThemedView>
       </ScrollView>

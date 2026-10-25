@@ -165,7 +165,9 @@ export function conversationPreview(
   const isGroup = conversation.type === 'GROUP';
   const body = last.deleted
     ? 'Message supprimé'
-    : last.attachment
+    : last.type === 'sticker'
+      ? 'Sticker'
+      : last.attachment
       ? last.content
         ? last.content
         : last.attachment.type === 'AUDIO'

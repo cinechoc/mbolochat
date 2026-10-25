@@ -65,6 +65,35 @@ function previewOf(content: string): string {
   return single.length > 160 ? `${single.slice(0, 157)}…` : single;
 }
 
+/** Texte affiché dans la notification, selon le type et la pièce jointe. */
+export function notificationText(
+  message: Pick<MessageDto, 'type' | 'content' | 'attachment'>,
+): string {
+  if (message.type === 'sticker') {
+    return 'Sticker';
+  }
+  if (!message.attachment) {
+    return previewOf(message.content);
+  }
+  if (message.content) {
+    return previewOf(message.content);
+  }
+  switch (message.attachment.type) {
+    case 'AUDIO':
+      return '🎤 Message vocal';
+    case 'VIDEO':
+      return '🎬 Vidéo';
+    case 'FILE':
+      return '📎 Fichier';
+    case 'GIF':
+      return '🎞️ GIF';
+    case 'STICKER':
+      return '✨ Sticker';
+    default:
+      return '📷 Photo';
+  }
+}
+
 /**
  * Envoi des notifications push des nouveaux messages via le service Expo.
  *
@@ -151,21 +180,7 @@ export class PushService {
           ? (conversation.name?.trim() || 'Groupe')
           : message.sender.displayName;
       // Une pièce jointe sans légende s'annonce comme sur WhatsApp.
-      const text = message.attachment
-        ? message.content
-          ? previewOf(message.content)
-          : message.attachment.type === 'AUDIO'
-            ? '🎤 Message vocal'
-            : message.attachment.type === 'VIDEO'
-              ? '🎬 Vidéo'
-              : message.attachment.type === 'FILE'
-                ? '📎 Fichier'
-                : message.attachment.type === 'GIF'
-                  ? '🎞️ GIF'
-                  : message.attachment.type === 'STICKER'
-                    ? '✨ Sticker'
-                    : '📷 Photo'
-        : previewOf(message.content);
+      const text = notificationText(message);
       const body = conversation.type === 'GROUP' ? `${message.sender.displayName} : ${text}` : text;
 
       // L'avatar part en URL absolue dans la notification : il doit être signé
