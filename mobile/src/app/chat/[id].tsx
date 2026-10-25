@@ -41,7 +41,9 @@ import { PresenceSubtitle } from '@/features/presence/PresenceSubtitle';
 import { VoiceMessageBubble, voiceBubbleWidth } from '@/features/voice-notes/VoiceMessageBubble';
 import { VoiceRecordButton } from '@/features/voice-notes/VoiceRecordButton';
 import { ChatComposer, type ComposerTheme } from '@/features/composer/ChatComposer';
+import { SingleEmojiMessage } from '@/features/emoji/AnimatedEmoji';
 import { EmojiText, MessageText } from '@/features/emoji/EmojiText';
+import { emojiOnlyCount, splitEmoji, type EmojiSegment } from '@/features/emoji/emojiUtils';
 import { GifMessageBubble } from '@/features/media/GifMessageBubble';
 import { StickerMessageBubble } from '@/features/stickers/StickerMessageBubble';
 import { StickerMessage } from '@/features/stickers/StickerView';
@@ -519,6 +521,9 @@ export default function ChatScreen() {
   const [videoViewer, setVideoViewer] = useState<string | null>(null);
   /** Message cité par la réponse en cours de composition. */
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  /** Espace réel au-dessus du clavier, utilisé pour dimensionner la recherche emoji. */
+  const [chatAreaHeight, setChatAreaHeight] = useState(0);
+  const [replyBarHeight, setReplyBarHeight] = useState(0);
   /** Bulle dont le menu d'appui long est ouvert. */
   const [menuFor, setMenuFor] = useState<Message | null>(null);
   /** Waveforms des vocaux de cette session, indexées par clientId/URI locale. */
@@ -1456,6 +1461,109 @@ export default function ChatScreen() {
         );
       }
 
+      if (!attachment) {
+        const trimmed = message.content.trim();
+        const emojiCount = emojiOnlyCount(trimmed);
+        if (emojiCount >= 1 && emojiCount <= 3) {
+          const emojiSegment =
+            emojiCount === 1
+              ? splitEmoji(trimmed).find(
+                  (segment): segment is EmojiSegment => segment.type === 'emoji',
+                )
+              : undefined;
+          const createdAtMs = new Date(message.createdAt).getTime();
+          const fresh =
+            waiting || queuedById.has(message.id) || Date.now() - createdAtMs < 15_000;
+          return row(
+            <SwipeableBubble
+              mine={mine}
+              onReply={() => startReply(message)}
+              onPress={stuck ? () => resend(stuck.clientId) : undefined}
+              onLongPress={() => setMenuFor(message)}
+              style={bubbleMaxWidth}
+              accessibilityLabel={stuck ? 'Renvoyer ce message' : 'Options du message'}>
+              <View
+                style={[
+                  styles.emojiOnlyBlock,
+                  mine ? styles.emojiOnlyBlockMine : null,
+                ]}>
+                {!mine && isGroup ? (
+                  <ThemedText type="smallBold" style={[styles.senderName, chatStyles.senderName]}>
+                    {message.sender.displayName}
+                  </ThemedText>
+                ) : null}
+                {message.replyTo ? (
+                  <View style={styles.emojiOnlyQuote}>
+                    <QuoteBlock
+                      quote={message.replyTo}
+                      mine={mine}
+                      onPress={() => jumpToMessage(message.replyTo?.id)}
+                    />
+                  </View>
+                ) : null}
+                {emojiCount === 1 && emojiSegment ? (
+                  <SingleEmojiMessage
+                    emoji={emojiSegment.value}
+                    messageId={message.clientId ?? message.id}
+                    fresh={fresh}
+                  />
+                ) : (
+                  <MessageText
+                    text={trimmed}
+                    style={[styles.emojiOnlyText, chatStyles.messageText]}
+                  />
+                )}
+                <View
+                  style={[
+                    styles.emojiOnlyMeta,
+                    mine ? styles.emojiOnlyMetaMine : null,
+                  ]}>
+                  <ThemedText style={[styles.emojiOnlyTime, chatStyles.secondaryText]}>
+                    {formatClock(message.createdAt)}
+                  </ThemedText>
+                  {mine && tick ? (
+                    <Ticks state={tick} tone={chat.tick} failedTone={chat.error} />
+                  ) : null}
+                </View>
+                {stuck ? (
+                  <View
+                    style={[
+                      styles.emojiOnlyFailed,
+                      mine ? styles.emojiOnlyFailedMine : null,
+                    ]}>
+                    <ThemedText
+                      style={[styles.failedHint, chatStyles.failed]}
+                      numberOfLines={2}>
+                      {stuck.error ?? "Le message n'est pas parti."}
+                    </ThemedText>
+                    <View style={styles.mediaFailedActions}>
+                      <Pressable
+                        onPress={() => void resend(stuck.clientId)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Réessayer l'envoi">
+                        <ThemedText style={[styles.failedHint, chatStyles.failed]}>
+                          Réessayer
+                        </ThemedText>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => void discard(stuck.clientId)}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Supprimer ce message">
+                        <ThemedText style={[styles.failedHint, chatStyles.secondaryText]}>
+                          Supprimer
+                        </ThemedText>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+            </SwipeableBubble>,
+          );
+        }
+      }
+
       if (attachment?.type === 'AUDIO') {
         const waveform =
           (message.clientId ? voiceWaveforms[message.clientId] : undefined) ??
@@ -2060,6 +2168,7 @@ export default function ChatScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        onLayout={(event) => setChatAreaHeight(event.nativeEvent.layout.height)}
         style={styles.flex}>
         <FlatList
           ref={listRef}
@@ -2131,7 +2240,9 @@ export default function ChatScreen() {
         ) : null}
 
         {replyTo ? (
-          <View style={[styles.replyBar, chatStyles.replyBar]}>
+          <View
+            onLayout={(event) => setReplyBarHeight(event.nativeEvent.layout.height)}
+            style={[styles.replyBar, chatStyles.replyBar]}>
             <View style={styles.replyBarBody}>
               <QuoteBlock quote={quoteOfMessage(replyTo)} mine={false} />
             </View>
@@ -2153,6 +2264,11 @@ export default function ChatScreen() {
           onSendSticker={(ref) => void sendSticker(ref)}
           onTextChange={onInputChange}
           bottomInset={insets.bottom}
+          availableHeight={
+            chatAreaHeight > 0
+              ? Math.max(0, chatAreaHeight - (replyTo ? replyBarHeight : 0))
+              : undefined
+          }
           voiceSlot={
             <VoiceRecordButton
               onSend={sendVoiceMessage}
@@ -2225,6 +2341,38 @@ const styles = StyleSheet.create({
   },
   stickerReplyQuote: {
     width: 160,
+  },
+  emojiOnlyBlock: {
+    maxWidth: 180,
+    gap: 4,
+  },
+  emojiOnlyBlockMine: {
+    alignItems: 'flex-end',
+  },
+  emojiOnlyQuote: {
+    width: 160,
+  },
+  emojiOnlyText: {
+    textAlign: 'center',
+  },
+  emojiOnlyMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  emojiOnlyMetaMine: {
+    justifyContent: 'flex-end',
+  },
+  emojiOnlyTime: {
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  emojiOnlyFailed: {
+    maxWidth: 180,
+    gap: 4,
+  },
+  emojiOnlyFailedMine: {
+    alignItems: 'flex-end',
   },
   headerBackground: {
     flex: 1,

@@ -104,3 +104,25 @@ test('deleteBackward : caractère simple', () => {
 test('deleteBackward : caractère après un emoji', () => {
   assert.deepEqual(deleteBackward('a😀b', 4, 4), { text: 'a😀', cursor: 3 });
 });
+
+test('décideur emoji seul : cas WhatsApp', () => {
+  const cases = [
+    ['😀', 1, '😀'],
+    [' 😀 ', 1, '😀'],
+    ['😀😀', 2, null],
+    ['😀 salut', 0, null],
+    ['👨‍👩‍👧', 1, '👨‍👩‍👧'],
+    ['👍🏽', 1, '👍🏽'],
+    ['❤️', 1, '❤️'],
+    ['', 0, null],
+    ['a', 0, null],
+  ];
+
+  for (const [text, count, expectedEmoji] of cases) {
+    assert.equal(emojiOnlyCount(text), count, `emojiOnlyCount(${JSON.stringify(text)})`);
+    if (expectedEmoji) {
+      const segment = splitEmoji(text.trim()).find((item) => item.type === 'emoji');
+      assert.equal(segment?.value, expectedEmoji, `emoji de ${JSON.stringify(text)}`);
+    }
+  }
+});

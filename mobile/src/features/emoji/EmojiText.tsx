@@ -1,6 +1,6 @@
 import React, { memo, useMemo } from 'react';
 import { Image, StyleProp, StyleSheet, Text, TextProps, TextStyle, ImageStyle } from 'react-native';
-import { EMOJI_SOURCES } from './emojiCatalog';
+import { EMOJI_LARGE_SOURCES, EMOJI_SOURCES } from './emojiCatalog';
 import { emojiOnlyCount, splitEmoji } from './emojiUtils';
 
 /**
@@ -9,11 +9,17 @@ import { emojiOnlyCount, splitEmoji } from './emojiUtils';
  */
 const INLINE_SHIFT = 0.14;
 
-type EmojiImageProps = { emojiKey: string; size: number; style?: StyleProp<ImageStyle> };
+type EmojiImageProps = {
+  emojiKey: string;
+  size: number;
+  /** Utilise la version grand format (192 px) si elle existe : pour les emoji affichés en grand. */
+  large?: boolean;
+  style?: StyleProp<ImageStyle>;
+};
 
 /** Une image d'emoji, ou rien si l'emoji n'est pas dans le pack. */
-export const EmojiImage = memo(function EmojiImage({ emojiKey, size, style }: EmojiImageProps) {
-  const source = EMOJI_SOURCES[emojiKey];
+export const EmojiImage = memo(function EmojiImage({ emojiKey, size, large, style }: EmojiImageProps) {
+  const source = (large ? EMOJI_LARGE_SOURCES[emojiKey] : undefined) ?? EMOJI_SOURCES[emojiKey];
   if (!source) return null;
   return (
     <Image

@@ -7,13 +7,23 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
+  type TextInputInstance,
   View,
   useWindowDimensions,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { EMOJI_BY_KEY, EMOJI_GROUPS, type EmojiGroup, type EmojiItem } from './emojiCatalog';
+import * as Haptics from 'expo-haptics';
+import {
+  EMOJI_BY_KEY,
+  EMOJI_GROUPS,
+  EMOJI_SOURCES,
+  type EmojiGroup,
+  type EmojiItem,
+} from './emojiCatalog';
 import { EmojiImage } from './EmojiText';
 import { toEmojiKey } from './emojiUtils';
+import { buildEmojiSearchIndex, searchEmojiIndex } from './emojiSearch';
 import { STICKER_PACKS, stickerRef, type StickerPack } from '../stickers/stickerPacks';
 import { StickerView } from '../stickers/StickerView';
 
@@ -31,14 +41,19 @@ export type PanelTheme = {
 };
 
 const BAR_H = 48; // barre d'onglets en bas
+const SEARCH_H = 48; // barre de recherche
 const DOTS_H = 20; // points de pagination
 const COLS = 8;
+const COMPACT_COLS = 7;
+const COMPACT_WIDTH = 340;
 const CELL_H = 46;
-const EMOJI_SIZE = 30;
+const EMOJI_SIZE = 34;
+const COMPACT_EMOJI_SIZE = 30;
 const STICKER_COLS = 4;
 
 type Tab =
   | { id: string; kind: 'recent' }
+  | { id: string; kind: 'favorite' }
   | { id: string; kind: 'group'; group: EmojiGroup }
   | { id: string; kind: 'pack'; pack: StickerPack };
 
@@ -46,6 +61,7 @@ type Props = {
   /** Hauteur totale du panneau (hors marge basse de sécurité). */
   height: number;
   recents: string[];
+  favorites: string[];
   onPickEmoji: (emoji: string) => void;
   /** Doit lire le texte courant via des refs (appelée en boucle lors d'un appui long). */
   onBackspace: () => void;
@@ -53,6 +69,10 @@ type Props = {
   showSend: boolean;
   onSend: () => void;
   theme: PanelTheme;
+  /** Appui long sur un emoji : ajoute/retire des favoris. */
+  onToggleFavorite?: (emoji: string) => void;
+  /** La barre de recherche prend le clavier : le compositeur garde le panneau ouvert. */
+  onSearchFocusChange?: (focused: boolean) => void;
 };
 
 /* ------------------------------ Pagination ------------------------------ */
@@ -151,46 +171,87 @@ const BackspaceCell = memo(function BackspaceCell({ onBackspace, width, theme }:
 type EmojiPageProps = {
   items: EmojiItem[];
   cellW: number;
+  cols: number;
+  emojiSize: number;
   rows: number;
+  showBackspace: boolean;
+  favorites: Set<string>;
   onPick: (emoji: string) => void;
   onBackspace: () => void;
+  onLongPress?: (emoji: EmojiItem) => void;
   theme: PanelTheme;
 };
 
-const EmojiPage = memo(function EmojiPage({ items, cellW, rows, onPick, onBackspace, theme }: EmojiPageProps) {
+const EmojiPage = memo(function EmojiPage({
+  items,
+  cellW,
+  cols,
+  emojiSize,
+  rows,
+  showBackspace,
+  favorites,
+  onPick,
+  onBackspace,
+  onLongPress,
+  theme,
+}: EmojiPageProps) {
   return (
     <View style={{ height: rows * CELL_H }}>
       {Array.from({ length: rows }, (_, rowIndex) => {
-        const rowItems = items.slice(rowIndex * COLS, (rowIndex + 1) * COLS);
+        const rowItems = items.slice(rowIndex * cols, (rowIndex + 1) * cols);
         return (
           <View key={rowIndex} style={{ flexDirection: 'row', height: CELL_H }}>
             {rowItems.map((emoji) => (
               <Pressable
                 key={emoji.key}
                 onPress={() => onPick(emoji.char)}
+                onLongPress={onLongPress ? () => onLongPress(emoji) : undefined}
+                delayLongPress={350}
                 accessibilityLabel={emoji.name}
                 style={({ pressed }) => [
                   styles.cell,
-                  { width: `${100 / COLS}%`, height: CELL_H },
+                  { width: `${100 / cols}%`, height: CELL_H },
                   pressed && { backgroundColor: theme.pressed, borderRadius: 8 },
                 ]}
               >
-                <EmojiImage emojiKey={emoji.key} size={EMOJI_SIZE} />
+                {EMOJI_SOURCES[emoji.key] ? (
+                  <EmojiImage emojiKey={emoji.key} size={emojiSize} />
+                ) : (
+                  <Text
+                    numberOfLines={1}
+                    allowFontScaling={false}
+                    style={[
+                      styles.nativeEmoji,
+                      { fontSize: Math.round(emojiSize * 0.9), lineHeight: CELL_H },
+                    ]}
+                  >
+                    {emoji.char}
+                  </Text>
+                )}
+                {favorites.has(emoji.key) ? (
+                  <MaterialCommunityIcons
+                    name="star"
+                    size={10}
+                    color={theme.accent}
+                    style={styles.favoriteStar}
+                  />
+                ) : null}
               </Pressable>
             ))}
           </View>
         );
       })}
-      {/* Comme WeChat : la dernière case de CHAQUE page est la touche « effacer ». */}
-      <View
-        style={{
-          position: 'absolute',
-          right: 0,
-          bottom: 0,
-          width: `${100 / COLS}%`,
-        }}>
-        <BackspaceCell onBackspace={onBackspace} width={cellW} theme={theme} />
-      </View>
+      {showBackspace ? (
+        <View
+          style={{
+            position: 'absolute',
+            right: 0,
+            bottom: 0,
+            width: `${100 / cols}%`,
+          }}>
+          <BackspaceCell onBackspace={onBackspace} width={cellW} theme={theme} />
+        </View>
+      ) : null}
     </View>
   );
 });
@@ -200,40 +261,123 @@ const EmojiPage = memo(function EmojiPage({ items, cellW, rows, onPick, onBacksp
 export function EmojiStickerPanel({
   height,
   recents,
+  favorites,
   onPickEmoji,
   onBackspace,
   onPickSticker,
   showSend,
   onSend,
   theme,
+  onToggleFavorite,
+  onSearchFocusChange,
 }: Props) {
   const { width } = useWindowDimensions();
+  const compact = width < COMPACT_WIDTH;
+  const cols = compact ? COMPACT_COLS : COLS;
+  const emojiSize = compact ? COMPACT_EMOJI_SIZE : EMOJI_SIZE;
+  const cellW = width / cols;
+
+  const searchRef = useRef<TextInputInstance>(null);
+  const [query, setQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchIndex = useMemo(() => buildEmojiSearchIndex(EMOJI_GROUPS), []);
+  const searchResults = useMemo(
+    () => (query.trim() ? searchEmojiIndex(searchIndex, query) : null),
+    [searchIndex, query],
+  );
+  const searching = searchResults !== null;
+  const favoritesSet = useMemo(() => new Set(favorites.map((char) => toEmojiKey(char))), [favorites]);
 
   const tabs = useMemo<Tab[]>(
     () => [
       { id: 'recent', kind: 'recent' },
+      { id: 'favorite', kind: 'favorite' },
       ...EMOJI_GROUPS.map((group) => ({ id: group.id, kind: 'group' as const, group })),
       ...STICKER_PACKS.map((pack) => ({ id: `pack:${pack.id}`, kind: 'pack' as const, pack })),
     ],
     [],
   );
 
-  const [tabId, setTabId] = useState<string>(() => (recents.length ? 'recent' : EMOJI_GROUPS[0]?.id ?? 'recent'));
-  const tab = tabs.find((t) => t.id === tabId) ?? tabs[0];
+  const [tabId, setTabId] = useState<string>(() =>
+    recents.length ? 'recent' : favorites.length ? 'favorite' : EMOJI_GROUPS[0]?.id ?? 'recent',
+  );
+  const tab = tabs.find((entry) => entry.id === tabId) ?? tabs[0];
 
-  const mainHeight = Math.max(120, height - BAR_H);
+  // Pendant la recherche, les onglets sont masqués pour laisser de la place aux résultats.
+  const showBar = !searchFocused;
+  const mainHeight = Math.max(80, height - SEARCH_H - (showBar ? BAR_H : 0));
   const gridHeight = mainHeight - DOTS_H;
-  const rows = Math.max(2, Math.floor(gridHeight / CELL_H));
-  const emojiPerPage = COLS * rows - 1; // -1 : la case « effacer »
-  const cellW = width / COLS;
+  const rows = Math.max(1, Math.floor(gridHeight / CELL_H));
+  const emojiPerPage = cols * rows - 1; // -1 : la case « effacer »
+  const searchPerPage = cols * rows;
 
   const recentItems = useMemo(
     () => recents.map((char) => EMOJI_BY_KEY.get(toEmojiKey(char))).filter((e): e is EmojiItem => !!e),
     [recents],
   );
+  const favoriteItems = useMemo(
+    () => favorites.map((char) => EMOJI_BY_KEY.get(toEmojiKey(char))).filter((e): e is EmojiItem => !!e),
+    [favorites],
+  );
+
+  const handleLongPress = useCallback(
+    (emoji: EmojiItem) => {
+      if (!onToggleFavorite) return;
+      Haptics.selectionAsync().catch(() => {});
+      onToggleFavorite(emoji.char);
+    },
+    [onToggleFavorite],
+  );
+
+  const handleSearchFocus = useCallback(() => {
+    setSearchFocused(true);
+    onSearchFocusChange?.(true);
+  }, [onSearchFocusChange]);
+
+  const handleSearchBlur = useCallback(() => {
+    setSearchFocused(false);
+    onSearchFocusChange?.(false);
+  }, [onSearchFocusChange]);
+
+  const selectTab = useCallback((nextTabId: string) => {
+    setQuery('');
+    setTabId(nextTabId);
+    searchRef.current?.blur();
+  }, []);
 
   let content: React.ReactElement;
-  if (tab.kind === 'pack') {
+  if (searching) {
+    content =
+      searchResults.length === 0 ? (
+        <View style={[styles.empty, { height: mainHeight }]}>
+          <Text style={{ color: theme.subtle }}>Aucun emoji trouvé</Text>
+        </View>
+      ) : (
+        <Pager
+          key={`search:${query}`}
+          items={searchResults}
+          perPage={searchPerPage}
+          width={width}
+          height={mainHeight}
+          theme={theme}
+          renderPage={(page) => (
+            <EmojiPage
+              items={page}
+              cellW={cellW}
+              cols={cols}
+              emojiSize={emojiSize}
+              rows={rows}
+              showBackspace={false}
+              favorites={favoritesSet}
+              onPick={onPickEmoji}
+              onBackspace={onBackspace}
+              onLongPress={handleLongPress}
+              theme={theme}
+            />
+          )}
+        />
+      );
+  } else if (tab.kind === 'pack') {
     const stickerCell = width / STICKER_COLS;
     const stickerRows = Math.max(1, Math.floor(gridHeight / stickerCell));
     content = (
@@ -252,7 +396,7 @@ export function EmojiStickerPanel({
                 onPress={() => onPickSticker(stickerRef(tab.pack.id, sticker.id))}
                 style={({ pressed }) => [
                   styles.cell,
-                  { width: `${100 / STICKER_COLS}%`, height: stickerCell },
+                  { width: stickerCell, height: stickerCell },
                   pressed && { opacity: 0.7 },
                 ]}
               >
@@ -264,11 +408,22 @@ export function EmojiStickerPanel({
       />
     );
   } else {
-    const items = tab.kind === 'recent' ? recentItems : tab.group.emojis;
+    const items =
+      tab.kind === 'recent'
+        ? recentItems
+        : tab.kind === 'favorite'
+          ? favoriteItems
+          : tab.group.emojis;
+    const emptyLabel =
+      tab.kind === 'recent'
+        ? 'Aucun emoji récent'
+        : tab.kind === 'favorite'
+          ? 'Aucun favori — appui long sur un emoji'
+          : 'Aucun emoji';
     content =
-      tab.kind === 'recent' && items.length === 0 ? (
+      items.length === 0 ? (
         <View style={[styles.empty, { height: mainHeight }]}>
-          <Text style={{ color: theme.subtle }}>Aucun emoji récent</Text>
+          <Text style={{ color: theme.subtle }}>{emptyLabel}</Text>
         </View>
       ) : (
         <Pager
@@ -279,7 +434,19 @@ export function EmojiStickerPanel({
           height={mainHeight}
           theme={theme}
           renderPage={(page) => (
-            <EmojiPage items={page} cellW={cellW} rows={rows} onPick={onPickEmoji} onBackspace={onBackspace} theme={theme} />
+            <EmojiPage
+              items={page}
+              cellW={cellW}
+              cols={cols}
+              emojiSize={emojiSize}
+              rows={rows}
+              showBackspace
+              favorites={favoritesSet}
+              onPick={onPickEmoji}
+              onBackspace={onBackspace}
+              onLongPress={handleLongPress}
+              theme={theme}
+            />
           )}
         />
       );
@@ -287,25 +454,104 @@ export function EmojiStickerPanel({
 
   return (
     <View style={{ height, backgroundColor: theme.panelBg }}>
+      <View
+        style={[
+          styles.searchBar,
+          {
+            backgroundColor: theme.tabBg,
+            borderColor: searchFocused ? theme.accent : theme.border,
+          },
+        ]}>
+        <MaterialCommunityIcons name="magnify" size={18} color={theme.subtle} />
+        <TextInput
+          ref={searchRef}
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Rechercher un emoji"
+          placeholderTextColor={theme.subtle}
+          style={[styles.searchInput, { color: theme.text }]}
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
+          onFocus={handleSearchFocus}
+          onBlur={handleSearchBlur}
+          accessibilityLabel="Rechercher un emoji"
+        />
+        {query ? (
+          <Pressable
+            onPress={() => setQuery('')}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Effacer la recherche">
+            <MaterialCommunityIcons name="close-circle" size={18} color={theme.subtle} />
+          </Pressable>
+        ) : null}
+        {searchFocused ? (
+          <Pressable
+            onPress={() => {
+              setQuery('');
+              searchRef.current?.blur();
+            }}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Quitter la recherche">
+            <MaterialCommunityIcons name="chevron-left" size={20} color={theme.subtle} />
+          </Pressable>
+        ) : null}
+      </View>
+
       {content}
-      <View style={[styles.bar, { height: BAR_H, borderTopColor: theme.border, backgroundColor: theme.panelBg }]}>
+
+      {showBar ? (
+        <View style={[styles.bar, { height: BAR_H, borderTopColor: theme.border, backgroundColor: theme.panelBg }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
-          {tabs.map((t) => {
-            const active = t.id === tab.id;
+          {tabs.map((entry) => {
+            const active = !searching && entry.id === tab.id;
             return (
               <Pressable
-                key={t.id}
-                onPress={() => setTabId(t.id)}
+                key={entry.id}
+                onPress={() => selectTab(entry.id)}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: active }}
+                accessibilityLabel={
+                  entry.kind === 'recent'
+                    ? 'Emoji récents'
+                    : entry.kind === 'favorite'
+                      ? 'Emoji favoris'
+                      : entry.kind === 'group'
+                        ? entry.group.label
+                        : entry.pack.name
+                }
                 style={[styles.tab, { backgroundColor: active ? theme.tabActiveBg : 'transparent' }]}
               >
-                {t.kind === 'recent' ? (
+                {entry.kind === 'recent' ? (
                   <MaterialCommunityIcons name="clock-outline" size={24} color={theme.icon} />
-                ) : t.kind === 'group' ? (
-                  <EmojiImage emojiKey={t.group.iconKey} size={24} />
+                ) : entry.kind === 'favorite' ? (
+                  <MaterialCommunityIcons
+                    name={favorites.length ? 'star' : 'star-outline'}
+                    size={24}
+                    color={theme.icon}
+                  />
+                ) : entry.kind === 'group' ? (
+                  EMOJI_SOURCES[entry.group.iconKey] ? (
+                    <EmojiImage emojiKey={entry.group.iconKey} size={24} />
+                  ) : (
+                    <Text
+                      numberOfLines={1}
+                      allowFontScaling={false}
+                      style={{ fontSize: 20, lineHeight: 24 }}>
+                      {entry.group.iconChar ?? entry.group.emojis[0]?.char ?? '🙂'}
+                    </Text>
+                  )
+                ) : EMOJI_SOURCES[toEmojiKey(entry.pack.iconEmoji)] ? (
+                  <EmojiImage emojiKey={toEmojiKey(entry.pack.iconEmoji)} size={24} />
                 ) : (
-                  <EmojiImage emojiKey={toEmojiKey(t.pack.iconEmoji)} size={24} />
+                  <Text
+                    numberOfLines={1}
+                    allowFontScaling={false}
+                    style={{ fontSize: 20, lineHeight: 24 }}>
+                    {entry.pack.iconEmoji}
+                  </Text>
                 )}
               </Pressable>
             );
@@ -316,16 +562,38 @@ export function EmojiStickerPanel({
             <Text style={{ color: theme.accentText, fontWeight: '600', fontSize: 15 }}>Envoyer</Text>
           </Pressable>
         )}
-      </View>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  cell: { alignItems: 'center', justifyContent: 'center' },
+  cell: { alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  nativeEmoji: { textAlign: 'center' },
+  favoriteStar: { position: 'absolute', top: 1, right: 3 },
   dots: { height: DOTS_H, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   dot: { width: 6, height: 6, borderRadius: 3 },
-  empty: { alignItems: 'center', justifyContent: 'center' },
+  empty: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+  searchBar: {
+    height: 40,
+    marginHorizontal: 8,
+    marginTop: 4,
+    marginBottom: 4,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  searchInput: {
+    flex: 1,
+    height: 38,
+    fontSize: 15,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+  },
   bar: { flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth, paddingRight: 8 },
   tabs: { paddingHorizontal: 8, alignItems: 'center', gap: 4 },
   tab: { width: 44, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },

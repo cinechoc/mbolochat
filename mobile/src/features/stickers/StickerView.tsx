@@ -37,7 +37,11 @@ export const StickerView = memo(function StickerView({ sticker, size = 96 }: Sti
       ]}
     >
       {sticker.emoji ? (
-        <EmojiImage emojiKey={toEmojiKey(sticker.emoji)} size={Math.round(size * 0.36)} />
+        <EmojiImage
+          emojiKey={toEmojiKey(sticker.emoji)}
+          size={Math.round(size * 0.36)}
+          large={Math.round(size * 0.36) > 40}
+        />
       ) : null}
       <Text
         numberOfLines={2}

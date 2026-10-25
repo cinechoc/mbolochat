@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { EmojiStickerPanel, type PanelTheme } from '../emoji/EmojiStickerPanel';
+import { useEmojiFavorites } from '../emoji/useEmojiFavorites';
 import { useRecentEmoji } from '../emoji/useRecentEmoji';
 import { deleteBackward, insertAt } from '../emoji/emojiUtils';
 
@@ -55,6 +56,8 @@ type Props = {
   onTextChange?: (text: string) => void;
   /** Marge de sécurité en bas (ex. insets.bottom) appliquée quand ni clavier ni panneau ne sont ouverts. */
   bottomInset?: number;
+  /** Hauteur disponible au-dessus du clavier, mesurée par l'écran de conversation. */
+  availableHeight?: number;
   placeholder?: string;
   disabled?: boolean;
   theme?: Partial<ComposerTheme>;
@@ -62,6 +65,11 @@ type Props = {
 
 const DEFAULT_PANEL_HEIGHT = 290;
 const MIN_PANEL_HEIGHT = 240;
+/** Le panneau se réduit quand le clavier de recherche est ouvert, pour laisser voir la conversation. */
+const SEARCH_PANEL_HEIGHT = 220;
+const SEARCH_PANEL_MIN_HEIGHT = 120;
+const COMPOSER_BAR_HEIGHT = 56;
+const SEARCH_CONVERSATION_RESERVE = 24;
 let lastKeyboardHeight = 0; // gardée entre les conversations : le panneau a la même hauteur que le clavier
 
 type Selection = { start: number; end: number };
@@ -73,22 +81,27 @@ export function ChatComposer({
   plusPanel,
   onTextChange,
   bottomInset = 0,
+  availableHeight,
   placeholder = 'Écrire un message…',
   disabled,
   theme: themeOverride,
 }: Props) {
   const t: ComposerTheme = { ...DEFAULT_COMPOSER_THEME, ...themeOverride };
   const { recents, push } = useRecentEmoji();
+  const { favorites, toggle: toggleFavorite } = useEmojiFavorites();
 
   const [text, setText] = useState('');
   const [voice, setVoice] = useState(false);
   const [panel, setPanel] = useState<Panel>('none');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [searchActive, setSearchActive] = useState(false);
   const [forcedSelection, setForcedSelection] = useState<Selection | null>(null);
 
   const inputRef = useRef<TextInputInstance>(null);
   const textRef = useRef('');
   const selectionRef = useRef<Selection>({ start: 0, end: 0 });
+  /** Le clavier visible appartient à la recherche du panneau, pas au champ. */
+  const searchActiveRef = useRef(false);
 
   /* ------------------------ Clavier et bouton retour ------------------------ */
 
@@ -96,7 +109,10 @@ export function ChatComposer({
     const show = Keyboard.addListener('keyboardDidShow', (e: KeyboardEvent) => {
       lastKeyboardHeight = Math.round(e.endCoordinates.height);
       setKeyboardVisible(true);
-      setPanel('none'); // l'utilisateur tape : le clavier prend la place du panneau
+      // Le clavier de la recherche vit dans le panneau : il ne doit pas le fermer.
+      if (!searchActiveRef.current) {
+        setPanel('none'); // l'utilisateur tape dans le champ : le clavier prend la place du panneau
+      }
     });
     const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
     return () => {
@@ -109,10 +125,18 @@ export function ChatComposer({
     if (panel === 'none') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       setPanel('none');
+      setSearchActive(false);
+      searchActiveRef.current = false;
+      Keyboard.dismiss();
       return true;
     });
     return () => sub.remove();
   }, [panel]);
+
+  const handleSearchFocusChange = useCallback((focused: boolean) => {
+    searchActiveRef.current = focused;
+    setSearchActive(focused);
+  }, []);
 
   /* ------------------------------ Édition du texte ------------------------------ */
 
@@ -165,6 +189,8 @@ export function ChatComposer({
   /* ------------------------------ Bascules ------------------------------ */
 
   const toggleVoice = () => {
+    setSearchActive(false);
+    searchActiveRef.current = false;
     if (voice) {
       setVoice(false);
       setPanel('none');
@@ -178,11 +204,17 @@ export function ChatComposer({
 
   const togglePanel = (target: 'emoji' | 'plus') => {
     if (panel === target) {
+      // Rendre le clavier au compositeur avant de démonter le panneau de recherche.
+      if (target === 'emoji') inputRef.current?.focus();
       setPanel('none');
+      setSearchActive(false);
+      searchActiveRef.current = false;
       if (target === 'emoji') requestAnimationFrame(() => inputRef.current?.focus());
       return;
     }
     setVoice(false);
+    setSearchActive(false);
+    searchActiveRef.current = false;
     setPanel(target); // d'abord le panneau, ensuite on ferme le clavier : pas de saut
     Keyboard.dismiss();
   };
@@ -191,6 +223,15 @@ export function ChatComposer({
 
   const hasText = text.trim().length > 0;
   const panelHeight = Math.max(MIN_PANEL_HEIGHT, lastKeyboardHeight || DEFAULT_PANEL_HEIGHT);
+  const searchMaxHeight =
+    availableHeight && availableHeight > 0
+      ? availableHeight - COMPOSER_BAR_HEIGHT - SEARCH_CONVERSATION_RESERVE
+      : SEARCH_PANEL_HEIGHT;
+  const searchPanelHeight = Math.max(
+    SEARCH_PANEL_MIN_HEIGHT,
+    Math.min(SEARCH_PANEL_HEIGHT, searchMaxHeight),
+  );
+  const emojiPanelHeight = searchActive ? searchPanelHeight : panelHeight;
   const showBottomInset = panel === 'none' && !keyboardVisible;
 
   return (
@@ -217,6 +258,13 @@ export function ChatComposer({
               onChangeText={(value) => commit(value)}
               selection={forcedSelection ?? undefined}
               onSelectionChange={handleSelectionChange}
+              onFocus={() => {
+                if (panel !== 'none') {
+                  setPanel('none');
+                  setSearchActive(false);
+                  searchActiveRef.current = false;
+                }
+              }}
               style={[styles.input, { backgroundColor: t.inputBg, color: t.inputText }]}
               textAlignVertical="center"
               blurOnSubmit={false}
@@ -251,16 +299,19 @@ export function ChatComposer({
       </View>
 
       {panel === 'emoji' && (
-        <View style={{ height: panelHeight + bottomInset, backgroundColor: t.panelBg }}>
+        <View style={{ height: emojiPanelHeight + bottomInset, backgroundColor: t.panelBg }}>
           <EmojiStickerPanel
-            height={panelHeight}
+            height={emojiPanelHeight}
             recents={recents}
+            favorites={favorites}
             onPickEmoji={handlePickEmoji}
             onBackspace={handleBackspace}
             onPickSticker={onSendSticker}
             showSend={hasText}
             onSend={handleSend}
             theme={t}
+            onToggleFavorite={toggleFavorite}
+            onSearchFocusChange={handleSearchFocusChange}
           />
         </View>
       )}

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { cache } from './cache';
+import { resetEmojiFavorites } from '@/features/emoji/useEmojiFavorites';
 import { resetRecentEmoji } from '@/features/emoji/useRecentEmoji';
 import { resetLocalStore } from './store';
 import { syncPushToken } from './push';
@@ -113,6 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // ce compte : ils ne doivent pas passer sur le suivant.
         void resetLocalStore();
         void resetRecentEmoji();
+        void resetEmojiFavorites();
       },
     }),
     [token, user, loading],
