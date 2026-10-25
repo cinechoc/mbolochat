@@ -8,6 +8,8 @@ import {
   Clock,
   Copy,
   Reply,
+  Star,
+  StarOff,
   Trash,
   Trash2,
   X,
@@ -45,8 +47,19 @@ import { SingleEmojiMessage } from '@/features/emoji/AnimatedEmoji';
 import { EmojiText, MessageText } from '@/features/emoji/EmojiText';
 import { emojiOnlyCount, splitEmoji, type EmojiSegment } from '@/features/emoji/emojiUtils';
 import { GifMessageBubble } from '@/features/media/GifMessageBubble';
+import type { RecentGif } from '@/features/media/GifPanel';
 import { StickerMessageBubble } from '@/features/stickers/StickerMessageBubble';
+import { findSticker } from '@/features/stickers/stickerPacks';
 import { StickerMessage } from '@/features/stickers/StickerView';
+import {
+  PERSONAL_PACK_ID,
+  receivedStickerId,
+  receivedStickerSeed,
+  saveReceivedSticker,
+  toggleStickerFavorite,
+  type PersonalSticker,
+} from '@/features/stickers/stickerLibrary';
+import { useStickerLibrary } from '@/features/stickers/useStickerLibrary';
 import { albumGridWidth, clusterMessages } from '@/features/media/album';
 import { AlbumMessageBubble } from '@/features/media/AlbumMessage';
 import {
@@ -462,6 +475,7 @@ export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { token, user } = useAuth();
+  const stickerLibrary = useStickerLibrary();
   const theme = useTheme();
   const chat = useChatColors();
   const { width: windowWidth } = useWindowDimensions();
@@ -903,6 +917,38 @@ export default function ChatScreen() {
     return chronological.reverse();
   }, [messages, queued, user, id, unreadFrom]);
 
+  /**
+   * GIF de cette conversation réutilisables tels quels. On ne garde que les
+   * médias GIPHY déjà acceptés par le serveur : leur URL peut repartir sans
+   * ré-upload et le backend revalide l'allowlist.
+   */
+  const recentGifs = useMemo<RecentGif[]>(() => {
+    const seen = new Set<string>();
+    const out: RecentGif[] = [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const attachment = messages[index]?.attachment;
+      if (attachment?.type !== 'GIF') continue;
+      const url = mediaUrl(attachment.url);
+      if (!/^https:\/\/media\d*\.giphy\.com\//i.test(url)) continue;
+      const key = attachment.giphyId ?? url;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        id: key,
+        url,
+        stillUrl: attachment.stillUrl ? mediaUrl(attachment.stillUrl) : undefined,
+        width: attachment.width,
+        height: attachment.height,
+        sticker: attachment.sticker === true,
+        title: attachment.title,
+        giphyId: attachment.giphyId,
+        username: attachment.username,
+      });
+      if (out.length >= 24) break;
+    }
+    return out;
+  }, [messages]);
+
   const openImage = useCallback(
     (uri: string) => {
       const urls = rows
@@ -1193,6 +1239,71 @@ export default function ChatScreen() {
   );
 
   /** Le menu d'appui long n'offre que ce qui a un sens pour cette bulle. */
+  type StickerMenuTarget =
+    | { kind: 'catalog'; key: string }
+    | { kind: 'personal'; key: string }
+    | { kind: 'received'; key: string; attachment: MessageAttachment; saved: boolean };
+
+  const stickerMenuTarget = useMemo<StickerMenuTarget | null>(() => {
+    const message = menuFor;
+    if (!message) return null;
+    if (message.type === 'sticker' && message.stickerRef && findSticker(message.stickerRef)) {
+      return { kind: 'catalog', key: message.stickerRef };
+    }
+    const attachment = message.attachment;
+    if (attachment?.type !== 'STICKER') return null;
+    const mine = message.sender.id === user?.id;
+    const local =
+      mine && attachment.stickerId
+        ? stickerLibrary.personal.find((sticker) => sticker.id === attachment.stickerId)
+        : undefined;
+    if (local) {
+      return { kind: 'personal', key: local.id };
+    }
+    const key = receivedStickerId(receivedStickerSeed(attachment));
+    return {
+      kind: 'received',
+      key,
+      attachment,
+      saved: stickerLibrary.personal.some((sticker) => sticker.id === key),
+    };
+  }, [menuFor, stickerLibrary.personal, user?.id]);
+
+  const stickerIsFavorite = stickerMenuTarget
+    ? stickerLibrary.favorites.includes(stickerMenuTarget.key)
+    : false;
+
+  const toggleStickerFromMenu = useCallback(async () => {
+    const target = stickerMenuTarget;
+    if (!target) return;
+    setMenuFor(null);
+    try {
+      if (target.kind === 'received' && !target.saved) {
+        await saveReceivedSticker({
+          url: mediaUrl(target.attachment.url),
+          name: target.attachment.stickerName ?? target.attachment.name,
+          mime: target.attachment.mime,
+          width: target.attachment.width,
+          height: target.attachment.height,
+          seed: receivedStickerSeed(target.attachment),
+        });
+        Alert.alert('Sticker ajouté aux favoris', 'Retrouve-le dans l’onglet Stickers.');
+        return;
+      }
+      const added = await toggleStickerFavorite(target.key);
+      if (added) {
+        Alert.alert('Sticker ajouté aux favoris', 'Retrouve-le dans l’onglet Stickers.');
+      }
+    } catch (favoriteError) {
+      Alert.alert(
+        'Favoris indisponibles',
+        favoriteError instanceof Error
+          ? favoriteError.message
+          : "Impossible d'enregistrer ce sticker.",
+      );
+    }
+  }, [stickerMenuTarget]);
+
   const menuActions = useMemo<SheetAction[]>(() => {
     const message = menuFor;
     if (!message) {
@@ -1200,6 +1311,14 @@ export default function ChatScreen() {
     }
     const waiting = queuedById.has(message.id);
     const actions: SheetAction[] = [];
+    if (stickerMenuTarget) {
+      actions.push({
+        key: 'sticker-favorite',
+        label: stickerIsFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris',
+        icon: stickerIsFavorite ? StarOff : Star,
+        onPress: () => void toggleStickerFromMenu(),
+      });
+    }
     if (!waiting && !message.deleted) {
       actions.push({
         key: 'reply',
@@ -1233,7 +1352,17 @@ export default function ChatScreen() {
       });
     }
     return actions;
-  }, [menuFor, queuedById, user?.id, startReply, copyMessage, removeMessage]);
+  }, [
+    menuFor,
+    queuedById,
+    user?.id,
+    startReply,
+    copyMessage,
+    removeMessage,
+    stickerMenuTarget,
+    stickerIsFavorite,
+    toggleStickerFromMenu,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -2151,6 +2280,76 @@ export default function ChatScreen() {
     [token, id, replyTo],
   );
 
+  /**
+   * Un sticker personnel est une image locale : elle passe par la file
+   * d'envoi existante puis le serveur la requalifie en pièce jointe STICKER.
+   */
+  const sendPersonalSticker = useCallback(
+    async (sticker: PersonalSticker) => {
+      if (!token || !id) return;
+      const now = Date.now();
+      if (now - lastStickerSendAt.current < 600) return;
+      lastStickerSendAt.current = now;
+      setError(null);
+      await enqueue({
+        conversationId: id,
+        content: '',
+        replyTo: replyTo?.id ?? null,
+        attachment: {
+          localUri: sticker.uri,
+          kind: 'sticker',
+          mime: sticker.mime,
+          width: sticker.width,
+          height: sticker.height,
+          name: sticker.name,
+          size: sticker.size ?? null,
+          external: {
+            id: sticker.id,
+            packId: PERSONAL_PACK_ID,
+            name: sticker.name,
+            width: sticker.width,
+            height: sticker.height,
+          },
+        },
+      });
+      setReplyTo(null);
+      void drain(token);
+    },
+    [token, id, replyTo],
+  );
+
+  /** Réutilise un GIF GIPHY déjà présent dans la conversation. */
+  const sendGif = useCallback(
+    async (gif: RecentGif) => {
+      if (!token || !id) return;
+      setError(null);
+      await enqueue({
+        conversationId: id,
+        content: '',
+        replyTo: replyTo?.id ?? null,
+        attachment: {
+          kind: 'gif',
+          mime: gif.sticker ? 'image/webp' : 'image/gif',
+          width: gif.width,
+          height: gif.height,
+          external: {
+            url: gif.url,
+            width: gif.width,
+            height: gif.height,
+            sticker: gif.sticker,
+            giphyId: gif.giphyId,
+            username: gif.username,
+            title: gif.title,
+            stillUrl: gif.stillUrl,
+          },
+        },
+      });
+      setReplyTo(null);
+      void drain(token);
+    },
+    [token, id, replyTo],
+  );
+
   if (!token || !user) {
     return <Redirect href="/login" />;
   }
@@ -2262,6 +2461,9 @@ export default function ChatScreen() {
           theme={composerTheme}
           onSendText={sendText}
           onSendSticker={(ref) => void sendSticker(ref)}
+          onSendPersonalSticker={(sticker) => void sendPersonalSticker(sticker)}
+          recentGifs={recentGifs}
+          onSendGif={(gif) => void sendGif(gif)}
           onTextChange={onInputChange}
           bottomInset={insets.bottom}
           availableHeight={

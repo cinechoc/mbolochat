@@ -1,7 +1,10 @@
 import type { ImageSourcePropType } from 'react-native';
 
+import { PANTHER_SOURCES } from './pantherAssets.generated';
+import { PANTHER_STICKERS } from './pantherCatalog.generated';
+
 /**
- * Un sticker est identifié par une RÉFÉRENCE « idPack/idSticker » (ex. "mbolo/merci").
+ * Un sticker est identifié par une RÉFÉRENCE « idPack/idSticker » (ex. "mbolo-panther/bonjour").
  * Seule cette référence voyage dans le message : aucun fichier n'est envoyé.
  */
 export type TextSticker = {
@@ -23,6 +26,10 @@ export type ImageSticker = {
   source: ImageSourcePropType;
   /** Description pour l'accessibilité. */
   alt: string;
+  /** Nom court affiché aux lecteurs d'écran. */
+  name?: string;
+  /** Mots-clés français et anglais. */
+  tags?: string[];
 };
 
 export type Sticker = TextSticker | ImageSticker;
@@ -30,17 +37,33 @@ export type Sticker = TextSticker | ImageSticker;
 export type StickerPack = {
   id: string;
   name: string;
+  description?: string;
   /** Emoji affiché sur l'onglet du pack. */
   iconEmoji: string;
   stickers: Sticker[];
 };
 
+/** Collection originale de la mascotte panthère noire. */
+const PANTHER_PACK: StickerPack = {
+  id: 'mbolo-panther',
+  name: 'Panthère Mbolo',
+  description: 'La mascotte panthère noire de Mbolo — 26 expressions originales.',
+  iconEmoji: '🐾',
+  stickers: PANTHER_STICKERS.map((sticker) => ({
+    id: sticker.id,
+    kind: 'image',
+    source: PANTHER_SOURCES[sticker.id],
+    alt: sticker.alt,
+    name: sticker.name,
+    tags: sticker.tags,
+  })),
+};
+
 /**
- * Pack de départ 100 % maison : des stickers typographiques aux expressions courantes,
- * sans aucune illustration externe. Les packs illustrés (kind: 'image') s'ajoutent
- * à côté, dans STICKER_PACKS.
+ * Ancien pack typographique, retiré du sélecteur mais conservé dans l'index :
+ * les messages déjà envoyés (ex. « mbolo/merci ») gardent leur apparence.
  */
-const MBOLO_PACK: StickerPack = {
+const LEGACY_MBOLO_PACK: StickerPack = {
   id: 'mbolo',
   name: 'Mbolo',
   iconEmoji: '👋',
@@ -60,8 +83,8 @@ const MBOLO_PACK: StickerPack = {
   ],
 };
 
-/** Ajoute ici les futurs packs (illustrés ou typographiques). */
-export const STICKER_PACKS: StickerPack[] = [MBOLO_PACK];
+/** Packs proposés dans le sélecteur. */
+export const STICKER_PACKS: StickerPack[] = [PANTHER_PACK];
 
 const REF_PATTERN = /^[a-z0-9_-]{1,40}\/[a-z0-9_-]{1,60}$/;
 
@@ -80,7 +103,13 @@ const STICKER_INDEX = new Map<string, Sticker>(
   ),
 );
 
+const LEGACY_STICKER_INDEX = new Map<string, Sticker>(
+  LEGACY_MBOLO_PACK.stickers.map(
+    (sticker) => [stickerRef(LEGACY_MBOLO_PACK.id, sticker.id), sticker] as const,
+  ),
+);
+
 /** Retourne le sticker ou `undefined` (pack inconnu : l'appli est peut-être plus ancienne que l'expéditeur). */
 export function findSticker(ref: string): Sticker | undefined {
-  return STICKER_INDEX.get(ref);
+  return STICKER_INDEX.get(ref) ?? LEGACY_STICKER_INDEX.get(ref);
 }

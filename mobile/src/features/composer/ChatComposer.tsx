@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { EmojiStickerPanel, type PanelTheme } from '../emoji/EmojiStickerPanel';
+import type { RecentGif } from '../media/GifPanel';
+import type { PersonalSticker } from '../stickers/stickerLibrary';
 import { useEmojiFavorites } from '../emoji/useEmojiFavorites';
 import { useRecentEmoji } from '../emoji/useRecentEmoji';
 import { deleteBackward, insertAt } from '../emoji/emojiUtils';
@@ -48,6 +50,11 @@ type Props = {
   onSendText: (text: string) => void;
   /** Référence « pack/sticker » à envoyer comme message sticker. */
   onSendSticker: (ref: string) => void;
+  /** Sticker personnel : l'image locale est importée puis envoyée comme sticker. */
+  onSendPersonalSticker: (sticker: PersonalSticker) => void;
+  /** GIF déjà présents dans la conversation, réutilisables dans l'onglet GIF. */
+  recentGifs: RecentGif[];
+  onSendGif: (gif: RecentGif) => void;
   /** Le bouton « Maintenir pour parler » existant (VoiceRecordButton), affiché à la place du champ en mode voix. */
   voiceSlot: React.ReactNode;
   /** Contenu du panneau « + » existant (Photos/Vidéos, Appareil photo, Fichier…). */
@@ -67,7 +74,8 @@ const DEFAULT_PANEL_HEIGHT = 290;
 const MIN_PANEL_HEIGHT = 240;
 /** Le panneau se réduit quand le clavier de recherche est ouvert, pour laisser voir la conversation. */
 const SEARCH_PANEL_HEIGHT = 220;
-const SEARCH_PANEL_MIN_HEIGHT = 120;
+/** La barre d'onglets principale prend 48 px : la recherche garde une grille lisible. */
+const SEARCH_PANEL_MIN_HEIGHT = 176;
 const COMPOSER_BAR_HEIGHT = 56;
 const SEARCH_CONVERSATION_RESERVE = 24;
 let lastKeyboardHeight = 0; // gardée entre les conversations : le panneau a la même hauteur que le clavier
@@ -77,6 +85,9 @@ type Selection = { start: number; end: number };
 export function ChatComposer({
   onSendText,
   onSendSticker,
+  onSendPersonalSticker,
+  recentGifs,
+  onSendGif,
   voiceSlot,
   plusPanel,
   onTextChange,
@@ -275,7 +286,7 @@ export function ChatComposer({
         <IconButton
           name={panel === 'emoji' ? 'keyboard-outline' : 'emoticon-happy-outline'}
           color={t.icon}
-          label={panel === 'emoji' ? 'Clavier' : 'Emoji et stickers'}
+          label={panel === 'emoji' ? 'Clavier' : 'Emojis, stickers et GIF'}
           onPress={() => togglePanel('emoji')}
         />
 
@@ -306,9 +317,10 @@ export function ChatComposer({
             favorites={favorites}
             onPickEmoji={handlePickEmoji}
             onBackspace={handleBackspace}
-            onPickSticker={onSendSticker}
-            showSend={hasText}
-            onSend={handleSend}
+            onSendSticker={onSendSticker}
+            onSendPersonalSticker={onSendPersonalSticker}
+            gifItems={recentGifs}
+            onSendGif={onSendGif}
             theme={t}
             onToggleFavorite={toggleFavorite}
             onSearchFocusChange={handleSearchFocusChange}

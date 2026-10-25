@@ -3,6 +3,7 @@ import { api } from './api';
 import { cache } from './cache';
 import { resetEmojiFavorites } from '@/features/emoji/useEmojiFavorites';
 import { resetRecentEmoji } from '@/features/emoji/useRecentEmoji';
+import { resetStickerLibrary } from '@/features/stickers/stickerLibrary';
 import { resetLocalStore } from './store';
 import { syncPushToken } from './push';
 import { disconnectSocket } from './socket';
@@ -115,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void resetLocalStore();
         void resetRecentEmoji();
         void resetEmojiFavorites();
+        void resetStickerLibrary();
       },
     }),
     [token, user, loading],
