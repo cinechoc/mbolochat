@@ -1,0 +1,6 @@
+{
+  "name": "Mon Codespace Weston",
+  "image": "://microsoft.com",
+  "features": {},
+  "postCreateCommand": "sudo apt update && sudo apt install -y weston"
+}
