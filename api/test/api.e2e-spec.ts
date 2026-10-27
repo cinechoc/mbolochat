@@ -1,5 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
@@ -331,6 +333,35 @@ describe('MboloChat API (e2e)', () => {
     expect(second.user.username).toMatch(/^jean\.dupont/);
     expect(second.user.username).not.toBe(first.user.username);
     expect(second.user.displayName).toBe('Jean Dupont');
+  });
+
+  it('uploads then deletes the profile avatar', async () => {
+    const account = (await register('Avatar', 'Test')).body;
+    const token = account.accessToken;
+    const userId = account.user.id;
+    const png =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2ZQAAAABJRU5ErkJggg==';
+
+    const uploaded = await request(app.getHttpServer())
+      .post('/users/me/avatar')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ data: png, mimeType: 'image/png' })
+      .expect(201);
+    expect(uploaded.body.avatarUrl).toContain(encodeURIComponent(`/uploads/${userId}.png`));
+    expect(existsSync(join(process.cwd(), 'uploads', `${userId}.png`))).toBe(true);
+
+    const deleted = await request(app.getHttpServer())
+      .delete('/users/me/avatar')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(deleted.body.avatarUrl).toBeNull();
+    expect(existsSync(join(process.cwd(), 'uploads', `${userId}.png`))).toBe(false);
+
+    const me = await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(me.body.avatarUrl).toBeNull();
   });
 
   it('rejects underage registrations', async () => {

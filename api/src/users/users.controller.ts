@@ -11,7 +11,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
@@ -55,6 +55,10 @@ export class UsersController {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const filename = `${current.sub}.${ext}`;
     const filepath = join(dir, filename);
+    // Un changement d'extension laisserait l'ancien fichier orphelin et servi.
+    for (const oldExt of ['png', 'jpg', 'webp']) {
+      if (oldExt !== ext) rmSync(join(dir, `${current.sub}.${oldExt}`), { force: true });
+    }
     const buffer = Buffer.from(body.data, 'base64');
     if (buffer.length > 2 * 1024 * 1024) {
       throw new (await import('@nestjs/common')).BadRequestException('Image too large (max 2MB)');
@@ -64,6 +68,18 @@ export class UsersController {
     stream.end();
     const url = `/uploads/${filename}?v=${Date.now()}`;
     const user = await this.usersService.updateProfile(current.sub, { avatarUrl: url });
+    return toPublicUser(user);
+  }
+
+  /** Retire la photo de profil et efface les fichiers d'avatar de ce compte. */
+  @Delete('me/avatar')
+  async deleteAvatar(@CurrentUser() current: JwtPayload) {
+    const dir = join(process.cwd(), 'uploads');
+    // Les anciens uploads pouvaient avoir une autre extension (png/jpg/webp).
+    for (const ext of ['png', 'jpg', 'webp']) {
+      rmSync(join(dir, `${current.sub}.${ext}`), { force: true });
+    }
+    const user = await this.usersService.updateProfile(current.sub, { avatarUrl: null });
     return toPublicUser(user);
   }
 

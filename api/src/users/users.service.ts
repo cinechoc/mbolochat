@@ -16,6 +16,8 @@ export interface PublicUser {
   displayName: string;
   bio: string | null;
   avatarUrl: string | null;
+  /** Genre déclaré à l'inscription, pour choisir l'avatar par défaut. */
+  gender: string | null;
   notificationsEnabled: boolean;
   createdAt: Date;
 }
@@ -27,6 +29,7 @@ export function toPublicUser(user: User): PublicUser {
     displayName: user.displayName,
     bio: user.bio,
     avatarUrl: user.avatarUrl,
+    gender: user.gender,
     notificationsEnabled: user.notificationsEnabled,
     createdAt: user.createdAt,
   };

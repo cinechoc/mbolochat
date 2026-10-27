@@ -21,6 +21,8 @@ export interface SenderInfo {
   username: string;
   displayName: string;
   avatarUrl: string | null;
+  /** Genre déclaré, pour l'avatar par défaut quand il n'y a pas de photo. */
+  gender: string | null;
 }
 
 export interface MemberInfo extends SenderInfo {
@@ -156,6 +158,7 @@ const messageColumns = {
   senderUsername: users.username,
   senderDisplayName: users.displayName,
   senderAvatarUrl: users.avatarUrl,
+  senderGender: users.gender,
   quotedContent: quoted.content,
   quotedType: quoted.type,
   quotedStickerRef: quoted.stickerRef,
@@ -180,6 +183,7 @@ interface MessageRow {
   senderUsername: string;
   senderDisplayName: string;
   senderAvatarUrl: string | null;
+  senderGender: string | null;
   quotedContent: string | null;
   quotedType: string | null;
   quotedStickerRef: string | null;
@@ -225,6 +229,7 @@ function toMessageDto(row: MessageRow): MessageDto {
       username: row.senderUsername,
       displayName: row.senderDisplayName,
       avatarUrl: row.senderAvatarUrl ?? null,
+      gender: row.senderGender ?? null,
     },
   };
 }
@@ -335,6 +340,7 @@ export class ConversationsService {
         username: users.username,
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,
+        gender: users.gender,
         lastReadAt: conversationMembers.lastReadAt,
         role: conversationMembers.role,
       })
@@ -397,11 +403,12 @@ export class ConversationsService {
         createdAt: conversation.createdAt,
         members: memberRows
           .filter((member) => member.conversationId === conversation.id)
-          .map(({ id, username, displayName, avatarUrl, lastReadAt, role }) => ({
+          .map(({ id, username, displayName, avatarUrl, gender, lastReadAt, role }) => ({
             id,
             username,
             displayName,
             avatarUrl,
+            gender,
             lastReadAt,
             role,
           })),
@@ -935,6 +942,7 @@ export class ConversationsService {
         username: sender.username,
         displayName: sender.displayName,
         avatarUrl: sender.avatarUrl,
+        gender: sender.gender,
       },
     };
   }
@@ -1081,6 +1089,7 @@ export class ConversationsService {
       senderUsername: string;
       senderDisplayName: string;
       senderAvatarUrl: string | null;
+      senderGender: string | null;
     }>(sql`
       select distinct on (m.conversation_id)
         m.id,
@@ -1095,7 +1104,8 @@ export class ConversationsService {
         u.id as "senderId",
         u.username as "senderUsername",
         u.display_name as "senderDisplayName",
-        u.avatar_url as "senderAvatarUrl"
+        u.avatar_url as "senderAvatarUrl",
+        u.gender as "senderGender"
       from messages m
       inner join users u on u.id = m.sender_id
       where m.conversation_id in (${inList})
@@ -1127,6 +1137,7 @@ export class ConversationsService {
           username: row.senderUsername,
           displayName: row.senderDisplayName,
           avatarUrl: row.senderAvatarUrl ?? null,
+          gender: row.senderGender ?? null,
         },
       });
     }
