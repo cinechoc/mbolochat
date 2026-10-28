@@ -1,0 +1,512 @@
+[
+  {
+    "id": "face-sourire",
+    "source": "sourire"
+  },
+  {
+    "id": "face-fou-rire",
+    "source": "fou-rire"
+  },
+  {
+    "id": "face-chagrin",
+    "source": "chagrin"
+  },
+  {
+    "id": "face-tristesse",
+    "source": "tristesse"
+  },
+  {
+    "id": "face-colere",
+    "source": "colere"
+  },
+  {
+    "id": "face-surprise",
+    "source": "surprise"
+  },
+  {
+    "id": "face-choc",
+    "source": "choc"
+  },
+  {
+    "id": "face-yeux-en-coeur",
+    "source": "yeux-en-coeur"
+  },
+  {
+    "id": "face-reflexion",
+    "source": "reflexion"
+  },
+  {
+    "id": "face-timidite",
+    "source": "timidite"
+  },
+  {
+    "id": "face-fatigue",
+    "source": "fatigue"
+  },
+  {
+    "id": "face-endormi",
+    "source": "sommeil"
+  },
+  {
+    "id": "face-bisous",
+    "source": "bisous"
+  },
+  {
+    "id": "face-fete",
+    "source": "fete"
+  },
+  {
+    "id": "face-confusion",
+    "source": "confusion"
+  },
+  {
+    "id": "face-yeux-rieurs",
+    "source": "fier",
+    "dir": "assets/emoji-faces-src"
+  },
+  {
+    "id": "face-pardon",
+    "source": "pardon",
+    "dir": "assets/emoji-faces-src"
+  },
+  {
+    "id": "face-stupefait",
+    "source": "wow",
+    "dir": "assets/emoji-faces-src"
+  },
+  {
+    "id": "face-baillement",
+    "source": "fatigue",
+    "dir": "assets/emoji-faces-src"
+  },
+  {
+    "id": "face-quoi",
+    "source": "quoi",
+    "dir": "assets/emoji-faces-src"
+  },
+  {
+    "id": "face-miam",
+    "source": "miam",
+    "dir": "assets/emoji-faces-src"
+  },
+  {
+    "id": "face-grrr",
+    "source": "grrr",
+    "dir": "assets/emoji-faces-src"
+  },
+  {
+    "id": "face-bof",
+    "source": "bof",
+    "dir": "assets/emoji-faces-src"
+  },
+  {
+    "id": "face-bisou-leger",
+    "source": "bisou",
+    "dir": "assets/emoji-faces-src"
+  },
+  {
+    "id": "face-chill",
+    "source": "chill",
+    "dir": "assets/emoji-faces-src"
+  },
+  {
+    "id": "face-calin-ouvert",
+    "source": "calin",
+    "dir": "assets/emoji-faces-src"
+  },
+  {
+    "id": "face-rieur",
+    "source": "rieur",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-rire-yeux-fermes",
+    "source": "rire-yeux-fermes",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-rire-yeux-plisses",
+    "source": "rire-yeux-plisses",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-tete-a-lenvers",
+    "source": "tete-a-lenvers",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-coeurs-sourire",
+    "source": "coeurs-sourire",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-etoiles-yeux",
+    "source": "etoiles-yeux",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-clin-doeil",
+    "source": "clin-doeil",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-langue-clin",
+    "source": "langue-clin",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-langue-clin-droit",
+    "source": "langue-clin-droit",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-langue-yeux-plisses",
+    "source": "langue-yeux-plisses",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-langue",
+    "source": "langue",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-zoue",
+    "source": "zoue",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-argent-yeux",
+    "source": "argent-yeux",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-bisou-yeux-rieurs",
+    "source": "bisou-yeux-rieurs",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-bisou-yeux-fermes",
+    "source": "bisou-yeux-fermes",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-main-bouche",
+    "source": "main-bouche",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-chut",
+    "source": "chut",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-bouche-zipper",
+    "source": "bouche-zipper",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-sans-bouche",
+    "source": "sans-bouche",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-neutre",
+    "source": "neutre",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-yeux-clos-plat",
+    "source": "yeux-clos-plat",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-sournois",
+    "source": "sournois",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-yeux-roules",
+    "source": "yeux-roules",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-grimace",
+    "source": "grimace",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-perplexe",
+    "source": "perplexe",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-souffage",
+    "source": "souffage",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-pleure",
+    "source": "pleure",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-sourire-larme",
+    "source": "sourire-larme",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-pensif",
+    "source": "pensif",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-inquiet",
+    "source": "inquiet",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-legerement-triste",
+    "source": "legerement-triste",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-epuise",
+    "source": "epuise",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-harasse",
+    "source": "harasse",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-serre-dents",
+    "source": "serre-dents",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-abattement",
+    "source": "abattement",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-soulage-triste",
+    "source": "soulage-triste",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-mecontent",
+    "source": "mecontent",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-effraye",
+    "source": "effraye",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-angoisse",
+    "source": "angoisse",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-anxieux",
+    "source": "anxieux",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-ebahi",
+    "source": "ebahi",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-masque",
+    "source": "masque",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-thermometre",
+    "source": "thermometre",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-bandage",
+    "source": "bandage",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-nausee",
+    "source": "nausee",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-eternue",
+    "source": "eternue",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-vomit",
+    "source": "vomit",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-chaud",
+    "source": "chaud",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-froid",
+    "source": "froid",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-soul",
+    "source": "soul",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-etourdi",
+    "source": "etourdi",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-lunettes-soleil",
+    "source": "lunettes-soleil",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-geek",
+    "source": "geek",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-monocle",
+    "source": "monocle",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-bave",
+    "source": "bave",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-craquele",
+    "source": "craquele",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-larmes-retenues",
+    "source": "larmes-retenues",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-implorant",
+    "source": "implorant",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-boudeur-colere",
+    "source": "boudeur-colere",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-fumee-narines",
+    "source": "fumee-narines",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-jure",
+    "source": "jure",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-diable-souriant",
+    "source": "diable-souriant",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-diable-colere",
+    "source": "diable-colere",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-ange",
+    "source": "ange",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-salut-militaire",
+    "source": "salut-militaire",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-pointilles",
+    "source": "pointilles",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-nuages",
+    "source": "nuages",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-menteur",
+    "source": "menteur",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-secoue",
+    "source": "secoue",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-secoue-horizontal",
+    "source": "secoue-horizontal",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-secoue-vertical",
+    "source": "secoue-vertical",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-cerne",
+    "source": "cerne",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-roulade",
+    "source": "roulade",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-spirale",
+    "source": "spirale",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-explose",
+    "source": "explose",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-cowboy",
+    "source": "cowboy",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-deguise",
+    "source": "deguise",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-deforme",
+    "source": "deforme",
+    "dir": "assets/emoji-faces-proc"
+  },
+  {
+    "id": "face-fond",
+    "source": "fond",
+    "dir": "assets/emoji-faces-proc"
+  }
+]

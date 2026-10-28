@@ -32,9 +32,10 @@ type Props = {
 const TAB_H = 48;
 
 /**
- * Panneau d'expressions à trois sections explicites : emojis Unicode, stickers
- * (panthère + créations personnelles) et GIF réutilisables de la conversation.
- * Les ressources et la logique de chaque section restent indépendantes.
+ * Panneau d'expressions à trois sections explicites : emojis MboloChat,
+ * stickers (panthère + créations personnelles) et GIF réutilisables de la
+ * conversation. Les ressources et la logique de chaque section restent
+ * indépendantes.
  */
 export function EmojiStickerPanel({
   height,
@@ -71,7 +72,8 @@ export function EmojiStickerPanel({
           { backgroundColor: theme.panelBg, borderBottomColor: theme.border },
         ]}>
         <SectionTab
-          label="Emojis"
+          label="Emojis Mbolo"
+          accessibilityLabel="Emojis MboloChat"
           icon="emoticon-happy-outline"
           active={section === 'emoji'}
           theme={theme}
@@ -127,19 +129,27 @@ export function EmojiStickerPanel({
 
 type SectionTabProps = {
   label: string;
+  accessibilityLabel?: string;
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   active: boolean;
   theme: PanelTheme;
   onPress: () => void;
 };
 
-function SectionTab({ label, icon, active, theme, onPress }: SectionTabProps) {
+function SectionTab({
+  label,
+  accessibilityLabel,
+  icon,
+  active,
+  theme,
+  onPress,
+}: SectionTabProps) {
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
-      accessibilityLabel={label}
+      accessibilityLabel={accessibilityLabel ?? label}
       style={[
         styles.tab,
         { backgroundColor: active ? theme.tabActiveBg : 'transparent' },
@@ -151,6 +161,7 @@ function SectionTab({ label, icon, active, theme, onPress }: SectionTabProps) {
         color={active ? theme.accent : theme.subtle}
       />
       <Text
+        numberOfLines={1}
         style={[
           styles.tabLabel,
           { color: active ? theme.accent : theme.subtle },
@@ -184,7 +195,7 @@ const styles = StyleSheet.create({
     gap: 5,
     position: 'relative',
   },
-  tabLabel: { fontSize: 12.5 },
+  tabLabel: { fontSize: 12 },
   tabLabelActive: { fontWeight: '700' },
   activeLine: {
     position: 'absolute',

@@ -1,11 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { EMOJI_GROUPS } from '../src/features/emoji/emojiData.generated.ts';
+import {
+  MBOLO_EMOJI_ENTRIES,
+  MBOLO_EMOJI_GROUP_META,
+} from '../src/features/emoji/mboloEmojiData.generated.ts';
 import {
   normalizeEmojiSearch,
   searchEmojis,
 } from '../src/features/emoji/emojiSearch.ts';
+
+const REAL_GROUPS = MBOLO_EMOJI_GROUP_META.map((group) => ({
+  ...group,
+  emojis: MBOLO_EMOJI_ENTRIES.filter((entry) => entry.group === group.id).map((entry) => ({
+    char: entry.char,
+    key: entry.key,
+    name: entry.name,
+    keywords: entry.keywords,
+    variantKind: entry.variantKind,
+  })),
+}));
 
 const fixture = [
   {
@@ -66,12 +80,18 @@ test('recherche : mots multiples, vide et sans résultat', () => {
 });
 
 test('catalogue réel : les favoris de recherche sont présents', () => {
-  const heart = searchEmojis(EMOJI_GROUPS, 'coeur');
+  const heart = searchEmojis(REAL_GROUPS, 'coeur');
   assert.ok(heart.some((emoji) => emoji.key === '2764'), 'cœur introuvable');
 
-  const france = searchEmojis(EMOJI_GROUPS, 'france');
+  const france = searchEmojis(REAL_GROUPS, 'france');
   assert.ok(france.some((emoji) => emoji.key === '1f1eb-1f1f7'), 'drapeau France introuvable');
 
-  const flags = EMOJI_GROUPS.find((group) => group.id === 'flags');
+  const flags = REAL_GROUPS.find((group) => group.id === 'flags');
   assert.ok(flags && flags.emojis.length >= 200, 'catégorie drapeaux absente');
+
+  const skin = searchEmojis(REAL_GROUPS, 'peau claire');
+  assert.ok(skin.some((emoji) => emoji.variantKind === 'skin-tone'), 'variante de peau introuvable');
+
+  const confusion = searchEmojis(REAL_GROUPS, 'confus');
+  assert.ok(confusion.some((emoji) => emoji.key === '1f615'), 'visage confus introuvable');
 });

@@ -1,0 +1,966 @@
+{
+  "expressions": [
+    {
+      "id": "rieur",
+      "covers": [
+        "1f600",
+        "1f603"
+      ],
+      "eyes": "open",
+      "mouth": "grin_big"
+    },
+    {
+      "id": "rire-yeux-fermes",
+      "covers": [
+        "1f601",
+        "1f606"
+      ],
+      "eyes": "closed_up",
+      "mouth": "grin_big"
+    },
+    {
+      "id": "rire-yeux-plisses",
+      "covers": [
+        "1f604"
+      ],
+      "eyes": "squint",
+      "mouth": "grin_big"
+    },
+    {
+      "id": "tete-a-lenvers",
+      "covers": [
+        "1f643"
+      ],
+      "eyes": "open",
+      "mouth": "smile",
+      "rotate": 180
+    },
+    {
+      "id": "coeurs-sourire",
+      "covers": [
+        "1f970"
+      ],
+      "eyes": "closed_up",
+      "mouth": "smile",
+      "extras": [
+        {
+          "kind": "heart",
+          "pos": [
+            120,
+            210
+          ],
+          "r": 13
+        },
+        {
+          "kind": "heart",
+          "pos": [
+            255,
+            150
+          ],
+          "r": 15
+        },
+        {
+          "kind": "heart",
+          "pos": [
+            392,
+            205
+          ],
+          "r": 13
+        }
+      ]
+    },
+    {
+      "id": "etoiles-yeux",
+      "covers": [
+        "1f929"
+      ],
+      "eyes": "star",
+      "mouth": "grin_big"
+    },
+    {
+      "id": "clin-doeil",
+      "covers": [
+        "1f609"
+      ],
+      "eyes": "wink_left",
+      "mouth": "smile"
+    },
+    {
+      "id": "langue-clin",
+      "covers": [
+        "1f61c"
+      ],
+      "eyes": "wink_left",
+      "mouth": "tongue_out"
+    },
+    {
+      "id": "langue-clin-droit",
+      "covers": [
+        "1f61b"
+      ],
+      "eyes": "wink_right",
+      "mouth": "tongue_out"
+    },
+    {
+      "id": "langue-yeux-plisses",
+      "covers": [
+        "1f61d"
+      ],
+      "eyes": "squint",
+      "mouth": "tongue_out"
+    },
+    {
+      "id": "langue",
+      "covers": [
+        "1f61b"
+      ],
+      "eyes": "open",
+      "mouth": "tongue_out"
+    },
+    {
+      "id": "zoue",
+      "covers": [
+        "1f92a"
+      ],
+      "eyes": {
+        "left": "open",
+        "right": "squint"
+      },
+      "mouth": "tongue_out"
+    },
+    {
+      "id": "argent-yeux",
+      "covers": [
+        "1f911"
+      ],
+      "eyes": "star",
+      "mouth": "tongue_out"
+    },
+    {
+      "id": "bisou-yeux-rieurs",
+      "covers": [
+        "1f619"
+      ],
+      "eyes": "closed_up",
+      "mouth": "kiss",
+      "extras": [
+        {
+          "kind": "heart",
+          "pos": [
+            330,
+            330
+          ],
+          "r": 11
+        }
+      ]
+    },
+    {
+      "id": "bisou-yeux-fermes",
+      "covers": [
+        "1f61a"
+      ],
+      "eyes": "closed_up",
+      "mouth": "kiss"
+    },
+    {
+      "id": "main-bouche",
+      "covers": [
+        "1f92d",
+        "1fae2",
+        "1fae3"
+      ],
+      "eyes": "open",
+      "mouth": "smile",
+      "extras": [
+        {
+          "kind": "paw"
+        }
+      ]
+    },
+    {
+      "id": "chut",
+      "covers": [
+        "1f92b"
+      ],
+      "eyes": "closed_up",
+      "mouth": "flat",
+      "extras": [
+        {
+          "kind": "paw"
+        }
+      ]
+    },
+    {
+      "id": "bouche-zipper",
+      "covers": [
+        "1f910"
+      ],
+      "eyes": "open",
+      "mouth": "zipper"
+    },
+    {
+      "id": "sans-bouche",
+      "covers": [
+        "1f636"
+      ],
+      "eyes": "open",
+      "mouth": "none"
+    },
+    {
+      "id": "neutre",
+      "covers": [
+        "1f610"
+      ],
+      "eyes": "open",
+      "mouth": "flat"
+    },
+    {
+      "id": "yeux-clos-plat",
+      "covers": [
+        "1f611"
+      ],
+      "eyes": "line",
+      "mouth": "flat"
+    },
+    {
+      "id": "sournois",
+      "covers": [
+        "1f60f"
+      ],
+      "eyes": "half",
+      "mouth": "smile"
+    },
+    {
+      "id": "yeux-roules",
+      "covers": [
+        "1f644"
+      ],
+      "eyes": "rolled",
+      "mouth": "flat"
+    },
+    {
+      "id": "grimace",
+      "covers": [
+        "1f62c"
+      ],
+      "eyes": "half",
+      "mouth": "grit"
+    },
+    {
+      "id": "perplexe",
+      "covers": [
+        "1fae4"
+      ],
+      "eyes": "open",
+      "mouth": "wavy"
+    },
+    {
+      "id": "souffage",
+      "covers": [
+        "1f62e-200d-1f4a8"
+      ],
+      "eyes": "closed_up",
+      "mouth": "open_o",
+      "extras": [
+        {
+          "kind": "puff"
+        }
+      ]
+    },
+    {
+      "id": "pleure",
+      "covers": [
+        "1f622"
+      ],
+      "eyes": "closed_down",
+      "brows": "sad",
+      "mouth": "frown",
+      "extras": [
+        {
+          "kind": "tear",
+          "pos": [
+            150,
+            336
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sourire-larme",
+      "covers": [
+        "1f972"
+      ],
+      "eyes": "closed_up",
+      "mouth": "smile",
+      "extras": [
+        {
+          "kind": "tear",
+          "pos": [
+            150,
+            336
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pensif",
+      "covers": [
+        "1f614"
+      ],
+      "eyes": "closed_down",
+      "mouth": "frown"
+    },
+    {
+      "id": "inquiet",
+      "covers": [
+        "1f61f"
+      ],
+      "eyes": "open",
+      "brows": "sad",
+      "mouth": "frown"
+    },
+    {
+      "id": "legerement-triste",
+      "covers": [
+        "1f641",
+        "2639"
+      ],
+      "eyes": "open",
+      "mouth": "frown"
+    },
+    {
+      "id": "epuise",
+      "covers": [
+        "1f629"
+      ],
+      "eyes": "closed_down",
+      "mouth": "open_o"
+    },
+    {
+      "id": "harasse",
+      "covers": [
+        "1f62b"
+      ],
+      "eyes": "squint",
+      "mouth": "open_o",
+      "extras": [
+        {
+          "kind": "sweat",
+          "pos": [
+            368,
+            232
+          ]
+        }
+      ]
+    },
+    {
+      "id": "serre-dents",
+      "covers": [
+        "1f616"
+      ],
+      "eyes": "squint",
+      "brows": "sad",
+      "mouth": "grit"
+    },
+    {
+      "id": "abattement",
+      "covers": [
+        "1f613"
+      ],
+      "eyes": "open",
+      "mouth": "frown",
+      "extras": [
+        {
+          "kind": "sweat",
+          "pos": [
+            368,
+            232
+          ]
+        }
+      ]
+    },
+    {
+      "id": "soulage-triste",
+      "covers": [
+        "1f625"
+      ],
+      "eyes": "closed_down",
+      "mouth": "wavy",
+      "extras": [
+        {
+          "kind": "sweat",
+          "pos": [
+            368,
+            232
+          ]
+        }
+      ]
+    },
+    {
+      "id": "mecontent",
+      "covers": [
+        "1f626"
+      ],
+      "eyes": "open",
+      "mouth": "frown"
+    },
+    {
+      "id": "effraye",
+      "covers": [
+        "1f628"
+      ],
+      "eyes": "open",
+      "brows": "raised",
+      "mouth": "frown"
+    },
+    {
+      "id": "angoisse",
+      "covers": [
+        "1f627"
+      ],
+      "eyes": "open",
+      "brows": "raised",
+      "mouth": "grit"
+    },
+    {
+      "id": "anxieux",
+      "covers": [
+        "1f630"
+      ],
+      "eyes": "open",
+      "brows": "sad",
+      "mouth": "wavy",
+      "extras": [
+        {
+          "kind": "sweat",
+          "pos": [
+            368,
+            232
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ebahi",
+      "covers": [
+        "1f62f"
+      ],
+      "eyes": "open",
+      "mouth": "open_o"
+    },
+    {
+      "id": "masque",
+      "covers": [
+        "1f637"
+      ],
+      "eyes": "closed_down",
+      "mouth": "none",
+      "extras": [
+        {
+          "kind": "mask"
+        }
+      ]
+    },
+    {
+      "id": "thermometre",
+      "covers": [
+        "1f912"
+      ],
+      "eyes": "open",
+      "brows": "sad",
+      "mouth": "flat",
+      "extras": [
+        {
+          "kind": "thermometer"
+        }
+      ]
+    },
+    {
+      "id": "bandage",
+      "covers": [
+        "1f915"
+      ],
+      "eyes": "closed_down",
+      "brows": "sad",
+      "mouth": "frown",
+      "extras": [
+        {
+          "kind": "bandage"
+        }
+      ]
+    },
+    {
+      "id": "nausee",
+      "covers": [
+        "1f922"
+      ],
+      "eyes": "squint",
+      "mouth": "wavy",
+      "tint": [
+        90,
+        160,
+        90
+      ]
+    },
+    {
+      "id": "eternue",
+      "covers": [
+        "1f927"
+      ],
+      "eyes": "closed_up",
+      "mouth": "open_o"
+    },
+    {
+      "id": "vomit",
+      "covers": [
+        "1f92e"
+      ],
+      "eyes": "closed_down",
+      "mouth": "open_o",
+      "extras": [
+        {
+          "kind": "vomit"
+        }
+      ],
+      "tint": [
+        90,
+        160,
+        90
+      ]
+    },
+    {
+      "id": "chaud",
+      "covers": [
+        "1f975"
+      ],
+      "eyes": "squint",
+      "mouth": "tongue_out",
+      "tint": [
+        220,
+        110,
+        70
+      ],
+      "extras": [
+        {
+          "kind": "sweat",
+          "pos": [
+            368,
+            232
+          ]
+        }
+      ]
+    },
+    {
+      "id": "froid",
+      "covers": [
+        "1f976"
+      ],
+      "eyes": "squint",
+      "mouth": "grit",
+      "tint": [
+        90,
+        140,
+        230
+      ]
+    },
+    {
+      "id": "soul",
+      "covers": [
+        "1f974"
+      ],
+      "eyes": {
+        "left": "half",
+        "right": "spiral"
+      },
+      "mouth": "wavy"
+    },
+    {
+      "id": "etourdi",
+      "covers": [
+        "1f635"
+      ],
+      "eyes": "x",
+      "mouth": "open_o"
+    },
+    {
+      "id": "lunettes-soleil",
+      "covers": [
+        "1f60e"
+      ],
+      "eyes": "open",
+      "mouth": "smile",
+      "extras": [
+        {
+          "kind": "sunglasses"
+        }
+      ]
+    },
+    {
+      "id": "geek",
+      "covers": [
+        "1f913"
+      ],
+      "eyes": "open",
+      "mouth": "grin_big",
+      "extras": [
+        {
+          "kind": "glasses"
+        }
+      ]
+    },
+    {
+      "id": "monocle",
+      "covers": [
+        "1f9d0"
+      ],
+      "eyes": "open",
+      "brows": "raised",
+      "mouth": "flat",
+      "extras": [
+        {
+          "kind": "monocle"
+        }
+      ]
+    },
+    {
+      "id": "bave",
+      "covers": [
+        "1f924"
+      ],
+      "eyes": "closed_up",
+      "mouth": "smile",
+      "extras": [
+        {
+          "kind": "drool"
+        }
+      ]
+    },
+    {
+      "id": "craquele",
+      "covers": [
+        "1faeb"
+      ],
+      "eyes": "open",
+      "mouth": "wavy",
+      "extras": [
+        {
+          "kind": "cracks"
+        }
+      ]
+    },
+    {
+      "id": "larmes-retenues",
+      "covers": [
+        "1f979"
+      ],
+      "eyes": "open",
+      "eye_scale": 1.15,
+      "mouth": "smile",
+      "extras": [
+        {
+          "kind": "tear",
+          "pos": [
+            162,
+            330
+          ],
+          "r": 7
+        },
+        {
+          "kind": "tear",
+          "pos": [
+            350,
+            326
+          ],
+          "r": 7
+        }
+      ]
+    },
+    {
+      "id": "implorant",
+      "covers": [
+        "1f97a"
+      ],
+      "eyes": "open",
+      "eye_scale": 1.2,
+      "brows": "sad",
+      "mouth": "frown"
+    },
+    {
+      "id": "boudeur-colere",
+      "covers": [
+        "1f623"
+      ],
+      "eyes": "squint",
+      "brows": "angry",
+      "mouth": "grit"
+    },
+    {
+      "id": "fumee-narines",
+      "covers": [
+        "1f624"
+      ],
+      "eyes": "squint",
+      "brows": "angry",
+      "mouth": "grit",
+      "extras": [
+        {
+          "kind": "steam",
+          "spread": 36
+        }
+      ]
+    },
+    {
+      "id": "jure",
+      "covers": [
+        "1f92c"
+      ],
+      "eyes": "squint",
+      "brows": "angry",
+      "mouth": "none",
+      "extras": [
+        {
+          "kind": "symbols"
+        }
+      ]
+    },
+    {
+      "id": "diable-souriant",
+      "covers": [
+        "1f608"
+      ],
+      "eyes": "open",
+      "mouth": "smile",
+      "extras": [
+        {
+          "kind": "horns"
+        }
+      ]
+    },
+    {
+      "id": "diable-colere",
+      "covers": [
+        "1f47f"
+      ],
+      "eyes": "squint",
+      "brows": "angry",
+      "mouth": "grit",
+      "extras": [
+        {
+          "kind": "horns"
+        }
+      ]
+    },
+    {
+      "id": "ange",
+      "covers": [
+        "1f607"
+      ],
+      "eyes": "closed_up",
+      "mouth": "smile",
+      "extras": [
+        {
+          "kind": "halo"
+        }
+      ]
+    },
+    {
+      "id": "salut-militaire",
+      "covers": [
+        "1fae1"
+      ],
+      "eyes": "open",
+      "mouth": "smile",
+      "extras": [
+        {
+          "kind": "salute"
+        }
+      ]
+    },
+    {
+      "id": "pointilles",
+      "covers": [
+        "1fae5"
+      ],
+      "eyes": "line",
+      "mouth": "flat",
+      "dotted": true
+    },
+    {
+      "id": "nuages",
+      "covers": [
+        "1f636-200d-1f32b"
+      ],
+      "eyes": "open",
+      "mouth": "none",
+      "extras": [
+        {
+          "kind": "cloud"
+        }
+      ]
+    },
+    {
+      "id": "menteur",
+      "covers": [
+        "1f925"
+      ],
+      "eyes": "open",
+      "mouth": "flat",
+      "extras": [
+        {
+          "kind": "long_nose"
+        }
+      ]
+    },
+    {
+      "id": "secoue",
+      "covers": [
+        "1fae8"
+      ],
+      "eyes": "open",
+      "mouth": "wavy",
+      "extras": [
+        {
+          "kind": "motion",
+          "dir": "h"
+        }
+      ]
+    },
+    {
+      "id": "secoue-horizontal",
+      "covers": [
+        "1f642-200d-2194"
+      ],
+      "eyes": "open",
+      "mouth": "smile",
+      "extras": [
+        {
+          "kind": "motion",
+          "dir": "h"
+        }
+      ]
+    },
+    {
+      "id": "secoue-vertical",
+      "covers": [
+        "1f642-200d-2195"
+      ],
+      "eyes": "open",
+      "mouth": "smile",
+      "extras": [
+        {
+          "kind": "motion",
+          "dir": "v"
+        }
+      ]
+    },
+    {
+      "id": "cerne",
+      "covers": [
+        "1fae9"
+      ],
+      "eyes": "half",
+      "mouth": "flat",
+      "extras": [
+        {
+          "kind": "bags"
+        }
+      ]
+    },
+    {
+      "id": "roulade",
+      "covers": [
+        "1f923"
+      ],
+      "eyes": "closed_up",
+      "mouth": "grin_big",
+      "rotate": -14,
+      "extras": [
+        {
+          "kind": "tear",
+          "pos": [
+            130,
+            290
+          ],
+          "r": 8
+        },
+        {
+          "kind": "tear",
+          "pos": [
+            392,
+            300
+          ],
+          "r": 8
+        }
+      ]
+    },
+    {
+      "id": "spirale",
+      "covers": [
+        "1f635-200d-1f4ab"
+      ],
+      "eyes": "spiral",
+      "mouth": "open_o"
+    },
+    {
+      "id": "explose",
+      "covers": [
+        "1f92f"
+      ],
+      "eyes": "open",
+      "mouth": "grit",
+      "extras": [
+        {
+          "kind": "explode"
+        }
+      ]
+    },
+    {
+      "id": "cowboy",
+      "covers": [
+        "1f920"
+      ],
+      "eyes": "open",
+      "mouth": "grin_big",
+      "extras": [
+        {
+          "kind": "hat"
+        }
+      ]
+    },
+    {
+      "id": "deguise",
+      "covers": [
+        "1f978"
+      ],
+      "eyes": "open",
+      "mouth": "flat",
+      "extras": [
+        {
+          "kind": "disguise"
+        }
+      ]
+    },
+    {
+      "id": "deforme",
+      "covers": [
+        "1faea"
+      ],
+      "eyes": "squint",
+      "mouth": "wavy",
+      "rotate": -8
+    },
+    {
+      "id": "fond",
+      "covers": [
+        "1fae0"
+      ],
+      "eyes": "closed_down",
+      "mouth": "wavy",
+      "extras": [
+        {
+          "kind": "melt"
+        }
+      ]
+    }
+  ]
+}

@@ -126,3 +126,59 @@ test('décideur emoji seul : cas WhatsApp', () => {
     }
   }
 });
+
+test('splitEmoji : séquence Emoji 18 reconnue par le registre', () => {
+  assert.deepEqual(splitEmoji('🫠'), [{ type: 'emoji', value: '🫠', key: '1fae0' }]);
+});
+
+test('splitEmoji : FE0F est conservé dans la valeur', () => {
+  assert.deepEqual(splitEmoji('❤️'), [{ type: 'emoji', value: '❤️', key: '2764' }]);
+  assert.deepEqual(splitEmoji('❤'), [{ type: 'emoji', value: '❤', key: '2764' }]);
+});
+
+test('splitEmoji : FE0E force la présentation texte', () => {
+  assert.deepEqual(splitEmoji('\u2764\uFE0E'), [{ type: 'text', value: '\u2764\uFE0E' }]);
+});
+
+test('splitEmoji : texte, lien et mention préservés', () => {
+  const text = 'Salut 😂 https://mbolo.chat @marc ❤️';
+  assert.deepEqual(
+    splitEmoji(text).map((segment) =>
+      segment.type === 'text' ? ['text', segment.value] : ['emoji', segment.key],
+    ),
+    [
+      ['text', 'Salut '],
+      ['emoji', '1f602'],
+      ['text', ' https://mbolo.chat @marc '],
+      ['emoji', '2764'],
+    ],
+  );
+});
+
+test('splitEmoji : emoji inconnu laissé en texte', () => {
+  assert.deepEqual(splitEmoji('Bonjour \uE000 !'), [
+    { type: 'text', value: 'Bonjour \uE000 !' },
+  ]);
+});
+
+test('splitEmoji : préfixe d’une séquence inconnue non remplacé', () => {
+  assert.deepEqual(splitEmoji('😀🏽'), [{ type: 'text', value: '😀🏽' }]);
+});
+
+test('emojiOnlyCount : séquences composées et récentes', () => {
+  assert.equal(emojiOnlyCount('🫠'), 1);
+  assert.equal(emojiOnlyCount('👍🏽'), 1);
+  assert.equal(emojiOnlyCount('👨‍👩‍👧'), 1);
+  assert.equal(emojiOnlyCount('🇫🇷'), 1);
+});
+
+test('deleteBackward : séquence Emoji 14 supprimée entièrement', () => {
+  assert.deepEqual(deleteBackward('x🫠', 3, 3), { text: 'x', cursor: 1 });
+});
+
+test('splitEmoji : long texte reconstruit à l’identique', () => {
+  const text = 'Salut 😂❤️ https://mbolo.chat @marc '.repeat(200);
+  const segments = splitEmoji(text);
+  assert.equal(segments.filter((segment) => segment.type === 'emoji').length, 400);
+  assert.equal(segments.map((segment) => segment.value).join(''), text);
+});

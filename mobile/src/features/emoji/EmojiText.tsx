@@ -35,16 +35,19 @@ type EmojiTextProps = Omit<TextProps, 'children'> & {
   children: string;
   /** Taille de l'emoji par rapport à la police (1.25 = légèrement plus grand que le texte). */
   emojiScale?: number;
+  /** Utilise les assets 192 px pour un emoji affiché seul / en grand. */
+  large?: boolean;
 };
 
 /**
- * Affiche un texte en remplaçant les emoji par les images du pack.
- * Un emoji absent du pack reste affiché avec la police du système (repli propre).
+ * Affiche un texte en remplaçant les emoji reconnus par les illustrations MboloChat.
+ * Un emoji sans illustration reste affiché avec la police du système (repli Unicode).
  */
 export const EmojiText = memo(function EmojiText({
   children,
   style,
   emojiScale = 1.25,
+  large = false,
   ...rest
 }: EmojiTextProps) {
   const fontSize = (StyleSheet.flatten(style) as TextStyle | undefined)?.fontSize ?? 16;
@@ -55,7 +58,8 @@ export const EmojiText = memo(function EmojiText({
     <Text style={style} {...rest}>
       {segments.map((segment, i) => {
         if (segment.type === 'text') return segment.value;
-        const source = EMOJI_SOURCES[segment.key];
+        const source =
+          (large ? EMOJI_LARGE_SOURCES[segment.key] : undefined) ?? EMOJI_SOURCES[segment.key];
         if (!source) return segment.value;
         return (
           <Image
@@ -78,7 +82,11 @@ export const MessageText = memo(function MessageText({ text, style, ...rest }: M
   const jumbo: TextStyle | undefined =
     count === 0 ? undefined : { fontSize: count === 1 ? 38 : count === 2 ? 32 : 28 };
   return (
-    <EmojiText style={[style, jumbo]} emojiScale={count ? 1.1 : 1.25} {...rest}>
+    <EmojiText
+      style={[style, jumbo]}
+      emojiScale={count ? 1.1 : 1.25}
+      large={count > 0}
+      {...rest}>
       {text}
     </EmojiText>
   );

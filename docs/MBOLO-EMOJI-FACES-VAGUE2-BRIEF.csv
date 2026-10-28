@@ -1,0 +1,25 @@
+ordre,fichier,emoji,cle,nom_unicode,details_semantiques,derive_vers,statut
+1,rieur.png,😀,1f600,visage rieur,"socle rire : grands yeux ronds ouverts, grand sourire ouvert",😃 1f603 (grands yeux) ; 😁 1f601 (yeux rieurs) ; 😆 1f606 (yeux plissés),à dessiner
+2,yeux-rieurs.png,😊,1f60a,visage souriant avec yeux rieurs,"yeux courbés fermés rieurs + sourire doux",☺️ 263a (variante sobre),fait (planche référence)
+3,sourire-goutte.png,😅,1f605,visage souriant avec une goutte de sueur,"sourire gêné + goutte bleue au front (même détail que face-fatigue)",—,fait (planche référence)
+4,clin-doeil.png,😉,1f609,visage faisant un clin d'œil,"un œil fermé + sourire complice",😜 1f61c (langue + clin) ; 😝 1f61d (langue yeux plissés) ; 😋 1f60b (langue gourmande),à dessiner
+5,bisou.png,😘,1f618,visage envoyant un bisou,"déjà produit : face-bisous (clin d'œil + cœur)",😗 1f617 (yeux ouverts) ; 😚 1f61a (yeux fermés) ; 😙 1f619 (yeux rieurs),fait (face-bisous)
+6,pleure.png,😢,1f622,visage qui pleure,"larme unique sous l'œil, tristesse sereine",🥲 1f972 (sourire + larme),à dessiner
+7,pensif.png,😔,1f614,visage pensif,"regard baissé, sourcils tristes",🙁 1f641 (mécontent léger) ; 😟 1f61f (inquiet),à dessiner
+8,blase.png,😒,1f612,visage blasé,"regard plissé méprisant, bouche droite",😑 1f611 (sans expression) ; 😐 1f610 (neutre) ; 😏 1f60f (sourire malin),fait (planche référence)
+9,boudeur.png,😡,1f621,visage boudeur,"sourcils très froncés, bouche pincée (famille face-colere)",—,fait (planche référence)
+10,fumee-narines.png,😤,1f624,visage avec fumée sortant des narines,"vapeur blanche des deux narines, sourcils froncés",—,à dessiner
+11,lunettes-soleil.png,😎,1f60e,visage avec lunettes de soleil,"lunettes noires + sourire cool",🤓 1f913 (lunettes rondes geek) ; 🧐 1f9d0 (monocle),à dessiner
+12,roulade-rire.png,🤣,1f923,se rouler par terre de rire,"tête penchée + larmes de rire massives (socle face-fou-rire)",—,à dessiner
+13,etoiles-yeux.png,🤩,1f929,visage avec des étoiles à la place des yeux,"étoiles jaunes à la place des yeux + grand sourire",—,à dessiner
+14,coeurs-sourire.png,🥰,1f970,visage souriant avec cœurs,"yeux rieurs + trois cœurs flottants autour",—,reporté (extraction planche impossible : cœurs/queue fusionnés au corps)
+15,grimace.png,😬,1f62c,visage grimaçant,"dents serrées, yeux écarquillés, malaise",—,à dessiner
+16,chaud.png,🥵,1f975,visage rouge et chaud,"teinte rouge, gouttes de sueur, langue pendante",🥶 1f976 (même tête teinte bleue + frissons),à dessiner
+17,anxieux.png,😰,1f630,visage anxieux avec goutte de sueur,"yeux inquiets + goutte (famille face-choc)",😨 1f628 (effrayé) ; 😧 1f627 (angoissé),à dessiner
+18,masque.png,😷,1f637,visage avec masque,"masque blanc sur le museau",🤒 1f912 (thermomètre) ; 🤕 1f915 (bandage),à dessiner
+19,nausee.png,🤢,1f922,visage nauséeux,"teinte verte, joues gonflées",🤮 1f92e (vomit) ; 🤧 1f927 (éternuement),à dessiner
+20,cable.png,🤗,1f917,visage qui fait un câlin,"deux pattes ouvertes autour du visage (exception validée tête+patte)",—,fait (planche référence)
+21,explose.png,🤯,1f92f,tête qui explose,"crâne ouvert + éclat d'explosion au-dessus",—,à dessiner
+22,yeux-roules.png,🙄,1f644,visage roulant des yeux,"pupilles tournées vers le haut, bouche droite",—,à dessiner
+23,epuise.png,😩,1f629,visage épuisé,"yeux fermés las, bouche tombante (socle face-fatigue)",😫 1f62b (fatigué) ; 🥱 1f971 (bâillement),à dessiner
+24,argent-yeux.png,🤑,1f911,argent dans les yeux et la bouche,"pièces/billets dans les yeux + langue",—,à dessiner

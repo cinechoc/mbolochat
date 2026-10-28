@@ -10,3 +10,7 @@ api/uploads/
 # Clés de service Firebase (FCM v1) : ne jamais versionner
 *service-account*.json
 *firebase-adminsdk*.json
+
+# Artefacts Python (scripts de génération d’emoji)
+__pycache__/
+*.pyc

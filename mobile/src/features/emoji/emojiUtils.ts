@@ -1,17 +1,49 @@
-import emojiRegex from 'emoji-regex';
+import { MBOLO_EMOJI_ENTRIES } from './mboloEmojiData.generated.ts';
 
 export type TextSegment = { type: 'text'; value: string };
 export type EmojiSegment = { type: 'emoji'; value: string; key: string };
 export type Segment = TextSegment | EmojiSegment;
 
 const VARIATION_SELECTOR_16 = /\uFE0F/g;
+const ZWJ = 0x200d;
+const KEYCAP = 0x20e3;
+const TEXT_PRESENTATION = 0xfe0e;
+const SKIN_TONE_MIN = 0x1f3fb;
+const SKIN_TONE_MAX = 0x1f3ff;
+
+interface TrieNode {
+  children: Map<number, TrieNode>;
+  key?: string;
+}
+
+function createNode(): TrieNode {
+  return { children: new Map() };
+}
+
+/**
+ * Trie construit une fois depuis l'inventaire complet. Les séquences sont
+ * normalisées sans FE0F, comme `toEmojiKey` : le scan ignore FE0F et conserve
+ * la valeur Unicode originale dans le segment.
+ */
+const ROOT = createNode();
+for (const entry of MBOLO_EMOJI_ENTRIES) {
+  let node = ROOT;
+  for (const char of entry.char.replace(VARIATION_SELECTOR_16, '')) {
+    const point = char.codePointAt(0) as number;
+    let next = node.children.get(point);
+    if (!next) {
+      next = createNode();
+      node.children.set(point, next);
+    }
+    node = next;
+  }
+  node.key ??= entry.key;
+}
 
 /**
  * Clé stable d'un emoji = points de code en hexadécimal, séparés par « - »,
  * sans le sélecteur de variation FE0F.
  * Ex. 😀 -> "1f600", 👨‍💻 -> "1f468-200d-1f4bb", 1️⃣ -> "31-20e3".
- * Le script de génération des images utilise la MÊME fonction : ne la modifie pas
- * d'un côté seulement.
  */
 export function toEmojiKey(emoji: string): string {
   const parts: string[] = [];
@@ -24,22 +56,90 @@ export function toEmojiKey(emoji: string): string {
 const cache = new Map<string, Segment[]>();
 const CACHE_MAX = 500;
 
-/** Découpe un texte en morceaux « texte » et « emoji » (séquences ZWJ, tons de peau, drapeaux inclus). */
+function isSequenceContinuation(point: number | undefined): boolean {
+  return (
+    point === ZWJ ||
+    point === KEYCAP ||
+    (point !== undefined && point >= SKIN_TONE_MIN && point <= SKIN_TONE_MAX)
+  );
+}
+
+/**
+ * Découpe un texte en morceaux « texte » et « emoji ».
+ *
+ * Le scan parcourt les points de code et cherche la plus longue séquence du
+ * registre (ZWJ, tons de peau, drapeaux, keycaps, variantes de genre…). Il ne
+ * remplace jamais un préfixe d'une séquence inconnue : si la suite immédiate
+ * est un ZWJ, un ton de peau ou un keycap, la séquence est laissée en texte.
+ */
 export function splitEmoji(text: string): Segment[] {
   const hit = cache.get(text);
   if (hit) return hit;
 
+  const chars = Array.from(text);
+  const offsets = new Array<number>(chars.length + 1);
+  let utf16 = 0;
+  for (let index = 0; index < chars.length; index += 1) {
+    offsets[index] = utf16;
+    utf16 += chars[index].length;
+  }
+  offsets[chars.length] = utf16;
+
   const segments: Segment[] = [];
   let last = 0;
-  for (const match of text.matchAll(emojiRegex())) {
-    const index = match.index ?? 0;
-    if (index > last) segments.push({ type: 'text', value: text.slice(last, index) });
-    segments.push({ type: 'emoji', value: match[0], key: toEmojiKey(match[0]) });
-    last = index + match[0].length;
-  }
-  if (last < text.length) segments.push({ type: 'text', value: text.slice(last) });
+  let index = 0;
 
-  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value as string);
+  while (index < chars.length) {
+    let node = ROOT;
+    let bestKey: string | undefined;
+    let bestEnd = index;
+
+    for (let cursor = index; cursor < chars.length; cursor += 1) {
+      const point = chars[cursor].codePointAt(0) as number;
+      if (point === 0xfe0f) {
+        // Sélecteur de présentation : ignoré pour la correspondance, conservé dans la valeur.
+        continue;
+      }
+      const next = node.children.get(point);
+      if (!next) break;
+      node = next;
+      if (node.key) {
+        bestKey = node.key;
+        bestEnd = cursor + 1;
+      }
+    }
+
+    // Un FE0F juste après la séquence fait partie de la présentation emoji :
+    // il doit rester dans la valeur remplacée (ex. ❤️), pas devenir du texte.
+    while (bestEnd < chars.length && chars[bestEnd].codePointAt(0) === 0xfe0f) {
+      bestEnd += 1;
+    }
+
+    const nextPoint = bestEnd < chars.length ? chars[bestEnd].codePointAt(0) : undefined;
+    const forcedText = nextPoint === TEXT_PRESENTATION;
+    const partialUnknown = isSequenceContinuation(nextPoint);
+
+    if (bestKey && !forcedText && !partialUnknown) {
+      const start = offsets[index];
+      const end = offsets[bestEnd];
+      if (start > last) {
+        segments.push({ type: 'text', value: text.slice(last, start) });
+      }
+      segments.push({ type: 'emoji', value: text.slice(start, end), key: bestKey });
+      last = end;
+      index = bestEnd;
+    } else {
+      index += 1;
+    }
+  }
+
+  if (last < text.length) {
+    segments.push({ type: 'text', value: text.slice(last) });
+  }
+
+  if (cache.size >= CACHE_MAX) {
+    cache.delete(cache.keys().next().value as string);
+  }
   cache.set(text, segments);
   return segments;
 }
