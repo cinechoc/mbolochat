@@ -1,8 +1,9 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notExists, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notExists, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { DRIZZLE, type Database } from '../db/db.module.js';
 import {
+  blocks,
   conversationMembers,
   conversations,
   messageHides,
@@ -118,6 +119,10 @@ export interface ConversationSummary {
   hidden: boolean;
   /** Rôle de l'utilisateur courant dans cette conversation. */
   myRole: 'admin' | 'member';
+  /** J'ai bloqué l'autre membre (discussion directe uniquement). */
+  blockedByMe: boolean;
+  /** L'autre membre m'a bloqué : la saisie est désactivée (direct uniquement). */
+  blockedByThem: boolean;
 }
 
 export interface ListMessagesOptions {
@@ -394,8 +399,26 @@ export class ConversationsService {
       preferenceRows.map((row) => [row.conversationId, row]),
     );
 
+    // Blocages impliquant l'utilisateur courant (les deux sens).
+    const myBlockRows = await this.db
+      .select({ blockerId: blocks.blockerId, blockedId: blocks.blockedId })
+      .from(blocks)
+      .where(or(eq(blocks.blockerId, userId), eq(blocks.blockedId, userId)));
+    const blockedByMeSet = new Set(
+      myBlockRows.filter((row) => row.blockerId === userId).map((row) => row.blockedId),
+    );
+    const blockedMeSet = new Set(
+      myBlockRows.filter((row) => row.blockedId === userId).map((row) => row.blockerId),
+    );
+
     const summaries = conversationRows.map((conversation) => {
       const preferences = preferenceMap.get(conversation.id);
+      const otherId =
+        conversation.type === 'DIRECT'
+          ? (memberRows.find(
+              (member) => member.conversationId === conversation.id && member.id !== userId,
+            )?.id ?? null)
+          : null;
       return {
         id: conversation.id,
         type: conversation.type,
@@ -418,6 +441,12 @@ export class ConversationsService {
         muted: Boolean(preferences?.mutedAt),
         hidden: Boolean(preferences?.hidden),
         myRole: preferences?.role ?? 'member',
+        blockedByMe:
+          conversation.type === 'DIRECT' && otherId
+            ? blockedByMeSet.has(otherId)
+            : false,
+        blockedByThem:
+          conversation.type === 'DIRECT' && otherId ? blockedMeSet.has(otherId) : false,
       };
     });
 
