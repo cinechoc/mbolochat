@@ -4,6 +4,7 @@ const path = require('node:path');
 
 const PACKAGE = 'com.groupenzogho.mbolochat';
 const SERVICE = `${PACKAGE}.MessagingNotificationService`;
+const RECEIVER = `${PACKAGE}.CallActionsReceiver`;
 const EXPO_SERVICE = 'expo.modules.notifications.service.ExpoFirebaseMessagingService';
 
 /**
@@ -37,6 +38,18 @@ module.exports = function withMessagingNotifications(config) {
       ],
     });
     application.service = services;
+
+    // Actions Accepter/Refuser des notifications d'appel.
+    const receivers = application.receiver ?? [];
+    if (!receivers.some((entry) => entry.$?.['android:name'] === RECEIVER)) {
+      receivers.push({
+        $: {
+          'android:name': RECEIVER,
+          'android:exported': 'false',
+        },
+      });
+    }
+    application.receiver = receivers;
     return config;
   });
 
@@ -60,18 +73,18 @@ module.exports = function withMessagingNotifications(config) {
   return withDangerousMod(config, [
     'android',
     async (config) => {
-      const source = path.join(__dirname, 'android', 'MessagingNotificationService.kt');
-      const target = path.join(
+      const targetDir = path.join(
         config.modRequest.platformProjectRoot,
         'app',
         'src',
         'main',
         'java',
         ...PACKAGE.split('.'),
-        'MessagingNotificationService.kt',
       );
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.copyFileSync(source, target);
+      fs.mkdirSync(targetDir, { recursive: true });
+      for (const file of ['MessagingNotificationService.kt', 'CallActionsReceiver.kt']) {
+        fs.copyFileSync(path.join(__dirname, 'android', file), path.join(targetDir, file));
+      }
       return config;
     },
   ]);

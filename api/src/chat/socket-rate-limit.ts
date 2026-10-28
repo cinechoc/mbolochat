@@ -4,6 +4,8 @@ export const PRESENCE_RATE_LIMIT = 10;
 export const PRESENCE_RATE_WINDOW_MS = 10_000;
 export const MESSAGE_RATE_LIMIT = 30;
 export const MESSAGE_RATE_WINDOW_MS = 60_000;
+export const CALL_RATE_LIMIT = 5;
+export const CALL_RATE_WINDOW_MS = 60_000;
 
 /**
  * Limitation en mémoire, par utilisateur (pas par socket) : deux appareils du
@@ -14,6 +16,7 @@ export const MESSAGE_RATE_WINDOW_MS = 60_000;
 export class SocketRateLimiter {
   private readonly presenceHits = new Map<string, number[]>();
   private readonly messageHits = new Map<string, number[]>();
+  private readonly callHits = new Map<string, number[]>();
 
   allowPresence(userId: string, now = Date.now()): boolean {
     return this.hit(
@@ -33,6 +36,10 @@ export class SocketRateLimiter {
       MESSAGE_RATE_WINDOW_MS,
       MESSAGE_RATE_LIMIT,
     );
+  }
+
+  allowCall(userId: string, now = Date.now()): boolean {
+    return this.hit(this.callHits, userId, now, CALL_RATE_WINDOW_MS, CALL_RATE_LIMIT);
   }
 
   private hit(

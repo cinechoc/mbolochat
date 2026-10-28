@@ -8,11 +8,18 @@
     "scheme": "mbolochat",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "MboloChat utilise le micro pour les messages vocaux et les appels.",
+        "NSCameraUsageDescription": "MboloChat utilise la caméra pour les appels vidéo et l’envoi de photos."
+      },
+      "UIBackgroundModes": [
+        "audio"
+      ]
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#3c87f7",
+        "backgroundColor": "#0B1428",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
@@ -21,8 +28,16 @@
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.USE_FULL_SCREEN_INTENT",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+        "android.permission.FOREGROUND_SERVICE_PHONE_CALL",
+        "android.permission.WAKE_LOCK"
       ]
     },
     "web": {
@@ -34,9 +49,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#3c87f7",
+          "backgroundColor": "#0B1428",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 110
+          "imageWidth": 160
         }
       ],
       "expo-secure-store",

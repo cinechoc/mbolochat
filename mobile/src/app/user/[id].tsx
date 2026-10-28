@@ -10,17 +10,22 @@ import { Spacing } from '@/constants/theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { cache } from '@/lib/cache';
-import type { UserProfile } from '@/lib/types';
+import type { Gender, UserProfile } from '@/lib/types';
 
 export default function UserProfileScreen() {
   // Le nom et la photo sont passés par l'écran appelant (liste, chat) : le
   // profil s'affiche ainsi instantanément, avant même la réponse du serveur.
-  const { id, name, username, avatar } = useLocalSearchParams<{
+  const { id, name, username, avatar, gender: genderParam } = useLocalSearchParams<{
     id: string;
     name?: string;
     username?: string;
     avatar?: string;
+    gender?: string;
   }>();
+  const initialGender: Gender | null =
+    genderParam === 'MALE' || genderParam === 'FEMALE' || genderParam === 'CUSTOM'
+      ? genderParam
+      : null;
   const { token, user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -42,7 +47,10 @@ export default function UserProfileScreen() {
       displayName: name,
       bio: null,
       avatarUrl: avatar ? avatar : null,
+      gender: initialGender,
       notificationsEnabled: true,
+      notificationSound: true,
+      notificationPreview: true,
       createdAt: '',
       isMe: false,
       stats: { messages: 0, conversations: 0 },

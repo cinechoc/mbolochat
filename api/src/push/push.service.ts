@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { eq, inArray, or } from 'drizzle-orm';
+import { eq, inArray, or, sql } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../db/db.module.js';
 import {
   blocks,
@@ -10,6 +10,7 @@ import {
 } from '../db/schema.js';
 import type { MessageDto } from '../conversations/conversations.service.js';
 import { MediaService } from '../media/media.service.js';
+import { PresenceService } from '../presence/presence.service.js';
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 /** L'API Expo accepte au maximum 100 messages par requête. */
@@ -30,6 +31,10 @@ interface ExpoTicket {
 interface ExpoPushMessage {
   to: string;
   priority: 'high';
+  /** Expiration courte pour les appels (une sonnerie périmée ne sert à rien). */
+  ttl?: number;
+  /** Canal Android (les appels ont leur propre canal prioritaire). */
+  channelId?: string;
   data: {
     type: 'message';
     title: string;
@@ -41,6 +46,41 @@ interface ExpoPushMessage {
     avatarUrl: string;
     /** Nom du groupe (vide pour une discussion directe). */
     groupName: string;
+    /** Nombre de non-lus de la conversation pour ce destinataire. */
+    unreadCount: string;
+    /** « 1 » : notification silencieuse (préférence du compte). */
+    silent: string;
+  };
+}
+
+/** Notification d'appel entrant : traitée par le service Android plein écran. */
+interface ExpoCallPushMessage {
+  to: string;
+  priority: 'high';
+  ttl: number;
+  channelId: 'calls';
+  data: {
+    type: 'call';
+    callId: string;
+    conversationId: string;
+    title: string;
+    senderName: string;
+    avatarUrl: string;
+    /** « 1 » : appel vidéo, pour le libellé de la notification. */
+    video: string;
+  };
+}
+
+/** Annulation / appel manqué : data-only, sans interface système. */
+interface ExpoCallUpdateMessage {
+  to: string;
+  priority: 'high';
+  data: {
+    type: 'call-cancel' | 'call-missed';
+    callId: string;
+    conversationId: string;
+    title: string;
+    video: string;
   };
 }
 
@@ -68,7 +108,11 @@ function previewOf(content: string): string {
 /** Texte affiché dans la notification, selon le type et la pièce jointe. */
 export function notificationText(
   message: Pick<MessageDto, 'type' | 'content' | 'attachment'>,
+  preview = true,
 ): string {
+  if (!preview) {
+    return 'Nouveau message';
+  }
   if (message.type === 'sticker') {
     return 'Sticker';
   }
@@ -112,6 +156,7 @@ export class PushService {
   constructor(
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly media: MediaService,
+    private readonly presence: PresenceService,
   ) {}
 
   async notifyNewMessage(message: MessageDto, activeUserIds: string[] = []): Promise<void> {
@@ -133,6 +178,8 @@ export class PushService {
           userId: conversationMembers.userId,
           mutedAt: conversationMembers.mutedAt,
           notificationsEnabled: users.notificationsEnabled,
+          notificationSound: users.notificationSound,
+          notificationPreview: users.notificationPreview,
         })
         .from(conversationMembers)
         .innerJoin(users, eq(users.id, conversationMembers.userId))
@@ -145,6 +192,8 @@ export class PushService {
             member.userId !== message.sender.id &&
             member.notificationsEnabled &&
             member.mutedAt === null &&
+            // App au premier plan (même sur un autre écran) : pas de push.
+            !this.presence.isOnline(member.userId) &&
             !active.has(member.userId),
         )
         .map((member) => member.userId);
@@ -168,27 +217,47 @@ export class PushService {
       }
 
       const tokens = await this.db
-        .select({ token: pushTokens.token, baseUrl: pushTokens.baseUrl })
+        .select({ userId: pushTokens.userId, token: pushTokens.token, baseUrl: pushTokens.baseUrl })
         .from(pushTokens)
         .where(inArray(pushTokens.userId, recipients));
       if (tokens.length === 0) {
         return;
       }
 
+      // Compteur par conversation : même règle que les pastilles de l'app.
+      const unreadRows = await this.db.execute<{ userId: string; cnt: number }>(sql`
+        select cm.user_id as "userId", count(m.id)::int as "cnt"
+        from conversation_members cm
+        left join messages m on m.conversation_id = cm.conversation_id
+          and m.sender_id <> cm.user_id
+          and m.type <> 'call'
+          and (cm.last_read_at is null or m.created_at > cm.last_read_at)
+          and not exists (
+            select 1 from message_hides mh
+            where mh.message_id = m.id and mh.user_id = cm.user_id
+          )
+        where cm.conversation_id = ${message.conversationId}
+          and cm.user_id in (${sql.join(recipients.map((id) => sql`${id}`), sql`, `)})
+        group by cm.user_id
+      `);
+      const unreadByUser = new Map(unreadRows.rows.map((row) => [row.userId, Number(row.cnt)]));
+      const prefsByUser = new Map(members.map((member) => [member.userId, member]));
+
       const title =
         conversation.type === 'GROUP'
           ? (conversation.name?.trim() || 'Groupe')
           : message.sender.displayName;
-      // Une pièce jointe sans légende s'annonce comme sur WhatsApp.
-      const text = notificationText(message);
-      const body = conversation.type === 'GROUP' ? `${message.sender.displayName} : ${text}` : text;
 
       // L'avatar part en URL absolue dans la notification : il doit être signé
       // ici aussi, la notification ne passe pas par la réponse HTTP.
       const avatarPath = this.media.signOrNull(message.sender.avatarUrl);
       const groupName = conversation.type === 'GROUP' ? title : '';
 
-      const payload: ExpoPushMessage[] = tokens.map(({ token, baseUrl }) => {
+      const payload: ExpoPushMessage[] = tokens.map(({ userId, token, baseUrl }) => {
+        const prefs = prefsByUser.get(userId);
+        // Aperçus coupés : le texte du message ne quitte jamais le serveur.
+        const text = notificationText(message, prefs?.notificationPreview ?? true);
+        const body = conversation.type === 'GROUP' ? `${message.sender.displayName} : ${text}` : text;
         const avatar = avatarPath ? absoluteMediaUrl(avatarPath, baseUrl) : null;
         return {
           to: token,
@@ -202,6 +271,8 @@ export class PushService {
             senderName: message.sender.displayName,
             avatarUrl: avatar ?? '',
             groupName,
+            unreadCount: String(Math.max(1, unreadByUser.get(userId) ?? 1)),
+            silent: prefs?.notificationSound === false ? '1' : '0',
           },
         };
       });
@@ -217,7 +288,97 @@ export class PushService {
     }
   }
 
-  private async send(payload: ExpoPushMessage[]): Promise<void> {
+  /**
+   * Appel entrant : le canal « calls » et la notification plein écran sont
+   * construits par MessagingNotificationService (Android). Les appels ignorent
+   * les préférences muet/notifications : un appel sonne toujours.
+   */
+  async notifyIncomingCall(input: {
+    callId: string;
+    conversationId: string;
+    calleeId: string;
+    callerName: string;
+    callerAvatarUrl: string | null;
+    video: boolean;
+  }): Promise<void> {
+    try {
+      const tokens = await this.db
+        .select({ token: pushTokens.token, baseUrl: pushTokens.baseUrl })
+        .from(pushTokens)
+        .where(eq(pushTokens.userId, input.calleeId));
+      if (tokens.length === 0) {
+        return;
+      }
+      const avatarPath = this.media.signOrNull(input.callerAvatarUrl);
+      const payload: ExpoCallPushMessage[] = tokens.map(({ token, baseUrl }) => ({
+        to: token,
+        priority: 'high',
+        ttl: 30,
+        channelId: 'calls',
+        data: {
+          type: 'call',
+          callId: input.callId,
+          conversationId: input.conversationId,
+          title: input.callerName,
+          senderName: input.callerName,
+          avatarUrl: (avatarPath ? absoluteMediaUrl(avatarPath, baseUrl) : null) ?? '',
+          video: input.video ? '1' : '0',
+        },
+      }));
+      await this.send(payload);
+    } catch (error) {
+      this.logger.warn(
+        `Notification d'appel non envoyée pour ${input.callId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  /**
+   * L'appel n'est plus en sonnerie : les appareils de l'appelé ferment la
+   * notification plein écran, puis affichent « Appel manqué » si besoin.
+   */
+  async notifyCallUpdate(input: {
+    calleeId: string;
+    callId: string;
+    conversationId: string;
+    callerName: string;
+    video: boolean;
+    outcome: 'cancelled' | 'missed';
+  }): Promise<void> {
+    try {
+      const tokens = await this.db
+        .select({ token: pushTokens.token })
+        .from(pushTokens)
+        .where(eq(pushTokens.userId, input.calleeId));
+      if (tokens.length === 0) {
+        return;
+      }
+      const payload: ExpoCallUpdateMessage[] = tokens.map(({ token }) => ({
+        to: token,
+        priority: 'high',
+        data: {
+          type: input.outcome === 'missed' ? 'call-missed' : 'call-cancel',
+          callId: input.callId,
+          conversationId: input.conversationId,
+          title: input.callerName,
+          video: input.video ? '1' : '0',
+        },
+      }));
+      await this.send(payload);
+    } catch (error) {
+      this.logger.warn(
+        `Mise à jour d'appel non envoyée pour ${input.callId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private async send(
+    payload: Array<ExpoPushMessage | ExpoCallPushMessage | ExpoCallUpdateMessage>,
+  ): Promise<void> {
     const deadTokens: string[] = [];
 
     for (let offset = 0; offset < payload.length; offset += BATCH_SIZE) {

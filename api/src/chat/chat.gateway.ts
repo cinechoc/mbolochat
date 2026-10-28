@@ -12,7 +12,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import type { Server, Socket } from 'socket.io';
 import type { Subscription } from 'rxjs';
-import type { JwtPayload } from '../auth/jwt-payload.js';
+import { authenticateSocket, userRoomOf } from './socket-auth.js';
 import {
   ConversationsService,
   type MessageDto,
@@ -31,8 +31,6 @@ import {
 import { isMessageType, isValidStickerRef, type MessageType } from './sticker-ref.js';
 
 const roomOf = (conversationId: string) => `conv:${conversationId}`;
-/** Salon personnel : la liste des discussions reçoit aussi les nouveaux messages. */
-const userRoomOf = (userId: string) => `user:${userId}`;
 
 @WebSocketGateway({ cors: { origin: true } })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
@@ -68,19 +66,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   }
 
   async handleConnection(client: Socket) {
-    const token = (client.handshake.auth as { token?: string } | undefined)?.token;
-    try {
-      const payload = await this.jwtService.verifyAsync<JwtPayload>(token ?? '');
-      if (payload.type !== 'access') {
-        throw new Error('invalid type');
-      }
-      client.data.userId = payload.sub;
-      // Chaque appareil suit ses propres conversations, même celles qu'il ne
-      // connaît pas encore (nouvelle discussion ouverte par quelqu'un).
-      await client.join(userRoomOf(payload.sub));
-    } catch {
-      client.disconnect(true);
-    }
+    // Chaque appareil suit ses propres conversations, même celles qu'il ne
+    // connaît pas encore (nouvelle discussion ouverte par quelqu'un).
+    await authenticateSocket(client, this.jwtService);
   }
 
   handleDisconnect(client: Socket) {

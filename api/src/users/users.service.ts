@@ -19,6 +19,10 @@ export interface PublicUser {
   /** Genre déclaré à l'inscription, pour choisir l'avatar par défaut. */
   gender: string | null;
   notificationsEnabled: boolean;
+  /** Son des notifications poussées. */
+  notificationSound: boolean;
+  /** Aperçu du texte dans les notifications. */
+  notificationPreview: boolean;
   createdAt: Date;
 }
 
@@ -31,6 +35,8 @@ export function toPublicUser(user: User): PublicUser {
     avatarUrl: user.avatarUrl,
     gender: user.gender,
     notificationsEnabled: user.notificationsEnabled,
+    notificationSound: user.notificationSound,
+    notificationPreview: user.notificationPreview,
     createdAt: user.createdAt,
   };
 }
@@ -105,6 +111,8 @@ export class UsersService {
       bio?: string | null;
       avatarUrl?: string | null;
       notificationsEnabled?: boolean;
+      notificationSound?: boolean;
+      notificationPreview?: boolean;
     },
   ): Promise<User> {
     const patch: Partial<typeof users.$inferInsert> = {};
@@ -113,6 +121,12 @@ export class UsersService {
     if (data.avatarUrl !== undefined) patch.avatarUrl = data.avatarUrl;
     if (data.notificationsEnabled !== undefined) {
       patch.notificationsEnabled = data.notificationsEnabled;
+    }
+    if (data.notificationSound !== undefined) {
+      patch.notificationSound = data.notificationSound;
+    }
+    if (data.notificationPreview !== undefined) {
+      patch.notificationPreview = data.notificationPreview;
     }
     const [user] = await this.db.update(users).set(patch).where(eq(users.id, userId)).returning();
     if (!user) throw new NotFoundException('User not found');

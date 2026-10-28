@@ -44,6 +44,7 @@ import { Spacing } from '@/constants/theme';
 import { PresenceSubtitle } from '@/features/presence/PresenceSubtitle';
 import { VoiceMessageBubble, voiceBubbleWidth } from '@/features/voice-notes/VoiceMessageBubble';
 import { ChatComposer, type ComposerTheme } from '@/features/composer/ChatComposer';
+import { useCalls } from '@/features/calls/CallProvider';
 import { SingleEmojiMessage } from '@/features/emoji/AnimatedEmoji';
 import { EmojiText, MessageText } from '@/features/emoji/EmojiText';
 import { emojiOnlyCount, splitEmoji, type EmojiSegment } from '@/features/emoji/emojiUtils';
@@ -1070,14 +1071,21 @@ export default function ChatScreen() {
     }
   }, [id, router]);
 
-  const onCallPress = useCallback((kind: 'voice' | 'video') => {
-    Alert.alert(
-      'Bientôt disponible',
-      kind === 'video'
-        ? 'Les appels vidéo arrivent dans une prochaine mise à jour.'
-        : 'Les appels vocaux arrivent dans une prochaine mise à jour.',
-    );
-  }, []);
+  const calls = useCalls();
+
+  const onCallPress = useCallback(
+    (kind: 'voice' | 'video') => {
+      if (!conversation || conversation.type !== 'DIRECT') {
+        return;
+      }
+      if (conversation.blockedByMe || conversation.blockedByThem) {
+        Alert.alert('Appel indisponible', 'Cette conversation est bloquée.');
+        return;
+      }
+      void calls.startCall(conversation.id, { video: kind === 'video' });
+    },
+    [calls, conversation],
+  );
 
   const headerOptions = useMemo(
     () => ({
@@ -1535,6 +1543,16 @@ export default function ChatScreen() {
         );
       }
       const { message } = item;
+      if (message.type === 'call') {
+        return (
+          <View style={styles.callRow}>
+            <Phone size={13} strokeWidth={2.4} color={chat.systemText} />
+            <ThemedText style={[styles.systemText, chatStyles.systemText]}>
+              {message.content}
+            </ThemedText>
+          </View>
+        );
+      }
       if (message.deleted) {
         return (
           <View style={styles.systemRow}>
@@ -2848,6 +2866,14 @@ const styles = StyleSheet.create({
   },
   systemRow: {
     alignItems: 'center',
+    marginVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+  },
+  callRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 5,
     marginVertical: Spacing.two,
     paddingHorizontal: Spacing.three,
   },

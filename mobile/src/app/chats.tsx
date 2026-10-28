@@ -204,7 +204,9 @@ export default function ChatsScreen() {
           ...existing,
           lastMessage: message,
           unreadCount:
-            message.sender.id === user?.id ? existing.unreadCount : existing.unreadCount + 1,
+            message.sender.id === user?.id || message.type === 'call'
+              ? existing.unreadCount
+              : existing.unreadCount + 1,
         };
         const next = previous.filter((_, position) => position !== index);
         return sortConversations([updated, ...next]);

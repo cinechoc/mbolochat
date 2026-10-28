@@ -34,6 +34,10 @@ export const users = pgTable('users', {
   bio: text('bio'),
   /** Notifications dans l'application (badges, compteurs de non-lus). */
   notificationsEnabled: boolean('notifications_enabled').notNull().default(true),
+  /** Son des notifications poussées (les appels sonnent toujours). */
+  notificationSound: boolean('notification_sound').notNull().default(true),
+  /** Aperçu du texte des messages dans les notifications. */
+  notificationPreview: boolean('notification_preview').notNull().default(true),
   passwordHash: text('password_hash').notNull(),
   avatarUrl: text('avatar_url'),
   birthday: date('birthday'),

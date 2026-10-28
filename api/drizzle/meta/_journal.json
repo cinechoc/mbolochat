@@ -141,6 +141,13 @@
       "when": 1792896291914,
       "tag": "0019_gigantic_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793187418157,
+      "tag": "0020_notification_prefs",
+      "breakpoints": true
     }
   ]
 }

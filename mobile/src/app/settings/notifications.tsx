@@ -1,7 +1,15 @@
 import { Redirect, Stack, useFocusEffect } from 'expo-router';
-import { Bell, ExternalLink, Smartphone } from 'lucide-react-native';
+import {
+  BatteryCharging,
+  Bell,
+  ExternalLink,
+  Eye,
+  Maximize2,
+  Smartphone,
+  Volume2,
+} from 'lucide-react-native';
 import { useCallback, useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/avatar';
@@ -12,7 +20,12 @@ import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { conversationTitle } from '@/lib/format';
-import { getPushPermissionStatus, requestPushToken } from '@/lib/push';
+import {
+  getPushPermissionStatus,
+  openBatteryOptimizationSettings,
+  openFullScreenIntentSettings,
+  requestPushToken,
+} from '@/lib/push';
 import type { ConversationSummary } from '@/lib/types';
 
 /** Réglages des notifications : interrupteur global + silence par discussion. */
@@ -75,6 +88,17 @@ export default function NotificationSettingsScreen() {
         }
         setPushStatus(await getPushPermissionStatus());
       }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Changement impossible.');
+    }
+  };
+
+  const updatePreferences = async (patch: {
+    notificationSound?: boolean;
+    notificationPreview?: boolean;
+  }) => {
+    try {
+      setUser(await api.setNotificationPreferences(token, patch));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Changement impossible.');
     }
@@ -154,6 +178,61 @@ export default function NotificationSettingsScreen() {
         ) : null}
 
         <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
+          PRÉFÉRENCES
+        </ThemedText>
+        <ThemedView style={styles.group}>
+          <View style={[styles.row, { borderBottomColor: theme.backgroundElement }]}>
+            <Volume2 size={22} color={theme.text} />
+            <ThemedText style={styles.rowLabel}>Sons</ThemedText>
+            <Switch
+              value={user.notificationSound ?? true}
+              onValueChange={(value) => void updatePreferences({ notificationSound: value })}
+              trackColor={{ true: '#3c87f7', false: theme.backgroundElement }}
+            />
+          </View>
+          <View style={[styles.row, { borderBottomWidth: 0 }]}>
+            <Eye size={22} color={theme.text} />
+            <ThemedText style={styles.rowLabel}>Aperçus</ThemedText>
+            <Switch
+              value={user.notificationPreview ?? true}
+              onValueChange={(value) => void updatePreferences({ notificationPreview: value })}
+              trackColor={{ true: '#3c87f7', false: theme.backgroundElement }}
+            />
+          </View>
+        </ThemedView>
+        <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
+          Aperçus désactivés : les notifications affichent « Nouveau message » au lieu du texte.
+        </ThemedText>
+
+        {Platform.OS === 'android' ? (
+          <>
+            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
+              ARRIÈRE-PLAN
+            </ThemedText>
+            <ThemedView style={styles.group}>
+              <Pressable
+                onPress={openBatteryOptimizationSettings}
+                style={[styles.row, { borderBottomColor: theme.backgroundElement }]}>
+                <BatteryCharging size={22} color={theme.text} />
+                <ThemedText style={styles.rowLabel}>Optimisation de batterie</ThemedText>
+                <ExternalLink size={16} color={theme.textSecondary} />
+              </Pressable>
+              <Pressable
+                onPress={openFullScreenIntentSettings}
+                style={[styles.row, { borderBottomWidth: 0 }]}>
+                <Maximize2 size={22} color={theme.text} />
+                <ThemedText style={styles.rowLabel}>Appels plein écran</ThemedText>
+                <ExternalLink size={16} color={theme.textSecondary} />
+              </Pressable>
+            </ThemedView>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
+              Autorise MboloChat à rester actif en arrière-plan pour recevoir les appels et les
+              messages sans délai, et à afficher les appels sur l’écran verrouillé.
+            </ThemedText>
+          </>
+        ) : null}
+
+        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
           PAR DISCUSSION
         </ThemedText>
         {conversations.length === 0 ? (
@@ -164,6 +243,10 @@ export default function NotificationSettingsScreen() {
           <ThemedView style={styles.group}>
             {conversations.map((conversation, index) => {
               const title = conversationTitle(conversation, user.id);
+              const isGroup = conversation.type === 'GROUP';
+              const other = isGroup
+                ? undefined
+                : conversation.members.find((member) => member.id !== user.id);
               return (
                 <Pressable
                   key={conversation.id}
@@ -176,7 +259,13 @@ export default function NotificationSettingsScreen() {
                     },
                     pressed ? { backgroundColor: theme.backgroundSelected } : null,
                   ]}>
-                  <Avatar name={title} size={36} />
+                  <Avatar
+                    name={title}
+                    size={36}
+                    uri={isGroup ? null : other?.avatarUrl}
+                    gender={other?.gender}
+                    variant={isGroup ? 'group' : 'user'}
+                  />
                   <ThemedText style={styles.rowLabel} numberOfLines={1}>
                     {title}
                   </ThemedText>

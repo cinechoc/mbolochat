@@ -26,6 +26,10 @@ export interface User {
   gender: Gender | null;
   /** Notifications dans l'application (badges de non-lus). */
   notificationsEnabled: boolean;
+  /** Son des notifications poussées. */
+  notificationSound: boolean;
+  /** Aperçu du texte dans les notifications. */
+  notificationPreview: boolean;
   createdAt: string;
 }
 
@@ -42,8 +46,8 @@ export interface UserProfile extends User {
 
 export type MessageAttachmentType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE' | 'GIF' | 'STICKER';
 
-/** Texte Unicode normal, ou sticker référencé par son catalogue local. */
-export type MessageType = 'text' | 'sticker';
+/** Texte Unicode normal, sticker référencé, ou message système d'appel. */
+export type MessageType = 'text' | 'sticker' | 'call';
 
 /** Pièce jointe d'un message (photo pour l'instant). */
 export interface MessageAttachment {

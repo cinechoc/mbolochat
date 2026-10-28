@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module.js';
+import { CallsModule } from './calls/calls.module.js';
 import { ChatModule } from './chat/chat.module.js';
 import { AppThrottlerGuard } from './common/app-throttler.guard.js';
 import { ConversationsModule } from './conversations/conversations.module.js';
@@ -37,6 +38,7 @@ import { UsersModule } from './users/users.module.js';
     MediaModule,
     PresenceModule,
     ChatModule,
+    CallsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AppThrottlerGuard }],
 })

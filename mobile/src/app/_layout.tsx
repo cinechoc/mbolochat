@@ -4,6 +4,9 @@ import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import { CallProvider } from '@/features/calls/CallProvider';
+import { CallBanner } from '@/features/calls/CallBanner';
+import { CallOverlay } from '@/features/calls/CallOverlay';
 import { PresenceProvider } from '@/features/presence/PresenceProvider';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
@@ -27,10 +30,14 @@ export default function RootLayout() {
       <AuthProvider>
         <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <StatusBar style="auto" />
-          <RootNavigator />
-          <NotificationRouter />
-          <ReliabilityLoop />
-          <PresenceProvider />
+          <CallProvider>
+            <RootNavigator />
+            <CallOverlay />
+            <CallBanner />
+            <NotificationRouter />
+            <ReliabilityLoop />
+            <PresenceProvider />
+          </CallProvider>
         </ThemeProvider>
       </AuthProvider>
     </GestureHandlerRootView>

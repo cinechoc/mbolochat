@@ -33,12 +33,21 @@ export class UsersController {
   @Patch('me')
   async updateMe(
     @CurrentUser() current: JwtPayload,
-    @Body() body: { displayName?: string; bio?: string; notificationsEnabled?: boolean },
+    @Body()
+    body: {
+      displayName?: string;
+      bio?: string;
+      notificationsEnabled?: boolean;
+      notificationSound?: boolean;
+      notificationPreview?: boolean;
+    },
   ) {
     const user = await this.usersService.updateProfile(current.sub, {
       displayName: body?.displayName,
       bio: body?.bio?.trim() ? body.bio.trim() : body?.bio === '' ? null : undefined,
       notificationsEnabled: body?.notificationsEnabled,
+      notificationSound: body?.notificationSound,
+      notificationPreview: body?.notificationPreview,
     });
     return toPublicUser(user);
   }

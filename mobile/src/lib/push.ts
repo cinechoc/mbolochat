@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import { api } from './api';
 import type * as ExpoNotifications from 'expo-notifications';
 
@@ -117,23 +117,84 @@ export async function requestPushToken(): Promise<string | null> {
 }
 
 /**
- * Réenregistre le jeton push au démarrage, sans redemander la permission.
- * L'API mémorise ainsi l'adresse par laquelle l'appareil joint les images
- * (photo de profil dans la notification).
+ * Jeton Expo déjà autorisé, sans redemander la permission (logout, resync).
  */
-export async function syncPushToken(authToken: string): Promise<void> {
+export async function getExistingPushToken(): Promise<string | null> {
+  const module = getNotifications();
+  if (!module) {
+    return null;
+  }
   try {
-    if ((await getPushPermissionStatus()) !== 'granted') {
+    if ((await module.getPermissionsAsync()).status !== 'granted') {
+      return null;
+    }
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+    if (!projectId) {
+      return null;
+    }
+    const { data } = await module.getExpoPushTokenAsync({ projectId });
+    return data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Enregistre l'appareil auprès de l'API. Avec `requestPermission`, la demande
+ * système est faite au premier login ; sinon on ne réenregistre qu'un jeton
+ * déjà autorisé (restauration de session).
+ */
+export async function ensurePushRegistration(
+  authToken: string,
+  options?: { requestPermission?: boolean },
+): Promise<void> {
+  const module = getNotifications();
+  if (!module) {
+    return;
+  }
+  try {
+    const { status } = await module.getPermissionsAsync();
+    if (status !== 'granted' && !options?.requestPermission) {
       return;
     }
-    const pushToken = await requestPushToken();
-    if (!pushToken) {
-      return;
+    const pushToken =
+      status === 'granted' ? await getExistingPushToken() : await requestPushToken();
+    if (pushToken) {
+      await api.registerPushToken(authToken, pushToken);
     }
-    await api.registerPushToken(authToken, pushToken);
   } catch {
     // Sans réseau, le prochain démarrage réessaiera.
   }
+}
+
+/**
+ * Réenregistre le jeton push au démarrage, sans redemander la permission.
+ */
+export async function syncPushToken(authToken: string): Promise<void> {
+  await ensurePushRegistration(authToken);
+}
+
+const APP_PACKAGE = Constants.expoConfig?.android?.package ?? 'com.groupenzogho.mbolochat';
+
+/** Écran système : autoriser l'app à tourner en arrière-plan. */
+export function openBatteryOptimizationSettings(): void {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+  void Linking.sendIntent('android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', [
+    { key: 'package', value: APP_PACKAGE },
+  ]).catch(() => void Linking.openSettings());
+}
+
+/** Android 14+ : autoriser l'appel plein écran sur l'écran verrouillé. */
+export function openFullScreenIntentSettings(): void {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+  void Linking.sendIntent('android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT').catch(
+    () => void Linking.openSettings(),
+  );
 }
 
 /** Données attachées à une notification (voir PushService côté API). */

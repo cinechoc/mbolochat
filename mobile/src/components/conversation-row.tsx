@@ -6,6 +6,7 @@ import {
   Film,
   Image as ImageIcon,
   Mic,
+  Phone,
   Pin,
   Sticker,
   Video,
@@ -117,7 +118,9 @@ function ConversationRowComponent({
           ) : null}
         </View>
         <View style={styles.previewRow}>
-          {!typing && preview.mine ? (
+          {!typing && conversation.lastMessage?.type === 'call' ? (
+            <Phone size={14} strokeWidth={2.2} color={theme.textSecondary} />
+          ) : !typing && preview.mine ? (
             preview.read ? (
               <CheckCheck size={14} strokeWidth={2.4} color={accentColor} />
             ) : (

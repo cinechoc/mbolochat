@@ -144,6 +144,14 @@ const quotedSender = alias(users, 'quoted_sender');
 /** Une citation tient sur une ligne : l'aperçu est coupé, pas stocké. */
 const QUOTE_PREVIEW_CHARS = 140;
 
+/** `call` : message système du serveur, jamais envoyé par un client. */
+function messageTypeOf(type: string): MessageType {
+  if (type === 'sticker') {
+    return 'sticker';
+  }
+  return type === 'call' ? 'call' : 'text';
+}
+
 /** Passé ce délai, un message ne se retire plus que pour soi. */
 const UNSEND_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -220,7 +228,7 @@ function toMessageDto(row: MessageRow): MessageDto {
   return {
     id: row.id,
     conversationId: row.conversationId,
-    type: row.type === 'sticker' ? 'sticker' : 'text',
+    type: messageTypeOf(row.type),
     // « Supprimé pour tous » vide la ligne : rien à renvoyer, juste le témoin.
     content: deleted ? '' : row.content,
     stickerRef: deleted || row.type !== 'sticker' ? null : (row.stickerRef ?? null),
@@ -372,6 +380,8 @@ export class ConversationsService {
       .where(
         and(
           sql`${messages.senderId} <> ${userId} AND (${conversationMembers.lastReadAt} IS NULL OR ${messages.createdAt} > ${conversationMembers.lastReadAt})`,
+          // Un message système d'appel n'est pas un message non lu.
+          sql`${messages.type} <> 'call'`,
           // Un message que j'ai supprimé pour moi ne doit plus compter.
           this.hiddenFrom(userId),
         ),
@@ -957,7 +967,7 @@ export class ConversationsService {
     return {
       id: stored.id,
       conversationId: stored.conversationId,
-      type: stored.type === 'sticker' ? 'sticker' : 'text',
+      type: messageTypeOf(stored.type),
       content: stored.content,
       stickerRef: stored.type === 'sticker' ? (stored.stickerRef ?? null) : null,
       attachment: stored.attachment ?? null,
@@ -974,6 +984,22 @@ export class ConversationsService {
         gender: sender.gender,
       },
     };
+  }
+
+  /**
+   * Message système d'appel (« Appel vocal · 1:24 », « Appel manqué »…).
+   * Réservé au serveur : aucun client ne peut envoyer ce type.
+   */
+  async createCallMessage(
+    conversationId: string,
+    senderId: string,
+    content: string,
+  ): Promise<MessageDto> {
+    const [row] = await this.db
+      .insert(messages)
+      .values({ conversationId, senderId, type: 'call', content })
+      .returning({ id: messages.id });
+    return this.messageDto(row.id);
   }
 
   /** Aperçu d'un message cité, pour l'acquittement d'un envoi avec réponse. */
@@ -1151,7 +1177,7 @@ export class ConversationsService {
       map.set(row.conversationId, {
         id: row.id,
         conversationId: row.conversationId,
-        type: row.type === 'sticker' ? 'sticker' : 'text',
+        type: messageTypeOf(row.type),
         content: deleted ? '' : row.content,
         stickerRef: deleted || row.type !== 'sticker' ? null : (row.stickerRef ?? null),
         attachment: deleted ? null : (row.attachment ?? null),

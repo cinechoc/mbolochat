@@ -5,12 +5,16 @@
  */
 export const STICKER_REF_PATTERN = /^[a-z0-9_-]{1,40}\/[a-z0-9_-]{1,60}$/;
 
-export type MessageType = 'text' | 'sticker';
+/** Types stockés en base : `call` est réservé aux messages système du serveur. */
+export type MessageType = 'text' | 'sticker' | 'call';
+
+/** Types qu'un client peut réellement envoyer. */
+export type ClientMessageType = 'text' | 'sticker';
 
 export function isValidStickerRef(value: unknown): value is string {
   return typeof value === 'string' && STICKER_REF_PATTERN.test(value);
 }
 
-export function isMessageType(value: unknown): value is MessageType {
+export function isMessageType(value: unknown): value is ClientMessageType {
   return value === 'text' || value === 'sticker';
 }

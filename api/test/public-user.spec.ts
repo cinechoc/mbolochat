@@ -11,6 +11,8 @@ function user(overrides: Partial<User> = {}): User {
     displayName: 'Mbolo',
     bio: null,
     notificationsEnabled: true,
+    notificationSound: true,
+    notificationPreview: true,
     passwordHash: 'hash',
     avatarUrl: null,
     birthday: null,

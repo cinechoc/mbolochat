@@ -178,6 +178,10 @@ export const api = {
     return request<User>('/users/me/avatar', { method: 'POST', token, body: { data, mimeType } });
   },
 
+  deleteAvatar(token: string) {
+    return request<User>('/users/me/avatar', { method: 'DELETE', token });
+  },
+
   /**
    * Importe une image (multipart) et renvoie son identifiant, à joindre à un
    * message. Le corps est un FormData : React Native gère seul le boundary,
@@ -406,10 +410,21 @@ export const api = {
   },
 
   setNotificationsEnabled(token: string, enabled: boolean) {
+    return this.setNotificationPreferences(token, { notificationsEnabled: enabled });
+  },
+
+  setNotificationPreferences(
+    token: string,
+    prefs: {
+      notificationsEnabled?: boolean;
+      notificationSound?: boolean;
+      notificationPreview?: boolean;
+    },
+  ) {
     return request<User>('/users/me', {
       method: 'PATCH',
       token,
-      body: { notificationsEnabled: enabled },
+      body: prefs,
     });
   },
 

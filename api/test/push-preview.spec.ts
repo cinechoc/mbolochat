@@ -41,4 +41,19 @@ describe('notificationText', () => {
       } as MessageDto),
     ).toBe('Regarde');
   });
+
+  it('masque le texte quand les aperçus sont désactivés', () => {
+    expect(notificationText({ ...base, content: 'Secret' } as MessageDto, false)).toBe(
+      'Nouveau message',
+    );
+    expect(
+      notificationText(
+        {
+          ...base,
+          attachment: { type: 'IMAGE', url: '/media?f=1', mime: 'image/jpeg', size: 1 },
+        } as MessageDto,
+        false,
+      ),
+    ).toBe('Nouveau message');
+  });
 });
