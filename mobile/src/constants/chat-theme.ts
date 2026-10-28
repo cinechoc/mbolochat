@@ -16,6 +16,8 @@ export interface ChatPalette {
   composer: string;
   input: string;
   inputPlaceholder: string;
+  /** Icônes du compositeur (micro, emoji, +) : gris WeChat, pas du blanc pur. */
+  composerIcon: string;
   send: string;
   sendText: string;
   headerText: string;
@@ -48,7 +50,8 @@ export const ChatColors: { light: ChatPalette; dark: ChatPalette } = {
     composer: '#F7F7F7',
     input: '#FFFFFF',
     inputPlaceholder: '#9B9B9B',
-    send: '#07C160',
+    composerIcon: '#5A5A5A',
+    send: '#3C87F7',
     sendText: '#FFFFFF',
     headerText: '#111111',
     headerSubtitle: '#9B9B9B',
@@ -78,7 +81,8 @@ export const ChatColors: { light: ChatPalette; dark: ChatPalette } = {
     composer: Colors.dark.backgroundElement,
     input: '#2C2C2E',
     inputPlaceholder: '#9B9B9B',
-    send: '#07C160',
+    composerIcon: '#C9CCD1',
+    send: '#3C87F7',
     sendText: '#FFFFFF',
     headerText: Colors.dark.text,
     headerSubtitle: Colors.dark.textSecondary,

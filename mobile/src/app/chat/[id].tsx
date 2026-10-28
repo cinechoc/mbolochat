@@ -41,7 +41,6 @@ import { CHAT_TIME_GAP_MS, useChatColors } from '@/constants/chat-theme';
 import { Spacing } from '@/constants/theme';
 import { PresenceSubtitle } from '@/features/presence/PresenceSubtitle';
 import { VoiceMessageBubble, voiceBubbleWidth } from '@/features/voice-notes/VoiceMessageBubble';
-import { VoiceRecordButton } from '@/features/voice-notes/VoiceRecordButton';
 import { ChatComposer, type ComposerTheme } from '@/features/composer/ChatComposer';
 import { SingleEmojiMessage } from '@/features/emoji/AnimatedEmoji';
 import { EmojiText, MessageText } from '@/features/emoji/EmojiText';
@@ -499,7 +498,6 @@ export default function ChatScreen() {
       unreadLine: { backgroundColor: chat.border },
       failed: { color: chat.error },
       replyBar: { backgroundColor: chat.composer },
-      voiceButtonText: { color: chat.primaryText },
     }),
     [chat],
   );
@@ -577,11 +575,12 @@ export default function ChatScreen() {
       tabActiveBg: theme.backgroundSelected,
       text: chat.primaryText,
       subtle: chat.secondaryText,
-      icon: chat.primaryText,
+      icon: chat.composerIcon,
       border: chat.border,
       pressed: theme.backgroundSelected,
       accent: chat.send,
       accentText: chat.sendText,
+      sendBg: chat.send,
     }),
     [chat, theme],
   );
@@ -857,6 +856,7 @@ export default function ChatScreen() {
         username: user.username,
         displayName: user.displayName,
         avatarUrl: user.avatarUrl,
+        gender: user.gender,
       };
       const confirmed = new Set(
         messages.map((message) => message.clientId).filter((clientId): clientId is string => Boolean(clientId)),
@@ -1056,6 +1056,7 @@ export default function ChatScreen() {
         name: other.displayName,
         username: other.username,
         avatar: other.avatarUrl ?? '',
+        gender: other.gender ?? '',
       },
     });
   }, [other, router]);
@@ -1442,6 +1443,7 @@ export default function ChatScreen() {
             name={avatarName}
             uri={mine ? user?.avatarUrl : first.sender.avatarUrl}
             size={40}
+            gender={mine ? user?.gender : first.sender.gender}
             style={styles.messageAvatar}
           />
         );
@@ -1512,6 +1514,7 @@ export default function ChatScreen() {
           name={avatarName}
           uri={mine ? user?.avatarUrl : message.sender.avatarUrl}
           size={40}
+          gender={mine ? user?.gender : message.sender.gender}
           style={styles.messageAvatar}
         />
       );
@@ -2471,18 +2474,9 @@ export default function ChatScreen() {
               ? Math.max(0, chatAreaHeight - (replyTo ? replyBarHeight : 0))
               : undefined
           }
-          voiceSlot={
-            <VoiceRecordButton
-              onSend={sendVoiceMessage}
-              onPermissionDenied={handleVoicePermissionDenied}
-              onError={handleVoiceError}
-              accentColor={chat.mineBubble}
-              idleColor={chat.input}
-              pressedColor={chat.border}
-              textStyle={chatStyles.voiceButtonText}
-              style={styles.voiceRecorder}
-            />
-          }
+          onSendVoice={sendVoiceMessage}
+          onVoicePermissionDenied={handleVoicePermissionDenied}
+          onVoiceError={handleVoiceError}
           plusPanel={
             <AttachPanel
               onPhotos={() => void pickLibrary()}
@@ -2529,10 +2523,6 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
-  },
-  voiceRecorder: {
-    flex: 1,
-    height: 40,
   },
   stickerMessageBlock: {
     maxWidth: 160,

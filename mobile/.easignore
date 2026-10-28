@@ -1,0 +1,30 @@
+# EAS utilise .easignore à la place de .gitignore : on reprend ses règles.
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+.metro-health-check*
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+*.pem
+.env*.local
+*.tsbuildinfo
+/ios
+/android
+
+# Sources de production des emojis : absentes du bundle runtime
+# (seuls assets/emoji-faces/*.webp et assets/mbolo-emoji/*.webp sont requis).
+assets/emoji-faces-src/
+assets/emoji-faces-proc/
+assets/reference/
+scripts/__pycache__/
