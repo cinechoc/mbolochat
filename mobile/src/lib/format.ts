@@ -87,7 +87,7 @@ export function initials(name: string): string {
 }
 
 /** Filtres de la liste de discussions. */
-export type ConversationFilter = 'all' | 'unread' | 'groups';
+export type ConversationFilter = 'all' | 'unread' | 'groups' | 'hidden';
 
 /** Étiquette de section pour regrouper les discussions par ancienneté. */
 export function conversationSectionLabel(iso: string): string {

@@ -24,33 +24,51 @@ interface ActionSheetProps {
   subtitle?: string;
   actions: SheetAction[];
   onClose: () => void;
+  /** 'sheet' (bas d'écran, défaut) ou 'center' (carte modale centrée). */
+  variant?: 'sheet' | 'center';
 }
 
-/** Feuille d'actions (bas d'écran), façon WhatsApp. */
-export function ActionSheet({ visible, title, subtitle, actions, onClose }: ActionSheetProps) {
+/** Feuille d'actions (bas d'écran ou carte centrée), façon WhatsApp. */
+export function ActionSheet({
+  visible,
+  title,
+  subtitle,
+  actions,
+  onClose,
+  variant = 'sheet',
+}: ActionSheetProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const centered = variant === 'center';
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType={centered ? 'fade' : 'slide'}
+      onRequestClose={onClose}>
+      <Pressable style={[styles.backdrop, centered && styles.backdropCenter]} onPress={onClose}>
         <Pressable
           onPress={() => undefined}
           style={[
             styles.sheet,
+            centered ? styles.card : styles.sheetBottom,
             {
               backgroundColor: theme.background,
               borderColor: theme.backgroundElement,
-              paddingBottom: Math.max(insets.bottom, Spacing.three),
+              paddingBottom: centered ? Spacing.two : Math.max(insets.bottom, Spacing.three),
             },
           ]}>
           {title ? (
-            <ThemedView style={styles.header}>
+            <ThemedView style={[styles.header, centered && styles.headerCenter]}>
               <ThemedText type="smallBold" numberOfLines={1}>
                 {title}
               </ThemedText>
               {subtitle ? (
-                <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                <ThemedText
+                  type="small"
+                  themeColor="textSecondary"
+                  numberOfLines={centered ? 3 : 1}>
                   {subtitle}
                 </ThemedText>
               ) : null}
@@ -78,6 +96,22 @@ export function ActionSheet({ visible, title, subtitle, actions, onClose }: Acti
               </ThemedText>
             </Pressable>
           ))}
+          {centered ? (
+            <>
+              <View style={[styles.divider, { backgroundColor: theme.backgroundElement }]} />
+              <Pressable
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Annuler"
+                style={({ pressed }) => [
+                  styles.action,
+                  styles.cancel,
+                  pressed && { backgroundColor: theme.backgroundSelected },
+                ]}>
+                <ThemedText type="smallBold">Annuler</ThemedText>
+              </Pressable>
+            </>
+          ) : null}
         </Pressable>
       </Pressable>
     </Modal>
@@ -90,16 +124,39 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
     justifyContent: 'flex-end',
   },
+  backdropCenter: {
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.five,
+  },
   sheet: {
-    borderTopLeftRadius: Spacing.four,
-    borderTopRightRadius: Spacing.four,
     borderWidth: StyleSheet.hairlineWidth,
     paddingTop: Spacing.two,
+  },
+  sheetBottom: {
+    borderTopLeftRadius: Spacing.four,
+    borderTopRightRadius: Spacing.four,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 380,
+    alignSelf: 'center',
+    borderRadius: Spacing.four,
+    overflow: 'hidden',
+    elevation: 12,
+    shadowColor: '#000000',
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
   },
   header: {
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.two,
     gap: Spacing.half,
+  },
+  headerCenter: {
+    paddingTop: Spacing.two,
+    paddingBottom: Spacing.three,
   },
   divider: {
     height: StyleSheet.hairlineWidth,
@@ -114,6 +171,9 @@ const styles = StyleSheet.create({
   },
   actionIcon: {
     width: 24,
+  },
+  cancel: {
+    justifyContent: 'center',
   },
   destructive: {
     color: '#e5484d',

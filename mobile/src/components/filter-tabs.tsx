@@ -1,7 +1,6 @@
-import { ScrollView, Pressable, StyleSheet } from 'react-native';
+import { ScrollView, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { accentColor } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -55,11 +54,10 @@ export function FilterTabs({ options, value, onChange }: FilterTabsProps) {
             </ThemedText>
             {option.count !== undefined && option.count > 0 ? (
               asBadge ? (
-                <ThemedView style={[styles.count, { backgroundColor: accentColor }]}>
-                  <ThemedText type="small" style={styles.countBadge}>
-                    {option.count}
-                  </ThemedText>
-                </ThemedView>
+                // Simple point d'alerte : indique des non-lus sans afficher le nombre.
+                <View
+                  style={[styles.dot, { backgroundColor: active ? '#ffffff' : accentColor }]}
+                />
               ) : (
                 <ThemedText
                   type="small"
@@ -102,19 +100,14 @@ const styles = StyleSheet.create({
   labelActive: {
     color: '#ffffff',
   },
-  count: {
-    minWidth: 20,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 999,
-    alignItems: 'center',
-  },
-  countBadge: {
-    color: '#ffffff',
-    fontWeight: '700',
-  },
   countText: {
     fontWeight: '600',
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginLeft: 1,
   },
   countTextActive: {
     color: '#ffffff',

@@ -75,9 +75,7 @@ function ConversationRowComponent({
     ),
   }));
 
-  const previewText = typing
-    ? `${isGroup ? `${typing.name} · ` : ''}en train d'écrire : ${typing.text}`
-    : preview.text;
+  const previewText = typing ? 'En train d’écrire' : preview.text;
 
   return (
     <AnimatedPressable
@@ -96,7 +94,14 @@ function ConversationRowComponent({
       }}
       style={[styles.row, rowAnimatedStyle]}>
       <View>
-        <Avatar name={title} uri={avatarUri} size={52} />
+        <Avatar
+          name={title}
+          uri={avatarUri}
+          size={52}
+          gender={isGroup ? null : other?.gender}
+          variant={isGroup ? 'group' : 'user'}
+          shape="rounded"
+        />
         {!isGroup && other ? <PresenceDot userId={other.id} /> : null}
       </View>
       <View style={styles.body}>
@@ -141,7 +146,7 @@ function ConversationRowComponent({
             numberOfLines={1}
             style={[
               styles.previewText,
-              { color: theme.textSecondary },
+              { color: typing ? accentColor : theme.textSecondary },
               unread && styles.bold,
               typing ? styles.typing : null,
             ]}>

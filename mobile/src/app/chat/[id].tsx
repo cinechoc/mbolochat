@@ -7,11 +7,13 @@ import {
   CircleAlert,
   Clock,
   Copy,
+  Phone,
   Reply,
   Star,
   StarOff,
   Trash,
   Trash2,
+  Video,
   X,
   type LucideIcon,
 } from 'lucide-react-native';
@@ -548,6 +550,7 @@ export default function ChatScreen() {
   /** Séparateur de non-lus, figé à l'ouverture : il ne suit pas les arrivages. */
   const [unreadFrom, setUnreadFrom] = useState<{ id: string; count: number } | null>(null);
   const [showJump, setShowJump] = useState(false);
+  const [composerHeight, setComposerHeight] = useState(0);
   /** Messages reçus pendant que l'on était remonté dans l'historique. */
   const [unseen, setUnseen] = useState(0);
   const unseenRef = useRef(0);
@@ -1067,6 +1070,15 @@ export default function ChatScreen() {
     }
   }, [id, router]);
 
+  const onCallPress = useCallback((kind: 'voice' | 'video') => {
+    Alert.alert(
+      'Bientôt disponible',
+      kind === 'video'
+        ? 'Les appels vidéo arrivent dans une prochaine mise à jour.'
+        : 'Les appels vocaux arrivent dans une prochaine mise à jour.',
+    );
+  }, []);
+
   const headerOptions = useMemo(
     () => ({
       headerTitleAlign: 'center' as const,
@@ -1095,9 +1107,40 @@ export default function ChatScreen() {
           <Pressable onPress={openConversationSettings} hitSlop={8}>
             <ThemedText style={[styles.headerAction, { color: chat.headerText }]}>Infos</ThemedText>
           </Pressable>
+        ) : conversation?.type === 'DIRECT' ? (
+          <View style={styles.headerCallActions}>
+            <Pressable
+              onPress={() => onCallPress('video')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Appel vidéo"
+              style={({ pressed }) => pressed && styles.pressedHeaderAction}>
+              <Video size={26} color={chat.headerText} />
+            </Pressable>
+            <Pressable
+              onPress={() => onCallPress('voice')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Appel vocal"
+              style={({ pressed }) => pressed && styles.pressedHeaderAction}>
+              {/* Combiné retourné (sens « raccroché »), comme WhatsApp. */}
+              <View style={styles.phoneFlipped}>
+                <Phone size={22} color={chat.headerText} />
+              </View>
+            </Pressable>
+          </View>
         ) : null,
     }),
-    [conversation, other, title, subtitle, openOtherProfile, openConversationSettings, chat],
+    [
+      conversation,
+      other,
+      title,
+      subtitle,
+      openOtherProfile,
+      openConversationSettings,
+      onCallPress,
+      chat,
+    ],
   );
 
   const keyExtractor = useCallback((item: ListRow) => item.key, []);
@@ -2406,7 +2449,14 @@ export default function ChatScreen() {
             onPress={jumpToBottom}
             accessibilityRole="button"
             accessibilityLabel="Retourner aux derniers messages"
-            style={[styles.jump, { backgroundColor: theme.backgroundElement }]}>
+            style={[
+              styles.jump,
+              {
+                backgroundColor: theme.backgroundElement,
+                // Au-dessus du compositeur (et des panneaux emoji/+ éventuels).
+                bottom: (composerHeight || 92) + Spacing.two,
+              },
+            ]}>
             {unseen > 0 ? (
               <View style={styles.jumpBadge}>
                 <ThemedText style={styles.jumpBadgeText}>
@@ -2459,6 +2509,23 @@ export default function ChatScreen() {
           </View>
         ) : null}
 
+        <View onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}>
+        {conversation?.type === 'DIRECT' && conversation.blockedByThem ? (
+          <View
+            style={[
+              styles.blockedBar,
+              {
+                backgroundColor: chat.composer,
+                borderTopColor: chat.border,
+                // Au-dessus de la barre de navigation système (gestes/boutons).
+                paddingBottom: Spacing.four + insets.bottom,
+              },
+            ]}>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.blockedText}>
+              Vous ne pouvez plus discuter avec cette personne.
+            </ThemedText>
+          </View>
+        ) : (
         <ChatComposer
           key={composerKey}
           theme={composerTheme}
@@ -2485,6 +2552,8 @@ export default function ChatScreen() {
             />
           }
         />
+        )}
+        </View>
       </KeyboardAvoidingView>
 
       <ActionSheet
@@ -2520,6 +2589,27 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  headerCallActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingRight: Spacing.two,
+  },
+  pressedHeaderAction: {
+    opacity: 0.55,
+  },
+  phoneFlipped: {
+    transform: [{ scaleX: -1 }],
+  },
+  blockedBar: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.four,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+  },
+  blockedText: {
+    textAlign: 'center',
   },
   flex: {
     flex: 1,
@@ -2786,7 +2876,6 @@ const styles = StyleSheet.create({
   jump: {
     position: 'absolute',
     right: Spacing.three,
-    bottom: 92,
     width: 42,
     height: 42,
     borderRadius: 21,

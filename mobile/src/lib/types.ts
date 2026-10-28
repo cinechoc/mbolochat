@@ -3,6 +3,8 @@ export interface SenderInfo {
   username: string;
   displayName: string;
   avatarUrl: string | null;
+  /** Genre déclaré, pour l'avatar par défaut quand il n'y a pas de photo. */
+  gender: Gender | null;
 }
 
 /** Membre d'une conversation, avec son dernier accusé de lecture. */
@@ -20,6 +22,8 @@ export interface User {
   displayName: string;
   bio: string | null;
   avatarUrl: string | null;
+  /** Genre déclaré à l'inscription, pour l'avatar par défaut. */
+  gender: Gender | null;
   /** Notifications dans l'application (badges de non-lus). */
   notificationsEnabled: boolean;
   createdAt: string;
@@ -156,6 +160,10 @@ export interface ConversationSummary {
   hidden: boolean;
   /** Mon rôle : seuls les administrateurs pilotent un groupe. */
   myRole: 'admin' | 'member';
+  /** J'ai bloqué l'autre membre (discussion directe). */
+  blockedByMe: boolean;
+  /** L'autre membre m'a bloqué (discussion directe) : saisie désactivée. */
+  blockedByThem: boolean;
 }
 
 export type LastSeenVisibility = 'everyone' | 'contacts' | 'nobody';

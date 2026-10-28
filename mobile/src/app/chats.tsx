@@ -1,5 +1,6 @@
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
 import {
+  Ban,
   Bell,
   BellOff,
   CheckCheck,
@@ -10,16 +11,18 @@ import {
   Pin,
   PinOff,
   Plus,
+  Trash2,
+  UserCheck,
   UserRound,
 } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ActionSheet, type SheetAction } from '@/components/action-sheet';
-import { Avatar } from '@/components/avatar';
 import { ConversationRow, type TypingEntry } from '@/components/conversation-row';
 import { FilterTabs } from '@/components/filter-tabs';
+import { SwipeableRow, type SwipeAction } from '@/components/swipeable-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TextField, accentColor } from '@/components/ui';
@@ -66,7 +69,6 @@ const listKeyExtractor = (item: ListRow) => item.key;
 export default function ChatsScreen() {
   const { token, user } = useAuth();
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const [conversations, setConversations] = useState<ConversationSummary[]>(
     // Dernière liste connue : la liste s'affiche immédiatement, sans clignotement.
@@ -74,6 +76,11 @@ export default function ChatsScreen() {
   );
   const [typingMap, setTypingMap] = useState<Record<string, TypingEntry>>({});
   const [filter, setFilter] = useState<ConversationFilter>('all');
+  const [headerMenu, setHeaderMenu] = useState(false);
+  const [openRowId, setOpenRowId] = useState<string | null>(null);
+  const [hiddenConversations, setHiddenConversations] = useState<ConversationSummary[]>([]);
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(() => new Set());
+  const [blockTarget, setBlockTarget] = useState<ConversationSummary | null>(null);
   const [query, setQuery] = useState('');
   // La liste en cache s'affiche immédiatement ; ce drapeau sert seulement à
   // éviter d'afficher « aucune conversation » avant la première réponse.
@@ -104,15 +111,46 @@ export default function ChatsScreen() {
     }
   }, [token]);
 
+  const loadHidden = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+    try {
+      const list = await api.listHiddenConversations(token);
+      setHiddenConversations(sortConversations(list));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Impossible de charger les masquées.');
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (filter === 'hidden') {
+      void loadHidden();
+    }
+  }, [filter, loadHidden]);
+
+  const loadBlocked = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+    try {
+      const list = await api.listBlockedUsers(token);
+      setBlockedIds(new Set(list.map((item) => item.id)));
+    } catch {
+      /* silencieux : le blocage reste disponible depuis les réglages */
+    }
+  }, [token]);
+
   useFocusEffect(
     useCallback(() => {
       refresh();
+      void loadBlocked();
       if (token) {
         // Le socket partagé reste ouvert entre les écrans ; on s'assure
         // simplement qu'il l'est quand la liste reprend le focus.
         connectSocket(token);
       }
-    }, [refresh, token]),
+    }, [loadBlocked, refresh, token]),
   );
 
   // Rejoint les salons de toutes les discussions affichées (temps réel).
@@ -275,7 +313,12 @@ export default function ChatsScreen() {
 
   const filteredRows = useMemo<ListRow[]>(() => {
     const needle = query.trim().toLowerCase();
-    const matching = conversations.filter((item) => {
+    const source = filter === 'hidden' ? hiddenConversations : conversations;
+    const matching = source.filter((item) => {
+      // Les discussions masquées n'apparaissent que dans leur propre filtre.
+      if (filter !== 'hidden' && item.hidden) {
+        return false;
+      }
       if (filter === 'unread' && item.unreadCount === 0) {
         return false;
       }
@@ -311,7 +354,7 @@ export default function ChatsScreen() {
       rows.push({ key: conversation.id, type: 'conversation', conversation });
     }
     return rows;
-  }, [conversations, filter, query, user?.id]);
+  }, [hiddenConversations, conversations, filter, query, user?.id]);
 
   const filterOptions = useMemo(
     () => [
@@ -331,6 +374,7 @@ export default function ChatsScreen() {
         label: 'Groupes',
         count: conversations.filter((item) => item.type === 'GROUP').length,
       },
+      { key: 'hidden' as const, label: 'Masqué' },
     ],
     [conversations, user?.notificationsEnabled],
   );
@@ -355,9 +399,17 @@ export default function ChatsScreen() {
       }
       try {
         const updated = await api.setConversationPreferences(token, conversation.id, body);
-        setConversations((previous) =>
-          sortConversations(previous.map((item) => (item.id === updated.id ? updated : item))),
-        );
+        if (updated.hidden) {
+          setConversations((previous) => previous.filter((item) => item.id !== updated.id));
+          setHiddenConversations((previous) =>
+            sortConversations([...previous.filter((item) => item.id !== updated.id), updated]),
+          );
+        } else {
+          setConversations((previous) =>
+            sortConversations([...previous.filter((item) => item.id !== updated.id), updated]),
+          );
+          setHiddenConversations((previous) => previous.filter((item) => item.id !== updated.id));
+        }
       } catch (err) {
         setError(err instanceof ApiError ? err.message : 'Action impossible.');
       }
@@ -413,9 +465,13 @@ export default function ChatsScreen() {
 
   const openConversation = useCallback(
     (conversation: ConversationSummary) => {
+      if (openRowId) {
+        setOpenRowId(null);
+        return;
+      }
       router.push({ pathname: '/chat/[id]', params: { id: conversation.id } });
     },
-    [router],
+    [router, openRowId],
   );
 
   const openConversationActions = useCallback((conversation: ConversationSummary) => {
@@ -434,17 +490,84 @@ export default function ChatsScreen() {
         );
       }
       const conversation = item.conversation;
+      const leftActions: SwipeAction[] =
+        conversation.hidden
+          ? [
+              {
+                key: 'show',
+                label: 'Afficher',
+                icon: Eye,
+                onPress: () => void applyPreferences(conversation, { hidden: false }),
+              },
+            ]
+          : conversation.unreadCount > 0
+          ? [
+              {
+                key: 'read',
+                label: 'Lu',
+                icon: CheckCheck,
+                onPress: () => void markConversationRead(conversation),
+              },
+            ]
+          : [
+              {
+                key: 'pin',
+                label: conversation.pinned ? 'Désépingler' : 'Épingler',
+                icon: conversation.pinned ? PinOff : Pin,
+                background: '#8e8e93',
+                onPress: () =>
+                  void applyPreferences(conversation, { pinned: !conversation.pinned }),
+              },
+            ];
+      const rightActions: SwipeAction[] = [
+        ...(conversation.hidden
+          ? []
+          : ([
+              {
+                key: 'hide',
+                label: 'Masquer',
+                icon: EyeOff,
+                background: '#8e8e93',
+                onPress: () => void applyPreferences(conversation, { hidden: true }),
+              },
+            ] satisfies SwipeAction[])),
+        {
+          key: 'delete',
+          label: 'Supprimer',
+          icon: Trash2,
+          background: '#e5484d',
+          onPress: () => setLeaveTarget(conversation),
+        },
+      ];
       return (
-        <ConversationRow
-          conversation={conversation}
-          currentUserId={user?.id ?? ''}
-          typing={typingMap[conversation.id] ?? null}
-          onPress={openConversation}
-          onLongPress={openConversationActions}
-        />
+        <SwipeableRow
+          open={openRowId === conversation.id}
+          onOpenChange={(next) =>
+            setOpenRowId((current) =>
+              next ? conversation.id : current === conversation.id ? null : current,
+            )
+          }
+          left={leftActions}
+          right={rightActions}>
+          <ConversationRow
+            conversation={conversation}
+            currentUserId={user?.id ?? ''}
+            typing={typingMap[conversation.id] ?? null}
+            onPress={openConversation}
+            onLongPress={openConversationActions}
+          />
+        </SwipeableRow>
       );
     },
-    [openConversation, openConversationActions, typingMap, user?.id],
+    [
+      applyPreferences,
+      markConversationRead,
+      openConversation,
+      openConversationActions,
+      openRowId,
+      typingMap,
+      user?.id,
+    ],
   );
 
   const listEmpty = useMemo(
@@ -458,6 +581,8 @@ export default function ChatsScreen() {
                 ? 'Tout est lu !'
                 : filter === 'groups'
                   ? 'Aucun groupe pour le moment.'
+                  : filter === 'hidden'
+                  ? 'Aucune discussion masquée.'
                   : 'Aucune conversation pour le moment.\nAppuie sur + pour commencer.'}
           </ThemedText>
         </ThemedView>
@@ -468,6 +593,46 @@ export default function ChatsScreen() {
   if (!token || !user) {
     return <Redirect href="/login" />;
   }
+
+  const blockTargetUser = blockTarget?.members.find((member) => member.id !== user?.id) ?? null;
+
+  const confirmBlock = useCallback(async () => {
+    if (!token || !blockTargetUser) {
+      return;
+    }
+    const blockedUserId = blockTargetUser.id;
+    setBlockTarget(null);
+    try {
+      await api.blockUser(token, blockedUserId);
+      setBlockedIds((previous) => new Set(previous).add(blockedUserId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Blocage impossible.');
+    }
+  }, [blockTargetUser, token]);
+
+  const unblockUser = useCallback(
+    async (userId: string) => {
+      if (!token) {
+        return;
+      }
+      try {
+        await api.unblockUser(token, userId);
+        setBlockedIds((previous) => {
+          const next = new Set(previous);
+          next.delete(userId);
+          return next;
+        });
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Déblocage impossible.');
+      }
+    },
+    [token],
+  );
+
+  const sheetOther =
+    actionTarget?.type === 'DIRECT'
+      ? (actionTarget.members.find((member) => member.id !== user?.id) ?? null)
+      : null;
 
   const sheetActions: SheetAction[] = actionTarget
     ? [
@@ -489,6 +654,7 @@ export default function ChatsScreen() {
                           name: other.displayName,
                           username: other.username,
                           avatar: other.avatarUrl ?? '',
+                          gender: other.gender ?? '',
                         },
                       });
                     }
@@ -564,6 +730,24 @@ export default function ChatsScreen() {
             setLeaveTarget(actionTarget);
           },
         },
+        ...(sheetOther
+          ? ([
+              {
+                key: blockedIds.has(sheetOther.id) ? 'unblock' : 'block',
+                label: blockedIds.has(sheetOther.id) ? 'Débloquer' : 'Bloquer',
+                icon: blockedIds.has(sheetOther.id) ? UserCheck : Ban,
+                destructive: !blockedIds.has(sheetOther.id),
+                onPress: () => {
+                  setActionTarget(null);
+                  if (blockedIds.has(sheetOther.id)) {
+                    void unblockUser(sheetOther.id);
+                  } else {
+                    setBlockTarget(actionTarget);
+                  }
+                },
+              },
+            ] satisfies SheetAction[])
+          : []),
       ]
     : [];
 
@@ -573,32 +757,15 @@ export default function ChatsScreen() {
         <ThemedView style={styles.header}>
           <ThemedView style={styles.headerTitleRow}>
             <ThemedText style={styles.brandTitle}>MboloChat</ThemedText>
-            {totalUnread > 0 ? (
-              <ThemedView style={styles.headerBadge}>
-                <ThemedText style={styles.headerBadgeText}>
-                  {totalUnread > 99 ? '99+' : totalUnread}
-                </ThemedText>
-              </ThemedView>
-            ) : null}
           </ThemedView>
           <ThemedView style={styles.headerActions}>
-            {totalUnread > 0 ? (
-              <Pressable
-                onPress={() => void markAllRead()}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Tout marquer comme lu"
-                style={({ pressed }) => pressed && styles.pressed}>
-                <CheckCheck size={22} color={theme.text} />
-              </Pressable>
-            ) : null}
             <Pressable
-              onPress={() => router.push('/profile')}
+              onPress={() => setHeaderMenu(true)}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel="Ouvrir mon profil"
+              accessibilityLabel="Actions"
               style={({ pressed }) => pressed && styles.pressed}>
-              <Avatar name={user.displayName} uri={user.avatarUrl} size={36} />
+              <Plus size={26} strokeWidth={2.2} color={theme.text} />
             </Pressable>
           </ThemedView>
         </ThemedView>
@@ -626,13 +793,73 @@ export default function ChatsScreen() {
           keyExtractor={listKeyExtractor}
           contentContainerStyle={filteredRows.length === 0 ? styles.emptyList : styles.listContent}
           keyboardShouldPersistTaps="handled"
+          onScroll={() => {
+            if (openRowId) setOpenRowId(null);
+          }}
           ItemSeparatorComponent={ConversationSeparator}
           ListEmptyComponent={listEmpty}
           renderItem={renderItem}
         />
 
         <ActionSheet
+          visible={headerMenu}
+          title="Actions"
+          actions={[
+            {
+              key: 'new',
+              label: 'Nouvelle discussion',
+              icon: Plus,
+              onPress: () => {
+                setHeaderMenu(false);
+                router.push('/new-chat');
+              },
+            },
+            {
+              key: 'profile',
+              label: 'Mon profil',
+              icon: UserRound,
+              onPress: () => {
+                setHeaderMenu(false);
+                router.push('/profile');
+              },
+            },
+            ...(totalUnread > 0
+              ? ([
+                  {
+                    key: 'readAll',
+                    label: 'Tout marquer comme lu',
+                    icon: CheckCheck,
+                    onPress: () => {
+                      setHeaderMenu(false);
+                      void markAllRead();
+                    },
+                  },
+                ] satisfies SheetAction[])
+              : []),
+          ]}
+          onClose={() => setHeaderMenu(false)}
+        />
+
+        <ActionSheet
+          visible={blockTarget !== null}
+          variant="center"
+          title={blockTargetUser ? `Bloquer ${blockTargetUser.displayName} ?` : 'Bloquer ?'}
+          subtitle="Cette personne ne pourra plus t’envoyer de messages."
+          actions={[
+            {
+              key: 'block',
+              label: 'Bloquer',
+              icon: Ban,
+              destructive: true,
+              onPress: () => void confirmBlock(),
+            },
+          ]}
+          onClose={() => setBlockTarget(null)}
+        />
+
+        <ActionSheet
           visible={actionTarget !== null}
+          variant="center"
           title={actionTarget ? conversationTitle(actionTarget, user.id) : undefined}
           subtitle={
             actionTarget
@@ -647,6 +874,7 @@ export default function ChatsScreen() {
 
         <ActionSheet
           visible={leaveTarget !== null}
+          variant="center"
           title={leaveTarget ? conversationTitle(leaveTarget, user.id) : undefined}
           subtitle={
             leaveTarget?.type === 'GROUP'
@@ -656,11 +884,6 @@ export default function ChatsScreen() {
           actions={
             leaveTarget
               ? [
-                  {
-                    key: 'cancel',
-                    label: 'Annuler',
-                    onPress: () => setLeaveTarget(null),
-                  },
                   {
                     key: 'confirm',
                     label:
@@ -680,17 +903,6 @@ export default function ChatsScreen() {
           onClose={() => setLeaveTarget(null)}
         />
 
-        <Pressable
-          onPress={() => router.push('/new-chat')}
-          accessibilityRole="button"
-          accessibilityLabel="Nouvelle discussion"
-          style={({ pressed }) => [
-            styles.fab,
-            { bottom: insets.bottom + Spacing.three },
-            pressed && styles.pressed,
-          ]}>
-          <Plus size={28} strokeWidth={2.4} color="#ffffff" />
-        </Pressable>
       </SafeAreaView>
     </ThemedView>
   );
@@ -715,20 +927,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-  },
-  headerBadge: {
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
-    paddingHorizontal: 6,
-    backgroundColor: accentColor,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerBadgeText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700',
   },
   brandTitle: {
     fontSize: 26,
@@ -780,22 +978,6 @@ const styles = StyleSheet.create({
     color: '#e5484d',
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.one,
-  },
-  fab: {
-    position: 'absolute',
-    right: Spacing.four,
-    bottom: Spacing.five,
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: accentColor,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000000',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 6,
   },
   backdrop: {
     flex: 1,
