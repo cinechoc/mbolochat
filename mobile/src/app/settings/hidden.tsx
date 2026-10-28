@@ -68,6 +68,10 @@ export default function HiddenConversationsScreen() {
           <ThemedView style={styles.group}>
             {conversations.map((conversation, index) => {
               const title = conversationTitle(conversation, user.id);
+              const isGroup = conversation.type === 'GROUP';
+              const other = isGroup
+                ? undefined
+                : conversation.members.find((member) => member.id !== user.id);
               return (
                 <Pressable
                   key={conversation.id}
@@ -80,7 +84,13 @@ export default function HiddenConversationsScreen() {
                     },
                     pressed ? { backgroundColor: '#e5e7eb' } : null,
                   ]}>
-                  <Avatar name={title} size={40} />
+                  <Avatar
+                    name={title}
+                    size={40}
+                    uri={isGroup ? null : other?.avatarUrl}
+                    gender={other?.gender}
+                    variant={isGroup ? 'group' : 'user'}
+                  />
                   <ThemedText style={styles.rowLabel} numberOfLines={1}>
                     {title}
                   </ThemedText>

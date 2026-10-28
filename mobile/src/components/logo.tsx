@@ -1,7 +1,7 @@
 import { Image, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
-// Source : le logo officiel de l'app (assets/images/icon.png)
-const logoSource = require('../../assets/images/icon.png') as number;
+// Version 256 px du logo officiel, suffisante pour les tailles d'interface.
+const logoSource = require('../../assets/images/logo-mark.png') as number;
 
 interface LogoMarkProps {
   size?: number;

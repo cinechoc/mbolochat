@@ -188,11 +188,17 @@ export default function NewChatScreen() {
                       name: item.displayName,
                       username: item.username,
                       avatar: item.avatarUrl ?? '',
+                      gender: item.gender ?? '',
                     },
                   })
                 }
                 hitSlop={6}>
-                <Avatar name={item.displayName} size={48} uri={item.avatarUrl} />
+                <Avatar
+                  name={item.displayName}
+                  size={48}
+                  uri={item.avatarUrl}
+                  gender={item.gender}
+                />
               </Pressable>
               <View style={styles.rowBody}>
                 <ThemedText style={styles.rowTitle}>{item.displayName}</ThemedText>

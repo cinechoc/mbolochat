@@ -78,7 +78,12 @@ export default function BlockedUsersScreen() {
                   },
                   pressed ? { backgroundColor: theme.backgroundSelected } : null,
                 ]}>
-                <Avatar name={item.displayName} uri={item.avatarUrl} size={40} />
+                <Avatar
+                  name={item.displayName}
+                  uri={item.avatarUrl}
+                  size={40}
+                  gender={item.gender}
+                />
                 <View style={styles.rowBody}>
                   <ThemedText style={styles.rowName}>{item.displayName}</ThemedText>
                 </View>

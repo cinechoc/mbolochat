@@ -171,7 +171,12 @@ export default function ConversationSettingsScreen() {
           keyExtractor={(m) => m.id}
           renderItem={({ item: m }) => (
             <ThemedView style={styles.memberRow}>
-              <Avatar name={m.displayName} uri={m.avatarUrl} size={40} />
+              <Avatar
+                name={m.displayName}
+                uri={m.avatarUrl}
+                size={40}
+                gender={m.gender}
+              />
               <ThemedView style={styles.memberBody}>
                 <ThemedText style={styles.memberName}>
                   {m.displayName}
@@ -216,7 +221,12 @@ export default function ConversationSettingsScreen() {
                 onPress={() => addMember(u)}
                 disabled={adding !== null}
                 style={({ pressed }) => [styles.resultRow, pressed && { opacity: 0.6 }]}>
-                <Avatar name={u.displayName} uri={u.avatarUrl} size={36} />
+                <Avatar
+                  name={u.displayName}
+                  uri={u.avatarUrl}
+                  size={36}
+                  gender={u.gender}
+                />
                 <ThemedView style={styles.memberBody}>
                   <ThemedText>{u.displayName}</ThemedText>
                 </ThemedView>

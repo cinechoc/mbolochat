@@ -32,7 +32,12 @@ export function ProfileHeader({
       <View style={styles.topRow}>
         <Pressable onPress={onPressAvatar} disabled={!onPressAvatar}>
           <View>
-            <Avatar name={profile.displayName} uri={profile.avatarUrl} size={86} />
+            <Avatar
+              name={profile.displayName}
+              uri={profile.avatarUrl}
+              size={86}
+              gender={profile.gender}
+            />
             {avatarBusy ? (
               <View style={[styles.avatarOverlay, { borderRadius: 43 }]}>
                 <ActivityIndicator color="#ffffff" />

@@ -1,6 +1,8 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import type { ComponentType, Ref } from 'react';
 
+import type { Gender } from './types';
+
 /**
  * Capacités audio : enregistrer et réécouter un message vocal.
  *
@@ -36,8 +38,9 @@ export interface VoiceBubbleProps {
   /** Durée connue avant le chargement du fichier, en millisecondes. */
   durationMs: number;
   mine: boolean;
-  /** Photo et nom de l'expéditeur, affichés sur le bouton de lecture. */
+  /** Photo, genre et nom de l'expéditeur, affichés sur le bouton de lecture. */
   avatarUrl?: string | null;
+  avatarGender?: Gender | null;
   senderName?: string;
   /** Appui long : menu du message (répondre, supprimer…). */
   onLongPress?: () => void;

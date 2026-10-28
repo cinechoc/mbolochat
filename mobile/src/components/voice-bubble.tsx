@@ -72,6 +72,7 @@ export function VoiceBubble({
   durationMs,
   mine,
   avatarUrl,
+  avatarGender,
   senderName,
   onLongPress,
 }: VoiceBubbleProps) {
@@ -293,7 +294,7 @@ export function VoiceBubble({
         style={styles.play}
         accessibilityRole="button"
         accessibilityLabel={status.playing ? 'Mettre en pause' : 'Écouter le message vocal'}>
-        <Avatar name={senderName ?? ''} uri={avatarUrl} size={36} />
+        <Avatar name={senderName ?? ''} uri={avatarUrl} size={36} gender={avatarGender} />
         <View style={styles.playBadge}>
           {status.playing ? (
             <Pause size={8} strokeWidth={3} color="#ffffff" fill="#ffffff" />
