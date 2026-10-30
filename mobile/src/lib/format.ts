@@ -4,6 +4,11 @@ export function conversationTitle(conversation: ConversationSummary, currentUser
   if (conversation.name) {
     return conversation.name;
   }
+  // Un groupe sans nom garde un titre stable : lister les membres changeait le
+  // titre à chaque arrivée ou départ.
+  if (conversation.type === 'GROUP') {
+    return 'Groupe';
+  }
   const others = conversation.members.filter((member) => member.id !== currentUserId);
   if (others.length === 0) {
     return 'Discussion';

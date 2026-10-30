@@ -87,6 +87,11 @@ export class CallsService implements OnModuleDestroy {
     this.callByUser.clear();
   }
 
+  /** Un appel 1:1 est déjà en cours pour cet utilisateur. */
+  isBusy(userId: string): boolean {
+    return this.callByUser.has(userId);
+  }
+
   async invite(
     callerId: string,
     conversationId: string | undefined,

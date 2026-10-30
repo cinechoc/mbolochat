@@ -69,6 +69,8 @@ const conversations = new Map<string, Entry<ConversationSummary>>();
 const conversationLists = new Map<string, Entry<ConversationSummary[]>>();
 const messages = new Map<string, Entry<Message[]>>();
 const profiles = new Map<string, Entry<UserProfile>>();
+/** Brouillons par conversation : survivent à la fermeture de l'écran. */
+const drafts = new Map<string, string>();
 
 /** Écritures groupées : on évite d'écrire sur le disque à chaque message. */
 const pendingWrites = new Map<string, string>();
@@ -134,6 +136,8 @@ export const cache = {
         }
       } else if (id.startsWith('messages:')) {
         messages.set(id.slice('messages:'.length), entry as Entry<Message[]>);
+      } else if (id.startsWith('draft:')) {
+        drafts.set(id.slice('draft:'.length), entry.value as string);
       } else if (id.startsWith('profiles:')) {
         profiles.set(id.slice('profiles:'.length), entry as Entry<UserProfile>);
       }
@@ -163,6 +167,49 @@ export const cache = {
   getConversationList(): ConversationSummary[] | null {
     const entry = conversationLists.get('list');
     return isUsable(entry) ? entry.value : null;
+  },
+
+  /** Met à jour une conversation partout : mémoire et liste persistée. */
+  patchConversation(conversation: ConversationSummary) {
+    conversations.set(conversation.id, { value: conversation, at: Date.now() });
+    const list = conversationLists.get('list');
+    if (list) {
+      cache.setConversationList(
+        list.value.map((entry) => (entry.id === conversation.id ? conversation : entry)),
+      );
+    }
+  },
+
+  /** Retire une conversation (exclusion d'un groupe) et son historique local. */
+  removeConversation(id: string) {
+    conversations.delete(id);
+    messages.delete(id);
+    const list = conversationLists.get('list');
+    if (list) {
+      cache.setConversationList(list.value.filter((entry) => entry.id !== id));
+    }
+    void safe((store) => store.multiRemove([`${PREFIX}messages:${id}`]), undefined);
+  },
+
+  /** Brouillon de saisie d'une conversation (vide s'il n'y en a pas). */
+  getDraft(conversationId: string): string {
+    return drafts.get(conversationId) ?? '';
+  },
+
+  setDraft(conversationId: string, text: string) {
+    const key = `${PREFIX}draft:${conversationId}`;
+    if (!text.trim()) {
+      drafts.delete(conversationId);
+      void safe((store) => store.multiRemove([key]), undefined);
+      return;
+    }
+    drafts.set(conversationId, text);
+    scheduleWrite(key, JSON.stringify({ value: text, at: Date.now() }));
+  },
+
+  clearDraft(conversationId: string) {
+    drafts.delete(conversationId);
+    void safe((store) => store.multiRemove([`${PREFIX}draft:${conversationId}`]), undefined);
   },
 
   setMessages(conversationId: string, list: Message[]) {

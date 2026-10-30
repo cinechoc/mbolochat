@@ -1,5 +1,7 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notExists, or, sql } from 'drizzle-orm';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, isNull, lt, ne, notExists, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { DRIZZLE, type Database } from '../db/db.module.js';
 import {
@@ -7,6 +9,7 @@ import {
   conversationMembers,
   conversations,
   messageHides,
+  messageReactions,
   messageReceipts,
   messages,
   users,
@@ -16,6 +19,12 @@ import { UploadsService } from '../uploads/uploads.service.js';
 import { UsersService } from '../users/users.service.js';
 import type { StickerAttachmentMeta } from '../chat/sticker-attachment.js';
 import { isValidStickerRef, isMessageType, type MessageType } from '../chat/sticker-ref.js';
+import {
+  isPantherReaction,
+  type ReactionSummary,
+} from '../chat/reactions.js';
+import { ConversationEventsService } from './conversation-events.service.js';
+import { MAX_GROUP_MEMBERS } from './group-limits.js';
 
 export interface SenderInfo {
   id: string;
@@ -59,6 +68,8 @@ export interface MessageDto {
   deleted: boolean;
   /** Citation d'une réponse, null pour un message simple. */
   replyTo: MessageQuoteDto | null;
+  /** Réactions emoji agrégées, dans l'ordre d'affichage. */
+  reactions: ReactionSummary[];
   createdAt: Date;
   sender: SenderInfo;
 }
@@ -69,6 +80,36 @@ export interface ReceiptDto {
   userId: string;
   deliveredAt: Date | null;
   readAt: Date | null;
+}
+
+/** Média partagé dans une conversation (photo, vidéo, document…). */
+export interface ConversationMediaItem {
+  messageId: string;
+  type: MessageAttachment['type'];
+  url: string;
+  mime: string;
+  name: string | null;
+  width?: number;
+  height?: number;
+  duration?: number;
+  createdAt: Date;
+  senderName: string;
+}
+
+/** Lien repéré dans le texte d'un message. */
+export interface ConversationLinkItem {
+  messageId: string;
+  url: string;
+  createdAt: Date;
+  senderName: string;
+}
+
+/** Résultat de recherche dans l'historique d'une conversation. */
+export interface ConversationSearchHit {
+  messageId: string;
+  content: string;
+  createdAt: Date;
+  senderName: string;
 }
 
 /** Accusé nouvellement apparu, avec de quoi prévenir l'expéditeur. */
@@ -107,7 +148,20 @@ export interface ConversationSummary {
   id: string;
   type: 'DIRECT' | 'GROUP';
   name: string | null;
+  /** Photo du groupe (chemin de stockage signé à la sortie de l'API). */
+  avatarUrl: string | null;
+  /** Identité de repli quand le groupe n'a pas de photo. */
+  emoji: string | null;
+  color: string | null;
+  description: string | null;
+  /** Créateur du groupe : badge propriétaire. */
+  ownerId: string | null;
+  /** Qui peut écrire dans le groupe (DIRECT : « all »). */
+  whoCanSend: 'all' | 'admins';
+  /** Qui peut ajouter des membres (DIRECT : « all »). */
+  whoCanAdd: 'all' | 'admins';
   createdAt: Date;
+  updatedAt: Date;
   members: MemberInfo[];
   lastMessage: (Omit<MessageDto, 'conversationId'> & { conversationId: string }) | null;
   unreadCount: number;
@@ -123,6 +177,33 @@ export interface ConversationSummary {
   blockedByMe: boolean;
   /** L'autre membre m'a bloqué : la saisie est désactivée (direct uniquement). */
   blockedByThem: boolean;
+}
+
+/** État complet d'un groupe, à diffuser en temps réel. */
+export interface GroupState {
+  id: string;
+  type: 'DIRECT' | 'GROUP';
+  name: string | null;
+  avatarUrl: string | null;
+  emoji: string | null;
+  color: string | null;
+  description: string | null;
+  ownerId: string | null;
+  whoCanSend: 'all' | 'admins';
+  whoCanAdd: 'all' | 'admins';
+  updatedAt: Date;
+  memberCount: number;
+  members: MemberInfo[];
+}
+
+/** Champs d'identité modifiables d'un groupe. */
+export interface GroupIdentityInput {
+  name?: string;
+  description?: string;
+  emoji?: string;
+  color?: string;
+  whoCanSend?: 'all' | 'admins';
+  whoCanAdd?: 'all' | 'admins';
 }
 
 export interface ListMessagesOptions {
@@ -149,7 +230,13 @@ function messageTypeOf(type: string): MessageType {
   if (type === 'sticker') {
     return 'sticker';
   }
-  return type === 'call' ? 'call' : 'text';
+  if (type === 'call') {
+    return 'call';
+  }
+  if (type === 'system') {
+    return 'system';
+  }
+  return 'text';
 }
 
 /** Passé ce délai, un message ne se retire plus que pour soi. */
@@ -223,7 +310,7 @@ function toQuoteDto(row: MessageRow): MessageQuoteDto | null {
   };
 }
 
-function toMessageDto(row: MessageRow): MessageDto {
+function toMessageDto(row: MessageRow, reactions: ReactionSummary[] = []): MessageDto {
   const deleted = row.deletedAt !== null;
   return {
     id: row.id,
@@ -236,6 +323,7 @@ function toMessageDto(row: MessageRow): MessageDto {
     clientId: row.clientId ?? null,
     deleted,
     replyTo: toQuoteDto(row),
+    reactions,
     createdAt: row.createdAt,
     sender: {
       id: row.senderId,
@@ -253,6 +341,7 @@ export class ConversationsService {
     @Inject(DRIZZLE) private readonly db: Database,
     private readonly usersService: UsersService,
     private readonly uploadsService: UploadsService,
+    private readonly events: ConversationEventsService,
   ) {}
 
   async listMemberIds(conversationId: string): Promise<string[]> {
@@ -277,7 +366,19 @@ export class ConversationsService {
     return Boolean(row);
   }
 
-  async create(currentUserId: string, memberIds: string[], type?: 'DIRECT' | 'GROUP', name?: string): Promise<ConversationSummary> {
+  async create(
+    currentUserId: string,
+    memberIds: string[],
+    type?: 'DIRECT' | 'GROUP',
+    name?: string,
+    identity: {
+      emoji?: string;
+      color?: string;
+      description?: string;
+      whoCanSend?: 'all' | 'admins';
+      whoCanAdd?: 'all' | 'admins';
+    } = {},
+  ): Promise<ConversationSummary> {
     const otherMemberIds = [...new Set(memberIds)].filter((id) => id !== currentUserId);
     if (otherMemberIds.length === 0) {
       throw new BadRequestException('At least one other member is required');
@@ -294,6 +395,12 @@ export class ConversationsService {
       }
     }
 
+    if (resolvedType === 'GROUP' && otherMemberIds.length + 1 > MAX_GROUP_MEMBERS) {
+      throw new BadRequestException(
+        `Un groupe est limité à ${MAX_GROUP_MEMBERS} membres`,
+      );
+    }
+
     const found = await this.db
       .select({ id: users.id })
       .from(users)
@@ -304,7 +411,17 @@ export class ConversationsService {
 
     const [conversation] = await this.db
       .insert(conversations)
-      .values({ type: resolvedType, name: resolvedType === 'GROUP' ? (name ?? null) : null })
+      .values({
+        type: resolvedType,
+        name: resolvedType === 'GROUP' ? (name ?? null) : null,
+        ownerId: resolvedType === 'GROUP' ? currentUserId : null,
+        emoji: resolvedType === 'GROUP' ? (identity.emoji?.trim() || null) : null,
+        color: resolvedType === 'GROUP' ? (identity.color?.trim() || null) : null,
+        description:
+          resolvedType === 'GROUP' ? (identity.description?.trim() || null) : null,
+        sendPermission: identity.whoCanSend === 'admins' ? 'admins' : 'all',
+        addPermission: identity.whoCanAdd === 'admins' ? 'admins' : 'all',
+      })
       .returning();
 
     await this.db.insert(conversationMembers).values(
@@ -315,6 +432,20 @@ export class ConversationsService {
         role: userId === currentUserId ? ('admin' as const) : ('member' as const),
       })),
     );
+
+    if (resolvedType === 'GROUP') {
+      this.events.publish({
+        kind: 'created',
+        conversationId: conversation.id,
+        userIds: otherMemberIds,
+      });
+      const creator = await this.usersService.getByIdOrThrow(currentUserId);
+      await this.postSystemMessage(
+        conversation.id,
+        currentUserId,
+        `${creator.displayName} a créé le groupe « ${name?.trim() || 'Groupe'} »`,
+      );
+    }
 
     return this.getSummaryForUser(conversation.id, currentUserId);
   }
@@ -381,7 +512,7 @@ export class ConversationsService {
         and(
           sql`${messages.senderId} <> ${userId} AND (${conversationMembers.lastReadAt} IS NULL OR ${messages.createdAt} > ${conversationMembers.lastReadAt})`,
           // Un message système d'appel n'est pas un message non lu.
-          sql`${messages.type} <> 'call'`,
+          sql`${messages.type} not in ('call', 'system')`,
           // Un message que j'ai supprimé pour moi ne doit plus compter.
           this.hiddenFrom(userId),
         ),
@@ -421,7 +552,7 @@ export class ConversationsService {
       myBlockRows.filter((row) => row.blockedId === userId).map((row) => row.blockerId),
     );
 
-    const summaries = conversationRows.map((conversation) => {
+    const summaries = conversationRows.map((conversation): ConversationSummary => {
       const preferences = preferenceMap.get(conversation.id);
       const otherId =
         conversation.type === 'DIRECT'
@@ -433,7 +564,15 @@ export class ConversationsService {
         id: conversation.id,
         type: conversation.type,
         name: conversation.name,
+        avatarUrl: conversation.avatarUrl ?? null,
+        emoji: conversation.emoji ?? null,
+        color: conversation.color ?? null,
+        description: conversation.description ?? null,
+        ownerId: conversation.ownerId ?? null,
+        whoCanSend: conversation.sendPermission === 'admins' ? 'admins' : 'all',
+        whoCanAdd: conversation.addPermission === 'admins' ? 'admins' : 'all',
         createdAt: conversation.createdAt,
+        updatedAt: conversation.updatedAt,
         members: memberRows
           .filter((member) => member.conversationId === conversation.id)
           .map(({ id, username, displayName, avatarUrl, gender, lastReadAt, role }) => ({
@@ -523,9 +662,8 @@ export class ConversationsService {
   }
 
   /**
-   * Uniquement les administrateurs renomment, invitent ou excluent. Sans cette
-   * garde, le moindre membre pouvait rebaptiser la discussion de tout le monde ou
-   * en vider les autres.
+   * Seuls les administrateurs modifient l'identité du groupe, changent les rôles
+   * ou excluent. Inviter et ajouter restent ouverts à tous les membres.
    */
   private async requireAdmin(conversationId: string, userId: string): Promise<void> {
     if ((await this.roleOf(conversationId, userId)) !== 'admin') {
@@ -533,37 +671,282 @@ export class ConversationsService {
     }
   }
 
-  async rename(conversationId: string, userId: string, name: string): Promise<ConversationSummary> {
+  /** Charge la conversation et refuse tout ce qui n'est pas un groupe. */
+  private async requireGroup(conversationId: string) {
     const [conversation] = await this.db
-      .select({ type: conversations.type })
+      .select()
       .from(conversations)
       .where(eq(conversations.id, conversationId))
       .limit(1);
     if (!conversation) {
       throw new NotFoundException('Conversation not found');
     }
-    // Une discussion à deux n'a pas de titre à soi : elle porte le nom de
-    // l'autre personne, et personne ne peut l'imposer à l'autre.
     if (conversation.type === 'DIRECT') {
-      throw new BadRequestException('Une discussion directe ne se renomme pas');
+      throw new BadRequestException('Une discussion directe ne se modifie pas comme un groupe');
     }
+    return conversation;
+  }
+
+  async updateGroup(
+    conversationId: string,
+    userId: string,
+    input: GroupIdentityInput,
+  ): Promise<ConversationSummary> {
+    const conversation = await this.requireGroup(conversationId);
     await this.requireAdmin(conversationId, userId);
-    await this.db.update(conversations).set({ name: name.trim() || null }).where(eq(conversations.id, conversationId));
+
+    const values: Partial<typeof conversations.$inferInsert> = { updatedAt: new Date() };
+    if (input.name !== undefined) {
+      values.name = input.name.trim() || null;
+    }
+    if (input.description !== undefined) {
+      values.description = input.description.trim() || null;
+    }
+    if (input.emoji !== undefined) {
+      values.emoji = input.emoji.trim() || null;
+    }
+    if (input.color !== undefined) {
+      values.color = input.color.trim().toLowerCase() || null;
+    }
+    if (input.whoCanSend !== undefined) {
+      values.sendPermission = input.whoCanSend;
+    }
+    if (input.whoCanAdd !== undefined) {
+      values.addPermission = input.whoCanAdd;
+    }
+    await this.db
+      .update(conversations)
+      .set(values)
+      .where(eq(conversations.id, conversation.id));
+
+    this.events.publish({ kind: 'updated', conversationId, actorId: userId });
     return this.getSummaryForUser(conversationId, userId);
   }
 
-  async addMembers(conversationId: string, userId: string, memberIds: string[]): Promise<ConversationSummary> {
+  /** Photo du groupe : même stockage disque que les avatars utilisateurs. */
+  async uploadPhoto(
+    conversationId: string,
+    userId: string,
+    data: string,
+    mimeType = 'image/jpeg',
+  ): Promise<ConversationSummary> {
+    await this.requireGroup(conversationId);
     await this.requireAdmin(conversationId, userId);
+
+    const extensions: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/jpg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+    };
+    const ext = extensions[mimeType.toLowerCase()];
+    if (!ext) {
+      throw new BadRequestException('Format d’image non pris en charge');
+    }
+    const buffer = Buffer.from(data, 'base64');
+    if (buffer.length === 0) {
+      throw new BadRequestException('Image vide');
+    }
+    if (buffer.length > 2 * 1024 * 1024) {
+      throw new BadRequestException('Image trop lourde (max 2 Mo)');
+    }
+
+    const dir = join(process.cwd(), 'uploads');
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    const base = `group-${conversationId}`;
+    // Une extension différente laisserait l'ancien fichier orphelin et servi.
+    for (const other of ['jpg', 'png', 'webp']) {
+      if (other !== ext) {
+        rmSync(join(dir, `${base}.${other}`), { force: true });
+      }
+    }
+    await new Promise<void>((resolve, reject) => {
+      const stream = createWriteStream(join(dir, `${base}.${ext}`));
+      stream.on('error', reject);
+      stream.on('finish', () => resolve());
+      stream.end(buffer);
+    });
+
+    const url = `/uploads/${base}.${ext}?v=${Date.now()}`;
+    await this.db
+      .update(conversations)
+      .set({ avatarUrl: url, updatedAt: new Date() })
+      .where(eq(conversations.id, conversationId));
+
+    this.events.publish({ kind: 'updated', conversationId, actorId: userId });
+    return this.getSummaryForUser(conversationId, userId);
+  }
+
+  async deletePhoto(conversationId: string, userId: string): Promise<ConversationSummary> {
+    await this.requireGroup(conversationId);
+    await this.requireAdmin(conversationId, userId);
+
+    const dir = join(process.cwd(), 'uploads');
+    for (const ext of ['jpg', 'png', 'webp']) {
+      rmSync(join(dir, `group-${conversationId}.${ext}`), { force: true });
+    }
+    await this.db
+      .update(conversations)
+      .set({ avatarUrl: null, updatedAt: new Date() })
+      .where(eq(conversations.id, conversationId));
+
+    this.events.publish({ kind: 'updated', conversationId, actorId: userId });
+    return this.getSummaryForUser(conversationId, userId);
+  }
+
+  /** Promotion ou rétrogradation d'un membre. */
+  async updateMemberRole(
+    conversationId: string,
+    requesterId: string,
+    targetUserId: string,
+    role: 'admin' | 'member',
+  ): Promise<ConversationSummary> {
+    const conversation = await this.requireGroup(conversationId);
+    await this.requireAdmin(conversationId, requesterId);
+
+    const [target] = await this.db
+      .select({ role: conversationMembers.role })
+      .from(conversationMembers)
+      .where(
+        and(
+          eq(conversationMembers.conversationId, conversationId),
+          eq(conversationMembers.userId, targetUserId),
+        ),
+      )
+      .limit(1);
+    if (!target) {
+      throw new NotFoundException('Membre introuvable');
+    }
+
+    if (role === 'member' && target.role === 'admin') {
+      if (conversation.ownerId === targetUserId) {
+        throw new ForbiddenException('Le propriétaire du groupe ne peut pas être rétrogradé');
+      }
+      const admins = await this.db
+        .select({ userId: conversationMembers.userId })
+        .from(conversationMembers)
+        .where(
+          and(
+            eq(conversationMembers.conversationId, conversationId),
+            eq(conversationMembers.role, 'admin'),
+          ),
+        );
+      if (admins.length <= 1) {
+        throw new ConflictException('Il doit rester au moins un administrateur');
+      }
+    }
+
+    if (target.role !== role) {
+      await this.db
+        .update(conversationMembers)
+        .set({ role })
+        .where(
+          and(
+            eq(conversationMembers.conversationId, conversationId),
+            eq(conversationMembers.userId, targetUserId),
+          ),
+        );
+      await this.db
+        .update(conversations)
+        .set({ updatedAt: new Date() })
+        .where(eq(conversations.id, conversationId));
+      this.events.publish({
+        kind: 'members',
+        conversationId,
+        actorId: requesterId,
+        action: 'role',
+        userIds: [targetUserId],
+      });
+    }
+
+    return this.getSummaryForUser(conversationId, requesterId);
+  }
+
+  /**
+   * Ajout de membres : ouvert à tout membre du groupe (comportement Snapchat),
+   * dans la limite du plafond. Le verrou de ligne sérialise les ajouts
+   * concurrents pour que deux invités ne fassent pas sauter le plafond ensemble.
+   */
+  async addMembers(conversationId: string, userId: string, memberIds: string[]): Promise<ConversationSummary> {
+    if (!(await this.isMember(conversationId, userId))) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+    const group = await this.requireGroup(conversationId);
+    if (
+      group.addPermission === 'admins' &&
+      (await this.roleOf(conversationId, userId)) !== 'admin'
+    ) {
+      throw new ForbiddenException(
+        'Seuls les administrateurs peuvent ajouter des membres',
+      );
+    }
+
     const ids = [...new Set(memberIds)].filter((id) => id !== userId);
-    if (ids.length === 0) return this.getSummaryForUser(conversationId, userId);
+    if (ids.length === 0) {
+      return this.getSummaryForUser(conversationId, userId);
+    }
     const found = await this.db.select({ id: users.id }).from(users).where(inArray(users.id, ids));
     if (found.length !== ids.length) {
       throw new BadRequestException('One or more member ids are invalid');
     }
-    await this.db
-      .insert(conversationMembers)
-      .values(ids.map((mid) => ({ conversationId, userId: mid })))
-      .onConflictDoNothing();
+
+    const added = await this.db.transaction(async (tx) => {
+      await tx.execute(sql`select id from conversations where id = ${conversationId} for update`);
+      const [countRow] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(conversationMembers)
+        .where(eq(conversationMembers.conversationId, conversationId));
+      const existing = await tx
+        .select({ userId: conversationMembers.userId })
+        .from(conversationMembers)
+        .where(
+          and(
+            eq(conversationMembers.conversationId, conversationId),
+            inArray(conversationMembers.userId, ids),
+          ),
+        );
+      const already = new Set(existing.map((row) => row.userId));
+      const fresh = ids.filter((id) => !already.has(id));
+      if (Number(countRow?.count ?? 0) + fresh.length > MAX_GROUP_MEMBERS) {
+        throw new ConflictException(`Groupe complet (${MAX_GROUP_MEMBERS} membres maximum)`);
+      }
+      if (fresh.length > 0) {
+        await tx
+          .insert(conversationMembers)
+          .values(fresh.map((mid) => ({ conversationId, userId: mid })))
+          .onConflictDoNothing();
+      }
+      return fresh;
+    });
+
+    if (added.length > 0) {
+      await this.db
+        .update(conversations)
+        .set({ updatedAt: new Date() })
+        .where(eq(conversations.id, conversationId));
+      this.events.publish({
+        kind: 'members',
+        conversationId,
+        actorId: userId,
+        action: 'added',
+        userIds: added,
+      });
+      const actor = await this.usersService.getByIdOrThrow(userId);
+      const addedUsers = await this.db
+        .select({ displayName: users.displayName })
+        .from(users)
+        .where(inArray(users.id, added));
+      const names = addedUsers.map((entry) => entry.displayName).join(', ');
+      if (names) {
+        await this.postSystemMessage(
+          conversationId,
+          userId,
+          `${actor.displayName} a ajouté ${names}`,
+        );
+      }
+    }
     return this.getSummaryForUser(conversationId, userId);
   }
 
@@ -576,6 +959,16 @@ export class ConversationsService {
     if (targetUserId !== requesterId && role !== 'admin') {
       throw new ForbiddenException('Seuls les administrateurs peuvent exclure un membre');
     }
+    if (!(await this.roleOf(conversationId, targetUserId))) {
+      throw new NotFoundException('Membre introuvable');
+    }
+
+    const [conversation] = await this.db
+      .select({ type: conversations.type, ownerId: conversations.ownerId })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+
     await this.db
       .delete(conversationMembers)
       .where(
@@ -588,17 +981,19 @@ export class ConversationsService {
     // Un groupe sans administrateur ne serait plus administrable du tout : on en
     // désigne un, à défaut le plus ancien membre restant.
     const remaining = await this.db
-      .select({ userId: conversationMembers.userId, role: conversationMembers.role })
+      .select({
+        userId: conversationMembers.userId,
+        role: conversationMembers.role,
+        joinedAt: conversationMembers.joinedAt,
+      })
       .from(conversationMembers)
-      .where(eq(conversationMembers.conversationId, conversationId));
-    if (remaining.length > 0 && !remaining.some((member) => member.role === 'admin')) {
-      const [heir] = await this.db
-        .select({ userId: conversationMembers.userId })
-        .from(conversationMembers)
-        .where(eq(conversationMembers.conversationId, conversationId))
-        .orderBy(asc(conversationMembers.joinedAt))
-        .limit(1);
-      if (heir) {
+      .where(eq(conversationMembers.conversationId, conversationId))
+      .orderBy(asc(conversationMembers.joinedAt));
+
+    if (conversation?.type === 'GROUP' && remaining.length > 0) {
+      let admins = remaining.filter((member) => member.role === 'admin');
+      if (admins.length === 0) {
+        const heir = remaining[0];
         await this.db
           .update(conversationMembers)
           .set({ role: 'admin' })
@@ -608,8 +1003,127 @@ export class ConversationsService {
               eq(conversationMembers.userId, heir.userId),
             ),
           );
+        admins = [{ ...heir, role: 'admin' }];
+      }
+      // Le propriétaire part : la propriété revient au plus ancien admin.
+      if (conversation.ownerId === targetUserId) {
+        await this.db
+          .update(conversations)
+          .set({ ownerId: admins[0]?.userId ?? remaining[0].userId, updatedAt: new Date() })
+          .where(eq(conversations.id, conversationId));
+      } else {
+        await this.db
+          .update(conversations)
+          .set({ updatedAt: new Date() })
+          .where(eq(conversations.id, conversationId));
+      }
+    } else if (conversation) {
+      await this.db
+        .update(conversations)
+        .set({ updatedAt: new Date() })
+        .where(eq(conversations.id, conversationId));
+    }
+
+    if (conversation?.type === 'GROUP') {
+      this.events.publish({
+        kind: 'members',
+        conversationId,
+        actorId: requesterId,
+        action: targetUserId === requesterId ? 'left' : 'removed',
+        userIds: [targetUserId],
+      });
+      if (remaining.length > 0) {
+        const targetUser = await this.usersService.getByIdOrThrow(targetUserId);
+        const content =
+          targetUserId === requesterId
+            ? `${targetUser.displayName} a quitté le groupe`
+            : `${targetUser.displayName} a été retiré par ${
+                (await this.usersService.getByIdOrThrow(requesterId)).displayName
+              }`;
+        await this.postSystemMessage(conversationId, requesterId, content);
       }
     }
+  }
+
+  /** État complet d'un groupe (identité + membres), pour le temps réel. */
+  async groupState(conversationId: string): Promise<GroupState> {
+    const [conversation] = await this.db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+    const members = await this.db
+      .select({
+        id: users.id,
+        username: users.username,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+        gender: users.gender,
+        lastReadAt: conversationMembers.lastReadAt,
+        role: conversationMembers.role,
+      })
+      .from(conversationMembers)
+      .innerJoin(users, eq(users.id, conversationMembers.userId))
+      .where(eq(conversationMembers.conversationId, conversationId))
+      .orderBy(asc(conversationMembers.joinedAt));
+
+    return {
+      id: conversation.id,
+      type: conversation.type,
+      name: conversation.name,
+      avatarUrl: conversation.avatarUrl ?? null,
+      emoji: conversation.emoji ?? null,
+      color: conversation.color ?? null,
+      description: conversation.description ?? null,
+      ownerId: conversation.ownerId ?? null,
+      whoCanSend: conversation.sendPermission === 'admins' ? 'admins' : 'all',
+      whoCanAdd: conversation.addPermission === 'admins' ? 'admins' : 'all',
+      updatedAt: conversation.updatedAt,
+      memberCount: members.length,
+      members,
+    };
+  }
+
+
+  /**
+   * Message système (création, ajout, départ…). Il n'est jamais envoyé par un
+   * client : le serveur l'insère et le diffuse comme un message normal.
+   */
+  async postSystemMessage(
+    conversationId: string,
+    actorId: string,
+    content: string,
+  ): Promise<MessageDto> {
+    const [stored] = await this.db
+      .insert(messages)
+      .values({ conversationId, senderId: actorId, content, type: 'system' })
+      .returning();
+    const sender = await this.usersService.getByIdOrThrow(actorId);
+    const message: MessageDto = {
+      id: stored.id,
+      conversationId,
+      type: 'system',
+      content,
+      stickerRef: null,
+      attachment: null,
+      clientId: null,
+      deleted: false,
+      replyTo: null,
+      reactions: [],
+      createdAt: stored.createdAt,
+      sender: {
+        id: sender.id,
+        username: sender.username,
+        displayName: sender.displayName,
+        avatarUrl: sender.avatarUrl ?? null,
+        gender: sender.gender ?? null,
+      },
+    };
+    this.events.publish({ kind: 'message', conversationId, actorId, message });
+    return message;
   }
 
   async getSummaryForUser(conversationId: string, userId: string): Promise<ConversationSummary> {
@@ -644,6 +1158,99 @@ export class ConversationsService {
     );
   }
 
+  /** Réactions de plusieurs messages, agrégées pour un lecteur donné. */
+  private async reactionsFor(
+    messageIds: string[],
+    userId: string,
+  ): Promise<Map<string, ReactionSummary[]>> {
+    const map = new Map<string, ReactionSummary[]>();
+    if (messageIds.length === 0) {
+      return map;
+    }
+    const rows = await this.db
+      .select({
+        messageId: messageReactions.messageId,
+        reaction: messageReactions.reaction,
+        userId: messageReactions.userId,
+      })
+      .from(messageReactions)
+      .where(inArray(messageReactions.messageId, messageIds));
+
+    const perMessage = new Map<string, Map<string, { count: number; mine: boolean }>>();
+    for (const row of rows) {
+      let byReaction = perMessage.get(row.messageId);
+      if (!byReaction) {
+        byReaction = new Map();
+        perMessage.set(row.messageId, byReaction);
+      }
+      const entry = byReaction.get(row.reaction) ?? { count: 0, mine: false };
+      entry.count += 1;
+      if (row.userId === userId) {
+        entry.mine = true;
+      }
+      byReaction.set(row.reaction, entry);
+    }
+
+    for (const [messageId, byReaction] of perMessage) {
+      map.set(
+        messageId,
+        [...byReaction.entries()]
+          .map(([reaction, info]) => ({ reaction, count: info.count, mine: info.mine }))
+          .sort((a, b) => b.count - a.count || a.reaction.localeCompare(b.reaction)),
+      );
+    }
+    return map;
+  }
+
+  /**
+   * Ajoute ou retire une réaction. Le retour est le résumé complet du message,
+   * pour que tous les appareils affichent le même état.
+   */
+  async toggleReaction(
+    conversationId: string,
+    messageId: string,
+    userId: string,
+    reaction: string,
+  ): Promise<ReactionSummary[]> {
+    if (!isPantherReaction(reaction)) {
+      throw new BadRequestException('Réaction invalide');
+    }
+    if (!(await this.isMember(conversationId, userId))) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+    const [message] = await this.db
+      .select({ id: messages.id, deletedAt: messages.deletedAt })
+      .from(messages)
+      .where(and(eq(messages.id, messageId), eq(messages.conversationId, conversationId)))
+      .limit(1);
+    if (!message) {
+      throw new NotFoundException('Message introuvable');
+    }
+    if (message.deletedAt) {
+      throw new BadRequestException('Message supprimé');
+    }
+
+    const inserted = await this.db
+      .insert(messageReactions)
+      .values({ messageId, userId, reaction })
+      .onConflictDoNothing()
+      .returning({ messageId: messageReactions.messageId });
+    if (inserted.length === 0) {
+      await this.db
+        .delete(messageReactions)
+        .where(
+          and(
+            eq(messageReactions.messageId, messageId),
+            eq(messageReactions.userId, userId),
+            eq(messageReactions.reaction, reaction),
+          ),
+        );
+    }
+
+    const summaries = await this.reactionsFor([messageId], userId);
+    return summaries.get(messageId) ?? [];
+  }
+
   async listMessages(
     conversationId: string,
     userId: string,
@@ -669,7 +1276,12 @@ export class ConversationsService {
       .orderBy(backwards ? desc(messages.createdAt) : asc(messages.createdAt))
       .limit(limit);
 
-    return (backwards ? rows.reverse() : rows).map(toMessageDto);
+    const ordered = backwards ? rows.reverse() : rows;
+    const reactions = await this.reactionsFor(
+      ordered.map((row) => row.id),
+      userId,
+    );
+    return ordered.map((row) => toMessageDto(row, reactions.get(row.id) ?? []));
   }
 
   /**
@@ -692,13 +1304,153 @@ export class ConversationsService {
       .where(and(gt(messages.createdAt, since), this.hiddenFrom(userId)))
       .orderBy(asc(messages.createdAt))
       .limit(Math.min(Math.max(limit, 1), 500));
-    return rows.map(toMessageDto);
+    const reactions = await this.reactionsFor(
+      rows.map((row) => row.id),
+      userId,
+    );
+    return rows.map((row) => toMessageDto(row, reactions.get(row.id) ?? []));
   }
 
   /**
    * Accusés de réception des messages envoyés par `requesterId` dans cette
    * conversation. Comme WhatsApp, seul l'expéditeur voit qui a reçu et lu.
    */
+  /**
+   * Médias et liens d'une conversation. Les pièces jointes sont lues dans
+   * l'historique (limité) ; les liens sont extraits des messages texte récents,
+   * sans doublon.
+   */
+  async listMedia(
+    conversationId: string,
+    userId: string,
+    limit = 60,
+  ): Promise<{ attachments: ConversationMediaItem[]; links: ConversationLinkItem[] }> {
+    if (!(await this.isMember(conversationId, userId))) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+    const capped = Math.min(Math.max(limit, 1), 100);
+
+    const attachmentRows = await this.db
+      .select({
+        messageId: messages.id,
+        attachment: messages.attachment,
+        createdAt: messages.createdAt,
+        senderName: users.displayName,
+      })
+      .from(messages)
+      .innerJoin(users, eq(users.id, messages.senderId))
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          isNull(messages.deletedAt),
+          isNotNull(messages.attachment),
+          this.hiddenFrom(userId),
+        ),
+      )
+      .orderBy(desc(messages.createdAt))
+      .limit(capped);
+
+    const attachments: ConversationMediaItem[] = [];
+    for (const row of attachmentRows) {
+      const attachment = row.attachment;
+      if (!attachment) continue;
+      attachments.push({
+        messageId: row.messageId,
+        type: attachment.type,
+        url: attachment.url,
+        mime: attachment.mime,
+        name: attachment.name ?? null,
+        width: attachment.width,
+        height: attachment.height,
+        duration: attachment.duration,
+        createdAt: row.createdAt,
+        senderName: row.senderName,
+      });
+    }
+
+    const textRows = await this.db
+      .select({
+        messageId: messages.id,
+        content: messages.content,
+        createdAt: messages.createdAt,
+        senderName: users.displayName,
+      })
+      .from(messages)
+      .innerJoin(users, eq(users.id, messages.senderId))
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          isNull(messages.deletedAt),
+          eq(messages.type, 'text'),
+          this.hiddenFrom(userId),
+        ),
+      )
+      .orderBy(desc(messages.createdAt))
+      .limit(200);
+
+    const seen = new Set<string>();
+    const links: ConversationLinkItem[] = [];
+    for (const row of textRows) {
+      const match = /https?:\/\/[^\s<>"']+/i.exec(row.content);
+      if (!match) continue;
+      const url = match[0].replace(/[.,);!?]+$/, '');
+      if (seen.has(url)) continue;
+      seen.add(url);
+      links.push({
+        messageId: row.messageId,
+        url,
+        createdAt: row.createdAt,
+        senderName: row.senderName,
+      });
+      if (links.length >= 50) break;
+    }
+
+    return { attachments, links };
+  }
+
+  /** Recherche plein texte simple dans l'historique de la conversation. */
+  async searchMessages(
+    conversationId: string,
+    userId: string,
+    query: string,
+    limit = 50,
+  ): Promise<ConversationSearchHit[]> {
+    if (!(await this.isMember(conversationId, userId))) {
+      throw new ForbiddenException('You are not a member of this conversation');
+    }
+    const term = query.trim();
+    if (term.length === 0) {
+      return [];
+    }
+    const escaped = term.replace(/[\\%_]/g, (character) => `\\${character}`);
+    const rows = await this.db
+      .select({
+        messageId: messages.id,
+        content: messages.content,
+        createdAt: messages.createdAt,
+        senderName: users.displayName,
+      })
+      .from(messages)
+      .innerJoin(users, eq(users.id, messages.senderId))
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          isNull(messages.deletedAt),
+          this.hiddenFrom(userId),
+          ilike(messages.content, `%${escaped}%`),
+        ),
+      )
+      .orderBy(desc(messages.createdAt))
+      .limit(Math.min(Math.max(limit, 1), 100));
+
+    return rows.map((row) => ({
+      messageId: row.messageId,
+      content: row.content,
+      createdAt: row.createdAt,
+      senderName: row.senderName,
+    }));
+  }
+
   async listReceipts(conversationId: string, requesterId: string): Promise<ReceiptDto[]> {
     if (!(await this.isMember(conversationId, requesterId))) {
       throw new ForbiddenException('You are not a member of this conversation');
@@ -823,7 +1575,7 @@ export class ConversationsService {
         from messages m
         join conversation_members cm
           on cm.conversation_id = m.conversation_id and cm.user_id = ${userId}
-        where m.sender_id <> ${userId} and m.created_at <= now() ${scope}
+        where m.sender_id <> ${userId} and m.type not in ('call', 'system') and m.created_at <= now() ${scope}
         on conflict (message_id, user_id) do update
           set delivered_at = coalesce(r.delivered_at, excluded.delivered_at),
               read_at = excluded.read_at
@@ -869,6 +1621,22 @@ export class ConversationsService {
 
     if (!(await this.isMember(conversationId, senderId))) {
       throw new ForbiddenException('You are not a member of this conversation');
+    }
+    const [permissions] = await this.db
+      .select({ sendPermission: conversations.sendPermission })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+    if (!permissions) {
+      throw new NotFoundException('Conversation not found');
+    }
+    if (
+      permissions.sendPermission === 'admins' &&
+      (await this.roleOf(conversationId, senderId)) !== 'admin'
+    ) {
+      throw new ForbiddenException(
+        'Seuls les administrateurs peuvent écrire dans ce groupe',
+      );
     }
 
     // Un blocage coupe les échanges dans les deux sens. Une seule requête :
@@ -975,6 +1743,7 @@ export class ConversationsService {
       deleted: stored.deletedAt !== null,
       // Un envoi sur deux ne cite rien : on ne paie la jointure que si c'est le cas.
       replyTo: stored.replyToId ? await this.quoteOf(stored.replyToId) : null,
+      reactions: [],
       createdAt: stored.createdAt,
       sender: {
         id: sender.id,
@@ -1185,6 +1954,8 @@ export class ConversationsService {
         deleted,
         // L'aperçu d'une liste n'affiche pas la citation : jointure inutile ici.
         replyTo: null,
+        // Les réactions ne servent pas dans l'aperçu de la liste.
+        reactions: [],
         // Les requêtes brutes renvoient les timestamps en chaîne : on normalise en Date.
         createdAt: new Date(row.createdAt),
         sender: {

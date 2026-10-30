@@ -1,9 +1,9 @@
 import { ChevronDown } from 'lucide-react-native';
 import { useState } from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
+import { FlatList, Pressable, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
+import { BottomSheet } from '@/components/bottom-sheet';
 import { ThemedText } from './themed-text';
-import { ThemedView } from './themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -20,6 +20,7 @@ interface SelectProps {
   style?: StyleProp<ViewStyle>;
 }
 
+/** Choix dans une feuille du bas, comme tous les menus de l'app. */
 export function Select({ placeholder, options, value, onChange, style }: SelectProps) {
   const theme = useTheme();
   const [open, setOpen] = useState(false);
@@ -44,33 +45,29 @@ export function Select({ placeholder, options, value, onChange, style }: SelectP
         <ChevronDown size={16} strokeWidth={2.4} color={theme.textSecondary} />
       </Pressable>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          <ThemedView style={styles.sheet}>
-            <FlatList
-              data={options}
-              keyExtractor={(item) => item.value}
-              keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => {
-                const isSelected = item.value === value;
-                return (
-                  <Pressable
-                    onPress={() => {
-                      onChange(item.value);
-                      setOpen(false);
-                    }}
-                    style={({ pressed }) => [
-                      styles.option,
-                      (pressed || isSelected) && { backgroundColor: theme.backgroundSelected },
-                    ]}>
-                    <ThemedText>{item.label}</ThemedText>
-                  </Pressable>
-                );
-              }}
-            />
-          </ThemedView>
-        </Pressable>
-      </Modal>
+      <BottomSheet visible={open} onClose={() => setOpen(false)} title={placeholder}>
+        <FlatList
+          data={options}
+          keyExtractor={(item) => item.value}
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) => {
+            const isSelected = item.value === value;
+            return (
+              <Pressable
+                onPress={() => {
+                  onChange(item.value);
+                  setOpen(false);
+                }}
+                style={({ pressed }) => [
+                  styles.option,
+                  (pressed || isSelected) && { backgroundColor: theme.backgroundSelected },
+                ]}>
+                <ThemedText>{item.label}</ThemedText>
+              </Pressable>
+            );
+          }}
+        />
+      </BottomSheet>
     </>
   );
 }
@@ -90,20 +87,6 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.7,
-  },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.four,
-  },
-  sheet: {
-    width: '85%',
-    maxWidth: 420,
-    maxHeight: '60%',
-    borderRadius: Spacing.four,
-    overflow: 'hidden',
   },
   option: {
     paddingHorizontal: Spacing.four,

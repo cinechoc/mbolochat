@@ -148,6 +148,27 @@
       "when": 1793187418157,
       "tag": "0020_notification_prefs",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793309710444,
+      "tag": "0021_group_identity_and_invites",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793343479193,
+      "tag": "0022_message_reactions",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793350990525,
+      "tag": "0023_group_permissions",
+      "breakpoints": true
     }
   ]
 }

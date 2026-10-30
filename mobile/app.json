@@ -37,7 +37,8 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MICROPHONE",
         "android.permission.FOREGROUND_SERVICE_PHONE_CALL",
-        "android.permission.WAKE_LOCK"
+        "android.permission.WAKE_LOCK",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "web": {
@@ -83,7 +84,10 @@
       "expo-asset",
       "expo-video",
       "expo-sharing",
-      "react-native-blob-util"
+      "react-native-blob-util",
+      "expo-image",
+      "expo-status-bar",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -96,8 +100,9 @@
         }
       },
       "eas": {
-        "projectId": "7c5665f6-9b3a-441a-9d05-e81b722cf004"
+        "projectId": "c2a657b3-6950-4b9c-803b-9958ad288616"
       }
-    }
+    },
+    "owner": "groupenzogho-dev"
   }
 }

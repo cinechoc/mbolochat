@@ -5,8 +5,8 @@
  */
 export const STICKER_REF_PATTERN = /^[a-z0-9_-]{1,40}\/[a-z0-9_-]{1,60}$/;
 
-/** Types stockés en base : `call` est réservé aux messages système du serveur. */
-export type MessageType = 'text' | 'sticker' | 'call';
+/** Types stockés en base : `call` et `system` sont réservés au serveur. */
+export type MessageType = 'text' | 'sticker' | 'call' | 'system';
 
 /** Types qu'un client peut réellement envoyer. */
 export type ClientMessageType = 'text' | 'sticker';

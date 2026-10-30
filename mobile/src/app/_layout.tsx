@@ -3,10 +3,11 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 
 import { CallProvider } from '@/features/calls/CallProvider';
 import { CallBanner } from '@/features/calls/CallBanner';
-import { CallOverlay } from '@/features/calls/CallOverlay';
+import { CallScreen } from '@/features/calls/CallScreen';
 import { PresenceProvider } from '@/features/presence/PresenceProvider';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
@@ -27,19 +28,23 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AuthProvider>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <StatusBar style="auto" />
-          <CallProvider>
-            <RootNavigator />
-            <CallOverlay />
-            <CallBanner />
-            <NotificationRouter />
-            <ReliabilityLoop />
-            <PresenceProvider />
-          </CallProvider>
-        </ThemeProvider>
-      </AuthProvider>
+      {/* Les overlays (appel, bannières, feuilles) vivent hors du navigateur :
+          le provider doit être à la racine pour qu'ils reçoivent les insets. */}
+      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+        <AuthProvider>
+          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+            <StatusBar style="auto" />
+            <CallProvider>
+              <RootNavigator />
+              <CallScreen />
+              <CallBanner />
+              <NotificationRouter />
+              <ReliabilityLoop />
+              <PresenceProvider />
+            </CallProvider>
+          </ThemeProvider>
+        </AuthProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
@@ -134,8 +139,12 @@ function RootNavigator() {
       <Stack.Screen name="register" options={{ headerShown: false }} />
       <Stack.Screen name="forgot-password" options={{ title: 'Mot de passe oublié' }} />
       <Stack.Screen name="chats" options={{ headerShown: false }} />
-      <Stack.Screen name="new-chat" options={{ title: 'Nouvelle discussion' }} />
+      <Stack.Screen name="new-message" options={{ title: 'Nouveau message' }} />
+      <Stack.Screen name="new-group" options={{ headerShown: false }} />
       <Stack.Screen name="chat/[id]" options={{ title: '' }} />
+      <Stack.Screen name="group/[id]" options={{ title: 'Groupe' }} />
+      <Stack.Screen name="conversation-search/[id]" options={{ title: 'Recherche' }} />
+      <Stack.Screen name="invite/[token]" options={{ title: 'Invitation' }} />
       <Stack.Screen name="document-viewer" options={{ headerShown: false }} />
       <Stack.Screen name="profile" options={{ title: 'Profil' }} />
       <Stack.Screen name="profile/edit" options={{ title: 'Modifier le profil' }} />

@@ -79,6 +79,10 @@ type Props = {
   placeholder?: string;
   disabled?: boolean;
   theme?: Partial<ComposerTheme>;
+  /** Brouillon restauré à l'ouverture de la conversation. */
+  initialText?: string;
+  /** Membres proposés après « @ » (groupes uniquement). */
+  mentionCandidates?: { id: string; username: string; displayName: string }[];
 };
 
 const DEFAULT_PANEL_HEIGHT = 290;
@@ -110,12 +114,14 @@ export function ChatComposer({
   placeholder = 'Écrire un message…',
   disabled,
   theme: themeOverride,
+  initialText = '',
+  mentionCandidates,
 }: Props) {
   const t: ComposerTheme = { ...DEFAULT_COMPOSER_THEME, ...themeOverride };
   const { recents, push } = useRecentEmoji();
   const { favorites, toggle: toggleFavorite } = useEmojiFavorites();
 
-  const [text, setText] = useState('');
+  const [text, setText] = useState(initialText);
   const [panel, setPanel] = useState<Panel>('none');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [searchActive, setSearchActive] = useState(false);
@@ -128,7 +134,7 @@ export function ChatComposer({
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const inputRef = useRef<TextInputInstance>(null);
-  const textRef = useRef('');
+  const textRef = useRef(initialText);
   const selectionRef = useRef<Selection>({ start: 0, end: 0 });
   /** Le clavier visible appartient à la recherche du panneau, pas au champ. */
   const searchActiveRef = useRef(false);
@@ -193,9 +199,42 @@ export function ChatComposer({
     [commit, push],
   );
 
+  /** Membre proposé quand la saisie se termine par « @… ». */
+  const mention = useMemo(() => {
+    if (!mentionCandidates || mentionCandidates.length === 0) {
+      return null;
+    }
+    const match = /(?:^|\s)@([\p{L}\p{N}._-]*)$/u.exec(text);
+    if (!match) {
+      return null;
+    }
+    const query = match[1].toLowerCase();
+    const atIndex = text.length - match[1].length - 1;
+    const items = mentionCandidates
+      .filter(
+        (candidate) =>
+          candidate.username.toLowerCase().includes(query) ||
+          candidate.displayName.toLowerCase().includes(query),
+      )
+      .slice(0, 6);
+    return items.length > 0 ? { query, atIndex, items } : null;
+  }, [text, mentionCandidates]);
+
+  const pickMention = useCallback(
+    (candidate: { id: string; username: string }) => {
+      const info = mention;
+      if (!info) return;
+      const value = textRef.current;
+      const insert = `@${candidate.username} `;
+      const next = value.slice(0, info.atIndex) + insert;
+      commit(next, next.length);
+      inputRef.current?.focus();
+    },
+    [commit, mention],
+  );
+
   // Stable et basée sur des refs : elle est rappelée en boucle pendant un appui long.
-  const handleBackspace = useCallback(() => {
-    const { start, end } = selectionRef.current;
+  const handleBackspace = useCallback(() => {    const { start, end } = selectionRef.current;
     const result = deleteBackward(textRef.current, start, end);
     commit(result.text, result.cursor);
   }, [commit]);
@@ -331,6 +370,29 @@ export function ChatComposer({
 
   return (
     <View style={{ backgroundColor: t.barBg }}>
+      {mention ? (
+        <View
+          style={[styles.mentionPanel, { backgroundColor: t.panelBg, borderColor: t.border }]}>
+          {mention.items.map((candidate) => (
+            <Pressable
+              key={candidate.id}
+              onPress={() => pickMention(candidate)}
+              accessibilityRole="button"
+              accessibilityLabel={`Mentionner ${candidate.displayName}`}
+              style={({ pressed }) => [
+                styles.mentionRow,
+                pressed && { backgroundColor: t.pressed },
+              ]}>
+              <Text style={[styles.mentionName, { color: t.text }]} numberOfLines={1}>
+                @{candidate.username}
+              </Text>
+              <Text style={[styles.mentionDisplay, { color: t.subtle }]} numberOfLines={1}>
+                {candidate.displayName}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
       <View style={[styles.bar, { borderTopColor: t.border }]}>
         <View style={styles.center}>
           <View style={[styles.field, { backgroundColor: t.inputBg }]}>
@@ -570,6 +632,27 @@ function WaveformIcon({ color, size = 26 }: { color: string; size?: number }) {
 }
 
 const styles = StyleSheet.create({
+  mentionPanel: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: '100%',
+    marginBottom: 4,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    elevation: 8,
+    zIndex: 20,
+  },
+  mentionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 12,
+  },
+  mentionName: { fontWeight: '600' },
+  mentionDisplay: { flexShrink: 1, fontSize: 13 },
   bar: {
     flexDirection: 'row',
     alignItems: 'flex-end',

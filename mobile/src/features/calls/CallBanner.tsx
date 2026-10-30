@@ -1,40 +1,53 @@
-import { ChevronUp, MicOff } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
+import { ChevronUp, MicOff, Phone, X } from 'lucide-react-native';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/avatar';
+import { Colors, Motion, Radii, Spacing, Type } from '@/constants/theme';
 import { useCalls } from './CallProvider';
-
-function formatDuration(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-}
+import { CallTimer } from './ui/CallTimer';
 
 /**
- * Appel réduit : bannière flottante au-dessus de l'app. Un appui rouvre
- * l'écran d'appel plein écran.
+ * Bandeau flottant d'appel : invitation à rejoindre un appel de groupe ouvert,
+ * puis appel réduit. Un seul élément pour les deux états, jamais en même temps
+ * que l'écran plein.
  */
 export function CallBanner() {
-  const { status, peer, muted, startedAt, minimized, restore } = useCalls();
+  const {
+    status,
+    mode,
+    peer,
+    group,
+    peers,
+    offer,
+    muted,
+    startedAt,
+    minimized,
+    restore,
+    joinOffer,
+    dismissOffer,
+  } = useCalls();
   const insets = useSafeAreaInsets();
-  const [now, setNow] = useState(Date.now());
 
-  useEffect(() => {
-    if (status !== 'active' || !startedAt) return;
-    const timer = setInterval(() => setNow(Date.now()), 500);
-    return () => clearInterval(timer);
-  }, [status, startedAt]);
-
-  if (!minimized || status === 'idle' || status === 'ended') {
+  const inCall = status !== 'idle' && status !== 'ended';
+  const invited = Boolean(offer) && !inCall;
+  if (!invited && !(minimized && inCall)) {
     return null;
   }
 
-  const name = peer?.displayName ?? 'Contact';
-  const subtitle =
-    status === 'active' && startedAt
-      ? formatDuration(now - startedAt)
+  const groupMode = invited ? true : mode === 'GROUP';
+  const name = invited
+    ? (offer?.name ?? 'Groupe')
+    : groupMode
+      ? (group?.name ?? 'Appel de groupe')
+      : (peer?.displayName ?? 'Contact');
+  const connected = peers.filter((entry) => entry.connected).length + 1;
+  const timing = inCall && status === 'active' && Boolean(startedAt);
+  const subtitle = invited
+    ? `${offer?.from.displayName ?? 'Quelqu’un'} appelle`
+    : groupMode
+      ? `${connected} en ligne`
       : status === 'reconnecting'
         ? 'Reconnexion…'
         : status === 'connecting'
@@ -42,26 +55,62 @@ export function CallBanner() {
           : 'Appelle…';
 
   return (
-    <View style={[styles.layer, { top: insets.top + 8 }]} pointerEvents="box-none">
-      <Animated.View entering={FadeInDown.duration(220).springify().damping(18)}>
+    <View style={[styles.layer, { top: insets.top + Spacing.two }]} pointerEvents="box-none">
+      <Animated.View entering={FadeInDown.duration(Motion.base).springify().damping(18)}>
         <Pressable
-          onPress={restore}
+          onPress={invited ? () => void joinOffer() : restore}
           accessibilityRole="button"
-          accessibilityLabel={`Revenir à l’appel avec ${name}`}
+          accessibilityLabel={
+            invited ? `Rejoindre l’appel de ${name}` : `Revenir à l’appel avec ${name}`
+          }
           style={({ pressed }) => [styles.banner, pressed && styles.pressed]}>
-          <Avatar name={name} uri={peer?.avatarUrl} size={34} variant="user" />
+          {groupMode ? (
+            <Avatar
+              name={name}
+              uri={invited ? offer?.avatarUrl : group?.avatarUrl}
+              emoji={invited ? offer?.emoji : group?.emoji}
+              color={invited ? offer?.color : group?.color}
+              variant="group"
+              size={34}
+            />
+          ) : (
+            <Avatar name={name} uri={peer?.avatarUrl} size={34} variant="user" />
+          )}
           <View style={styles.texts}>
             <Text style={styles.name} numberOfLines={1}>
               {name}
             </Text>
             <View style={styles.statusRow}>
-              {muted ? <MicOff size={11} strokeWidth={2.4} color="#9BA3B5" /> : null}
-              <Text style={styles.status} numberOfLines={1}>
-                {subtitle}
-              </Text>
+              {muted && !invited ? (
+                <MicOff size={11} strokeWidth={2.4} color={Colors.dark.textSecondary} />
+              ) : null}
+              {timing && !invited ? (
+                <CallTimer startedAt={startedAt} active={timing} style={styles.status} />
+              ) : (
+                <Text style={styles.status} numberOfLines={1}>
+                  {subtitle}
+                </Text>
+              )}
             </View>
           </View>
-          <ChevronUp size={20} strokeWidth={2.4} color="#C9CFDA" />
+          {invited ? (
+            <>
+              <View style={styles.join}>
+                <Phone size={14} color={Colors.dark.onAccent} />
+                <Text style={styles.joinText}>Rejoindre</Text>
+              </View>
+              <Pressable
+                onPress={dismissOffer}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Ignorer l’appel de groupe"
+                style={styles.dismiss}>
+                <X size={18} color={Colors.dark.textSecondary} />
+              </Pressable>
+            </>
+          ) : (
+            <ChevronUp size={20} strokeWidth={2.4} color={Colors.dark.textSecondary} />
+          )}
         </Pressable>
       </Animated.View>
     </View>
@@ -71,32 +120,35 @@ export function CallBanner() {
 const styles = StyleSheet.create({
   layer: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: Spacing.threeHalf,
+    right: Spacing.threeHalf,
     zIndex: 1000,
     elevation: 12,
   },
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 8,
-    paddingLeft: 8,
-    paddingRight: 14,
-    borderRadius: 26,
-    backgroundColor: '#171A22',
-    shadowColor: '#000000',
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    gap: Spacing.two + 2,
+    paddingVertical: Spacing.two,
+    paddingLeft: Spacing.two,
+    paddingRight: Spacing.threeHalf + 2,
+    borderRadius: Radii.pill,
+    backgroundColor: Colors.dark.backgroundElevated,
   },
   pressed: { opacity: 0.92, transform: [{ scale: 0.99 }] },
   texts: { flex: 1, minWidth: 0 },
-  name: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
-  status: {
-    color: '#9BA3B5',
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
+  name: { ...Type.caption, color: Colors.dark.text, fontWeight: '600' },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  status: { ...Type.micro, color: Colors.dark.textSecondary },
+  join: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.threeHalf,
+    paddingVertical: Spacing.two,
+    borderRadius: Radii.pill,
+    backgroundColor: Colors.dark.accent,
   },
+  joinText: { ...Type.caption, color: Colors.dark.onAccent, fontWeight: '600' },
+  dismiss: { padding: Spacing.one },
 });

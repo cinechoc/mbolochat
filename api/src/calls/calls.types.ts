@@ -50,3 +50,60 @@ export interface CallIcePayload {
   callId: string;
   candidate: unknown;
 }
+
+/* ------------------------------ appels de groupe ------------------------------ */
+
+/** Maillage WebRTC : chaque participant envoie son flux à tous les autres. */
+export type GroupCallMedia = 'AUDIO' | 'VIDEO';
+
+export interface GroupCallMember {
+  id: string;
+  displayName: string;
+  avatarUrl: string | null;
+  muted: boolean;
+  /** Ce participant a la caméra allumée. */
+  video: boolean;
+}
+
+export interface GroupCallIdentity {
+  conversationId: string;
+  name: string;
+  emoji: string | null;
+  color: string | null;
+  avatarUrl: string | null;
+}
+
+export type GroupCallError = 'invalid' | 'busy' | 'full' | 'forbidden' | 'rate';
+
+export type GroupCallAck =
+  | {
+      ok: true;
+      callId: string;
+      group: GroupCallIdentity;
+      members: GroupCallMember[];
+      media: GroupCallMedia;
+      maxParticipants: number;
+    }
+  | { ok: false; error: GroupCallError };
+
+/** Invitation reçue par les membres du groupe : bandeau « Rejoindre ». */
+export interface GroupCallInvitePayload extends GroupCallIdentity {
+  callId: string;
+  from: { id: string; displayName: string };
+  members: GroupCallMember[];
+  media: GroupCallMedia;
+  maxParticipants: number;
+}
+
+/** Signalisation maillée : `to` cible un participant, `from` désigne l'émetteur. */
+export interface GroupCallSignalPayload {
+  callId: string;
+  to?: string;
+  sdp?: string;
+  candidate?: unknown;
+}
+
+export interface GroupCallEndedPayload {
+  callId: string;
+  conversationId: string;
+}

@@ -457,6 +457,7 @@ export function pendingMessage(
     clientId: item.clientId,
     deleted: false,
     replyTo: item.replyTo ? (quoteOf?.(item.replyTo) ?? null) : null,
+    reactions: [],
     createdAt: new Date(item.createdAt).toISOString(),
     sender,
   };

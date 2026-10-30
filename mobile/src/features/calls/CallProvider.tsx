@@ -1,40 +1,66 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Alert, Linking } from 'react-native';
-import { Camera } from 'expo-camera';
-import * as Device from 'expo-device';
-import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
-import {
-  MediaStream,
-  RTCPeerConnection,
-  RTCIceCandidate,
-  RTCSessionDescription,
-  mediaDevices,
-  type MediaStreamTrack,
-  type RTCRtpSender,
-} from 'react-native-webrtc';
+import { Alert } from 'react-native';
+import { setAudioModeAsync } from 'expo-audio';
+import { MediaStream, type MediaStreamTrack } from 'react-native-webrtc';
 
 import {
+  CALL_GROUP_VIDEO_FPS,
+  CALL_ICE_RESTART_BASE_MS,
+  CALL_ICE_RESTART_MAX_MS,
+  CALL_LINK_RETRY_WINDOW_MS,
+  CALL_VIDEO_FPS,
+  MAX_GROUP_CALL_AUDIO,
   CALL_RECONNECT_GRACE_MS,
   CALL_RING_GUARD_MS,
-  CALL_VIDEO_FPS,
   CALL_VIDEO_LOW_BITRATE,
   CALL_VIDEO_MAX_BITRATE,
   CALL_VIDEO_STEP_BITRATE,
+  type CallMode,
+  type CallParticipant,
   type CallPeer,
   type CallStatus,
   type CameraFacing,
+  type GroupCallAck,
+  type GroupCallIdentity,
+  type GroupCallInvite,
+  type GroupCallMedia,
+  type GroupCallMember,
 } from '@/lib/calls';
-import { buildIceServers } from '@/lib/ice';
+import { buildIceServers, ensureIceServers, type IceServerConfig } from '@/lib/ice';
 import { onConnection, connectSocket } from '@/lib/socket';
 import { useAuth } from '@/lib/auth-context';
+import * as Haptics from 'expo-haptics';
 import { setSpeakerphone, startCallAudio, stopCallAudio } from './audioRoute';
 import { startIncomingRing, startOutgoingRing, stopRing } from './ringtone';
+import { CallMedia, CAMERA_UNAVAILABLE_EMULATOR } from './engine/CallMedia';
+import { RtcLink } from './engine/RtcLink';
+import { applyVideoBitrate } from './engine/PeerStats';
+import { IDLE_SPEAKING, updateSpeaking, type SpeakingState } from './engine/speaking';
 
 type DeepLinkAction = 'accept' | 'decline';
+type LinkOptions = { polite: boolean; group: boolean };
 
 type CallContextValue = {
   status: CallStatus;
+  /** Un à un : l'interlocuteur. Le groupe expose `peers`. */
   peer: CallPeer | null;
+  mode: CallMode;
+  group: GroupCallIdentity | null;
+  /** Participants du groupe, dans leur ordre d'arrivée (jamais réordonnés). */
+  peers: CallParticipant[];
+  /** Flux vidéo reçus, par participant, pour les tuiles. */
+  streams: Record<string, MediaStream>;
+  /** Identifiants dont on reçoit du son à l'instant t. */
+  speaking: string[];
+  /** Invitation à un appel de groupe encore ouvert, pas encore rejointe. */
+  offer: GroupCallInvite | null;
+  /** Média de l'appel et plafond imposé par le serveur. */
+  media: GroupCallMedia;
+  maxParticipants: number;
+  /** Mention brève affichée dans l'écran d'appel (« Marie a rejoint »). */
+  mention: string | null;
+  /** Moi, pour la tuile locale de la grille. */
+  self: CallPeer | null;
   muted: boolean;
   startedAt: number | null;
   endReason: string | null;
@@ -52,6 +78,15 @@ type CallContextValue = {
   /** Type du candidat ICE retenu (host, srflx, relay) — diagnostic réseau. */
   networkPath: string | null;
   startCall: (conversationId: string, options?: { video?: boolean }) => Promise<void>;
+  startGroupCall: (conversationId: string, options?: { video?: boolean }) => Promise<void>;
+  joinOffer: () => Promise<void>;
+  dismissOffer: () => void;
+  /** Refuser : l'appel continue pour les autres. */
+  declineOffer: () => void;
+  /** Rappeler des membres du groupe depuis l'écran d'appel. */
+  inviteMembers: (userIds: string[]) => void;
+  /** Un administrateur sort quelqu'un de l'appel. */
+  kickMember: (userId: string) => void;
   accept: (withVideo?: boolean) => Promise<void>;
   reject: () => void;
   hangup: () => void;
@@ -75,25 +110,36 @@ export function useCalls(): CallContextValue {
 }
 
 const IDLE_DELAY_MS = 1400;
-const QUALITY_SAMPLE_MS = 4_000;
+const QUALITY_SAMPLE_MS = 2_000;
+const SPEAKING_SAMPLE_MS = 700;
 const WEAK_NOTICE_MS = 4_500;
-/**
- * La caméra virtuelle de Waydroid ne délivre aucune image (0 fps) et fait
- * planter le thread natif de libwebrtc (« updateTexImage »). En développement,
- * on évite donc la capture sur cet émulateur : l'appel reste vocal. Les
- * téléphones réels ne sont pas concernés.
- */
-const CAMERA_UNAVAILABLE_EMULATOR =
-  __DEV__ && (Device.osBuildFingerprint ?? '').toLowerCase().includes('waydroid');
+/** En dessous de cette bande passante estimée, la vidéo n'a plus sa place. */
+const WEAK_BITRATE = 200_000;
+/** Au-dessus, le réseau est confortable : on ne dégrade rien. */
+const COMFORTABLE_BITRATE = 400_000;
+/** Niveau sonore recevable pour désigner celui qui parle. */
+/** Mesures mauvaises d'affilée avant d'afficher « Réseau faible ». */
+const WEAK_AFTER = 3;
+/** Mesures bonnes d'affilée avant de retirer la mention. */
+const HEALTHY_AFTER = 2;
 
 /**
- * Appels vocaux et vidéo 1:1 : signalisation Socket.IO, média WebRTC,
- * négociation parfaite (bascule vocal ↔ vidéo), routage audio et qualité.
+ * Le moteur d'appel de l'application : un à un et maillage de groupe. Un lien
+ * `RtcLink` par interlocuteur — l'appel un à un n'est que le cas à un lien.
  */
 export function CallProvider({ children }: { children: ReactNode }) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [status, setStatus] = useState<CallStatus>('idle');
+  const [mode, setMode] = useState<CallMode>('DIRECT');
   const [peer, setPeer] = useState<CallPeer | null>(null);
+  const [group, setGroup] = useState<GroupCallIdentity | null>(null);
+  const [peers, setPeers] = useState<CallParticipant[]>([]);
+  const [streams, setStreams] = useState<Record<string, MediaStream>>({});
+  const [speaking, setSpeaking] = useState<string[]>([]);
+  const [offer, setOffer] = useState<GroupCallInvite | null>(null);
+  const [media, setMedia] = useState<GroupCallMedia>('AUDIO');
+  const [maxParticipants, setMaxParticipants] = useState<number>(MAX_GROUP_CALL_AUDIO);
+  const [mention, setMention] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [endReason, setEndReason] = useState<string | null>(null);
@@ -110,146 +156,54 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const callIdRef = useRef<string | null>(null);
   const statusRef = useRef<CallStatus>('idle');
-  statusRef.current = status;
+  const modeRef = useRef<CallMode>('DIRECT');
+  const myIdRef = useRef<string | null>(null);
   const speakerRef = useRef(false);
   const mutedRef = useRef(false);
   const videoCallRef = useRef(false);
   const cameraOnRef = useRef(false);
   const facingRef = useRef<CameraFacing>('user');
-  const politeRef = useRef(false);
-  const makingOfferRef = useRef(false);
-  const ignoreOfferRef = useRef(false);
   const bitrateRef = useRef(CALL_VIDEO_MAX_BITRATE);
-  const badSamplesRef = useRef(0);
+  const fpsRef = useRef(CALL_VIDEO_FPS);
+  /** État de qualité par pair : paliers et vidéo éventuellement coupée. */
+  const qualityRef = useRef<Map<string, { bad: number; good: number; video: boolean }>>(new Map());
+  /** Santé audio par pair, avec hystérésis pour éviter le clignotement. */
+  const healthRef = useRef<Map<string, { weak: boolean; bad: number; good: number }>>(new Map());
+  /** État de parole lissé par pair. */
+  const speakingRef = useRef<Map<string, SpeakingState>>(new Map());
+  /** Tentatives de reconnexion par pair, bornées à 30 s. */
+  const retryRef = useRef<
+    Map<string, { count: number; deadline: number; timer: ReturnType<typeof setTimeout> | null }>
+  >(new Map());
   const resumeCameraRef = useRef(false);
-  /** Une seule opération caméra à la fois (getUserMedia, bascule, arrêt). */
-  const cameraBusyRef = useRef(false);
-  const cameraReleasePromiseRef = useRef<Promise<void> | null>(null);
-
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const audioStreamRef = useRef<MediaStream | null>(null);
-  const videoTrackRef = useRef<MediaStreamTrack | null>(null);
-  const videoSenderRef = useRef<RTCRtpSender | null>(null);
-  const remoteReadyRef = useRef(false);
-  const pendingCandidatesRef = useRef<unknown[]>([]);
+  const iceRef = useRef<IceServerConfig[]>([]);
+  const mediaRef = useRef<CallMedia | null>(null);
+  const linksRef = useRef<Map<string, RtcLink>>(new Map());
+  const audioBytesRef = useRef<Map<string, number>>(new Map());
   const pendingActionRef = useRef<{ callId: string; action: DeepLinkAction } | null>(null);
+  const pendingVideoRef = useRef<MediaStreamTrack | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ringGuardRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const statsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const speakingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const weakTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Relance d'un lien tombé : définie une fois `openLink` disponible. */
+  const retryLinkRef = useRef<(peerId: string, options: LinkOptions) => void>(() => {});
+  /** Miroir des participants pour les fermetures différées. */
+  const peersRef = useRef<CallParticipant[]>([]);
+
+  const getMedia = useCallback((): CallMedia => {
+    if (!mediaRef.current) {
+      mediaRef.current = new CallMedia();
+    }
+    return mediaRef.current;
+  }, []);
 
   const setPhase = useCallback((next: CallStatus) => {
     statusRef.current = next;
     setStatus(next);
   }, []);
-
-  const stopQualityMonitor = useCallback(() => {
-    if (statsTimerRef.current) {
-      clearInterval(statsTimerRef.current);
-      statsTimerRef.current = null;
-    }
-  }, []);
-
-  /**
-   * La capture native n'est vraiment libérée qu'après `release()`, mais la
-   * libération immédiate d'une texture encore alimentée par la caméra fait
-   * planter libwebrtc sur certains appareils (« updateTexImage »). On laisse
-   * donc retomber les dernières images avant de libérer.
-   */
-  const releaseVideoTrackSoon = useCallback((track: MediaStreamTrack) => {
-    cameraReleasePromiseRef.current = new Promise<void>((resolve) => {
-      setTimeout(() => {
-        try {
-          track.release();
-        } catch {
-          /* déjà libérée */
-        }
-        resolve();
-      }, 600);
-    });
-  }, []);
-
-  const closePeer = useCallback(() => {
-    // Arrêter les pistes avant de fermer la connexion : c'est l'ordre qui
-    // évite les textures caméra encore alimentées pendant le teardown.
-    const audio = audioStreamRef.current;
-    audioStreamRef.current = null;
-    audio?.getTracks().forEach((track) => track.stop());
-    const video = videoTrackRef.current;
-    videoTrackRef.current = null;
-    try {
-      video?.stop();
-    } catch {
-      /* déjà arrêtée */
-    }
-    if (video) releaseVideoTrackSoon(video);
-    try {
-      pcRef.current?.close();
-    } catch {
-      /* déjà fermé */
-    }
-    pcRef.current = null;
-    remoteReadyRef.current = false;
-    pendingCandidatesRef.current = [];
-    makingOfferRef.current = false;
-    ignoreOfferRef.current = false;
-    videoSenderRef.current = null;
-    stopQualityMonitor();
-    stopCallAudio();
-    void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
-  }, [releaseVideoTrackSoon, stopQualityMonitor]);
-
-  /** Fin d'appel locale : ferme le média et affiche l'état final brièvement. */
-  const finish = useCallback(
-    (reason: string) => {
-      if (ringGuardRef.current) {
-        clearTimeout(ringGuardRef.current);
-        ringGuardRef.current = null;
-      }
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
-      }
-      if (weakTimerRef.current) {
-        clearTimeout(weakTimerRef.current);
-        weakTimerRef.current = null;
-      }
-      stopRing();
-      closePeer();
-      callIdRef.current = null;
-      speakerRef.current = false;
-      mutedRef.current = false;
-      videoCallRef.current = false;
-      cameraOnRef.current = false;
-      facingRef.current = 'user';
-      resumeCameraRef.current = false;
-      bitrateRef.current = CALL_VIDEO_MAX_BITRATE;
-      badSamplesRef.current = 0;
-      setSpeakerOn(false);
-      setMuted(false);
-      setStartedAt(null);
-      setMinimized(false);
-      setVideoCall(false);
-      setLocalCameraOn(false);
-      setRemoteCameraOn(false);
-      setLocalStream(null);
-      setRemoteStream(null);
-      setFacing('user');
-      setWeakConnection(false);
-      setNetworkPath(null);
-      setEndReason(reason);
-      setPhase('ended');
-      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-      idleTimerRef.current = setTimeout(() => {
-        idleTimerRef.current = null;
-        setPeer(null);
-        setEndReason(null);
-        setPhase('idle');
-      }, IDLE_DELAY_MS);
-    },
-    [closePeer, setPhase],
-  );
 
   const emit = useCallback(
     (event: string, payload: Record<string, unknown>) => {
@@ -259,7 +213,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     [token],
   );
 
-  /* ----------------------------- Routage audio ----------------------------- */
+  /* ------------------------------- Routage audio ------------------------------- */
 
   const applySpeaker = useCallback((enabled: boolean) => {
     speakerRef.current = enabled;
@@ -290,52 +244,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
     [applySpeaker],
   );
 
-  /* ------------------------------- Permissions ------------------------------- */
-
-  const askMicrophone = useCallback(async (): Promise<boolean> => {
-    try {
-      const permission = await requestRecordingPermissionsAsync();
-      return permission.granted;
-    } catch {
-      return false;
-    }
-  }, []);
-
-  const askCamera = useCallback(async (): Promise<boolean> => {
-    try {
-      const permission = await Camera.requestCameraPermissionsAsync();
-      return permission.granted;
-    } catch {
-      return false;
-    }
-  }, []);
-
-  const showMicrophoneDenied = useCallback(() => {
-    Alert.alert('Micro requis', 'Autorisez le microphone pour passer un appel vocal.', [
-      { text: 'Plus tard', style: 'cancel' },
-      { text: 'Ouvrir les réglages', onPress: () => void Linking.openSettings() },
-    ]);
-  }, []);
-
-  const showCameraDenied = useCallback(() => {
-    Alert.alert(
-      'Caméra refusée',
-      'La caméra est refusée : l’appel continue en vocal. Vous pouvez l’autoriser dans les réglages.',
-      [
-        { text: 'Plus tard', style: 'cancel' },
-        { text: 'Ouvrir les réglages', onPress: () => void Linking.openSettings() },
-      ],
-    );
-  }, []);
-
-  const showCameraEmulator = useCallback(() => {
-    Alert.alert(
-      'Caméra indisponible',
-      'Cet émulateur ne fournit pas de flux vidéo utilisable. L’appel continue en vocal ; testez la vidéo sur un téléphone.',
-    );
-  }, []);
-
-  const showWeakConnection = useCallback(() => {    setWeakConnection(true);
+  const showWeakConnection = useCallback(() => {
+    setWeakConnection(true);
     if (weakTimerRef.current) clearTimeout(weakTimerRef.current);
     weakTimerRef.current = setTimeout(() => {
       weakTimerRef.current = null;
@@ -343,89 +253,92 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }, WEAK_NOTICE_MS);
   }, []);
 
-  /* ------------------------------- Média vidéo ------------------------------- */
-
-  const getVideoTrack = useCallback(async (facingMode: CameraFacing): Promise<MediaStreamTrack> => {
-    // Une caméra précédente est encore en cours de libération : on attend.
-    if (cameraReleasePromiseRef.current) {
-      await cameraReleasePromiseRef.current;
-      cameraReleasePromiseRef.current = null;
-    }
-    const stream = (await mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        width: 640,
-        height: 480,
-        frameRate: CALL_VIDEO_FPS,
-        facingMode,
-      },
-    })) as MediaStream;
-    const track = stream.getVideoTracks()[0];
-    if (!track) {
-      throw new Error('Caméra indisponible');
-    }
-    return track;
+  /** Mention discrète de l'écran d'appel, effacée après un instant. */
+  const say = useCallback((text: string) => {
+    setMention(text);
+    const timer = setTimeout(() => setMention((current) => (current === text ? null : current)), 2200);
+    return () => clearTimeout(timer);
   }, []);
 
-  /** Plafond d'encodage : la vidéo cède avant l'audio sur un réseau faible. */
-  const applyVideoParams = useCallback(async (sender: RTCRtpSender, maxBitrate: number) => {
-    try {
-      const params = sender.getParameters();
-      if (!params.encodings || params.encodings.length === 0) {
-        params.encodings = [{} as any];
-      }
-      params.encodings[0].maxBitrate = maxBitrate;
-      params.encodings[0].maxFramerate = CALL_VIDEO_FPS;
-      params.degradationPreference = 'balanced';
-      await sender.setParameters(params);
-      bitrateRef.current = maxBitrate;
-    } catch {
-      /* certains chemins natifs ignorent les paramètres */
+  const tap = useCallback((kind: 'light' | 'medium' | 'warning') => {
+    if (kind === 'warning') {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      return;
     }
+    void Haptics.impactAsync(
+      kind === 'light' ? Haptics.ImpactFeedbackStyle.Light : Haptics.ImpactFeedbackStyle.Medium,
+    ).catch(() => {});
   }, []);
 
-  const attachVideoTrack = useCallback(
-    async (track: MediaStreamTrack) => {
-      const pc = pcRef.current;
-      if (!pc) return;
-      let sender = videoSenderRef.current;
-      if (sender) {
-        await sender.replaceTrack(track);
-      } else {
-        sender = pc.addTrack(track, new MediaStream([track]));
-        videoSenderRef.current = sender;
+  const markPeer = useCallback((peerId: string, patch: Partial<CallParticipant>) => {
+    setPeers((previous) => {
+      const next = previous.map((entry) => (entry.id === peerId ? { ...entry, ...patch } : entry));
+      peersRef.current = next;
+      return next;
+    });
+  }, []);
+
+  /* ------------------------------ Liens et média ------------------------------ */
+
+  /** Publie le micro déjà acquis sur un lien ouvert en cours d'appel. */
+  const publishMicroTo = useCallback(
+    (link: RtcLink) => {
+      const stream = getMedia().micStream;
+      if (!stream) {
+        return;
       }
-      await applyVideoParams(sender, bitrateRef.current);
+      stream.getAudioTracks().forEach((track) => link.publish(track, stream));
     },
-    [applyVideoParams],
+    [getMedia],
   );
+
+  /** Acquitte le micro et le publie sur tous les liens ouverts. */
+  const publishMicro = useCallback(async () => {
+    const media = getMedia();
+    const stream = await media.ensureMicrophone();
+    stream.getAudioTracks().forEach((track) => {
+      linksRef.current.forEach((link) => link.publish(track, stream));
+    });
+  }, [getMedia]);
+
+  /** La caméra est une seule piste, remplacée sur chaque lien, puis renégociée. */
+  const attachVideoTrack = useCallback(async (track: MediaStreamTrack | null) => {
+    const attached = track ? new MediaStream([track]) : null;
+    for (const link of linksRef.current.values()) {
+      await link.setVideoTrack(track, attached);
+      const sender = link.videoSenderRef;
+      if (sender) {
+        await applyVideoBitrate(sender, bitrateRef.current, fpsRef.current);
+      }
+      link.renegotiate();
+    }
+  }, []);
 
   const enableCamera = useCallback(
     async (options?: { notify?: boolean }): Promise<boolean> => {
       if (cameraOnRef.current) return true;
+      const media = getMedia();
       if (CAMERA_UNAVAILABLE_EMULATOR) {
-        showCameraEmulator();
+        media.showCameraEmulator();
         return false;
       }
-      // Une libération différée est encore en cours : on la laisse finir.
-      if (cameraReleasePromiseRef.current) {
-        await cameraReleasePromiseRef.current;
-        cameraReleasePromiseRef.current = null;
-      }
-      const allowed = await askCamera();
+      const allowed = await media.askCamera();
       if (!allowed) {
-        showCameraDenied();
+        media.showCameraDenied();
         return false;
       }
       let track: MediaStreamTrack;
+      const fps = modeRef.current === 'GROUP' ? CALL_GROUP_VIDEO_FPS : CALL_VIDEO_FPS;
+      fpsRef.current = fps;
       try {
-        track = await getVideoTrack(facingRef.current);
+        track = await media.openCameraTrack(fps);
       } catch {
         Alert.alert('Caméra indisponible', 'Impossible d’ouvrir la caméra. L’appel continue en vocal.');
         return false;
       }
-      videoTrackRef.current = track;
       cameraOnRef.current = true;
+      facingRef.current = media.cameraFacing;
+      setFacing(media.cameraFacing);
       setLocalCameraOn(true);
       setLocalStream(new MediaStream([track]));
       setVideoMode(true);
@@ -435,159 +348,137 @@ export function CallProvider({ children }: { children: ReactNode }) {
         /* la piste sera reprise à la prochaine négociation */
       }
       if (options?.notify !== false && callIdRef.current) {
-        emit('call:video-toggle', { callId: callIdRef.current, video: true });
+        if (modeRef.current === 'DIRECT') {
+          emit('call:video-toggle', { callId: callIdRef.current, video: true });
+        } else {
+          emit('gcall:video', { callId: callIdRef.current, video: true });
+        }
       }
       return true;
     },
-    [applyVideoParams, askCamera, attachVideoTrack, emit, getVideoTrack, setVideoMode, showCameraDenied, showCameraEmulator],
+    [attachVideoTrack, emit, getMedia, setVideoMode],
   );
 
   /** Coupe vraiment la capture (batterie/données) et prévient l'autre. */
   const disableCamera = useCallback(
     async (notify = true) => {
-      const sender = videoSenderRef.current;
-      const track = videoTrackRef.current;
-      videoTrackRef.current = null;
+      const media = getMedia();
+      media.stopCameraTrack();
       cameraOnRef.current = false;
       setLocalCameraOn(false);
       setLocalStream(null);
       try {
-        await sender?.replaceTrack(null as any);
+        await attachVideoTrack(null);
       } catch {
         /* piste déjà retirée */
       }
-      try {
-        track?.stop();
-      } catch {
-        /* déjà arrêtée */
-      }
-      if (track) {
-        releaseVideoTrackSoon(track);
-      }
       if (notify && callIdRef.current) {
-        emit('call:video-toggle', { callId: callIdRef.current, video: false });
+        if (modeRef.current === 'DIRECT') {
+          emit('call:video-toggle', { callId: callIdRef.current, video: false });
+        } else {
+          emit('gcall:video', { callId: callIdRef.current, video: false });
+        }
       }
     },
-    [emit, releaseVideoTrackSoon],
+    [attachVideoTrack, emit, getMedia],
   );
 
-  const toggleCamera = useCallback(async () => {
-    const current = statusRef.current as CallStatus;
-    if (
-      current !== 'outgoing' &&
-      current !== 'connecting' &&
-      current !== 'active' &&
-      current !== 'reconnecting'
-    ) {
-      return;
-    }
-    if (cameraBusyRef.current) return;
-    cameraBusyRef.current = true;
-    try {
-      if (cameraOnRef.current) {
-        await disableCamera(true);
-      } else {
-        await enableCamera();
-      }
-    } finally {
-      cameraBusyRef.current = false;
-    }
-  }, [disableCamera, enableCamera]);
+  /* --------------------------------- Qualité --------------------------------- */
 
-  /**
-   * Bascule avant/arrière via `applyConstraints` : pas de seconde session de
-   * capture ni de destruction de texture (source du crash updateTexImage).
-   */
-  const flipCamera = useCallback(async () => {
-    const track = videoTrackRef.current;
-    if (!cameraOnRef.current || !track || cameraBusyRef.current) return;
-    const next: CameraFacing = facingRef.current === 'user' ? 'environment' : 'user';
-    cameraBusyRef.current = true;
-    try {
-      await track.applyConstraints({
-        width: 640,
-        height: 480,
-        frameRate: CALL_VIDEO_FPS,
-        facingMode: next,
-      });
-      facingRef.current = next;
-      setFacing(next);
-    } catch {
-      Alert.alert('Caméra indisponible', 'Impossible de changer de caméra.');
-    } finally {
-      cameraBusyRef.current = false;
+  const stopQualityMonitor = useCallback(() => {
+    if (statsTimerRef.current) {
+      clearInterval(statsTimerRef.current);
+      statsTimerRef.current = null;
     }
   }, []);
 
-  /* --------------------------- Qualité et dégradation --------------------------- */
-
-  const cutVideoForWeakNetwork = useCallback(async () => {
-    if (cameraBusyRef.current) return;
-    cameraBusyRef.current = true;
-    try {
-      await disableCamera(true);
-      showWeakConnection();
-    } finally {
-      cameraBusyRef.current = false;
-    }
-  }, [disableCamera, showWeakConnection]);
-
+  /**
+   * La vidéo cède par paliers avant l'audio : le lien le plus faible impose le
+   * débit à tous, puis la caméra se coupe au plancher.
+   */
+  /**
+   * Qualité réglée lien par lien : un pair en mauvaise réception ne coûte pas
+   * la vidéo aux autres. Chaque sender descend ses paliers, puis coupe sa vidéo
+   * au profit de l'audio quand son propre lien est trop juste.
+   */
   const sampleQuality = useCallback(async () => {
-    const pc = pcRef.current;
-    const sender = videoSenderRef.current;
-    if (!pc || !sender || !cameraOnRef.current) {
-      badSamplesRef.current = 0;
-      return;
-    }
-    try {
-      const report: any = await pc.getStats();
-      let available: number | null = null;
-      let sent = 0;
-      report.forEach((entry: any) => {
-        if (
-          entry.type === 'candidate-pair' &&
-          entry.state === 'succeeded' &&
-          entry.availableOutgoingBitrate
-        ) {
-          available = entry.availableOutgoingBitrate;
-        }
-        if (entry.type === 'outbound-rtp' && entry.kind === 'video') {
-          sent = entry.bytesSent ?? 0;
-        }
-      });
-      if (__DEV__) {
+    const cameraTrack = getMedia().cameraTrack;
+    for (const [peerId, link] of linksRef.current) {
+      if (link.connectionState !== 'connected') {
+        continue;
+      }
+      const stats = await link.readStats();
+      // Santé audio : trois mesures mauvaises d'affilée pour prévenir, deux
+      // bonnes pour retirer la mention — jamais au moindre incident.
+      const health = healthRef.current.get(peerId) ?? { weak: false, bad: 0, good: 0 };
+      if (stats.quality === 'weak') {
+        health.bad = Math.min(health.bad + 1, WEAK_AFTER);
+        health.good = 0;
+      } else if (stats.quality === 'good') {
+        health.good = Math.min(health.good + 1, HEALTHY_AFTER);
+        health.bad = 0;
+      }
+      if (!health.weak && health.bad >= WEAK_AFTER) {
+        health.weak = true;
+        markPeer(peerId, { weak: true });
+      } else if (health.weak && health.good >= HEALTHY_AFTER) {
+        health.weak = false;
+        markPeer(peerId, { weak: false });
+      }
+      healthRef.current.set(peerId, health);
+
+      const state = qualityRef.current.get(peerId) ?? { bad: 0, good: 0, video: true };
+      const available = stats.availableBitrate;
+      if (__DEV__ && cameraTrack && stats.videoBytesSent) {
         console.log(
-          `[call] vidéo ${Math.round(sent / 1024)} Ko envoyés, dispo ${available ?? '?'} bps`,
+          `[call] ${peerId} vidéo ${Math.round(stats.videoBytesSent / 1024)} Ko, dispo ${available ?? '?'} bps`,
         );
       }
-      // Le maxima du TURN et de la 4G restent modestes : on dégrade par paliers.
-      if (!available || available <= 0 || available >= 400_000) {
-        badSamplesRef.current = 0;
-        return;
+      if (!available || available <= 0) {
+        state.bad = 0;
+        qualityRef.current.set(peerId, state);
+        continue;
       }
-      badSamplesRef.current += 1;
-      if (badSamplesRef.current < 2) {
-        return;
+      if (available >= COMFORTABLE_BITRATE) {
+        state.bad = 0;
+        state.good += 1;
+        if (!state.video && state.good >= 2 && cameraOnRef.current && cameraTrack) {
+          // Le lien s'est rétabli : la vidéo revient sur ce pair uniquement.
+          await link.setVideoTrack(cameraTrack, new MediaStream([cameraTrack]));
+          link.renegotiate();
+          state.video = true;
+          state.good = 0;
+        }
+        qualityRef.current.set(peerId, state);
+        continue;
       }
-      badSamplesRef.current = 0;
-      if (available < 200_000) {
-        await cutVideoForWeakNetwork();
-        return;
+      state.good = 0;
+      state.bad += 1;
+      if (state.bad < 2) {
+        qualityRef.current.set(peerId, state);
+        continue;
       }
-      if (bitrateRef.current > CALL_VIDEO_STEP_BITRATE) {
-        await applyVideoParams(sender, CALL_VIDEO_STEP_BITRATE);
-        return;
+      state.bad = 0;
+      if (available < WEAK_BITRATE) {
+        if (state.video) {
+          await link.setVideoTrack(null, null);
+          link.renegotiate();
+          state.video = false;
+        }
+        showWeakConnection();
+      } else {
+        const tier = Math.max(
+          CALL_VIDEO_LOW_BITRATE,
+          Math.min(CALL_VIDEO_STEP_BITRATE, Math.floor(available * 0.6)),
+        );
+        const sender = link.videoSenderRef;
+        if (sender) {
+          await applyVideoBitrate(sender, tier, fpsRef.current);
+        }
       }
-      if (bitrateRef.current > CALL_VIDEO_LOW_BITRATE) {
-        await applyVideoParams(sender, CALL_VIDEO_LOW_BITRATE);
-        return;
-      }
-      // Déjà au plancher : la vidéo cède, l'audio continue.
-      await cutVideoForWeakNetwork();
-    } catch {
-      /* statistiques indisponibles */
+      qualityRef.current.set(peerId, state);
     }
-  }, [applyVideoParams, cutVideoForWeakNetwork]);
+  }, [getMedia, markPeer, showWeakConnection]);
 
   const startQualityMonitor = useCallback(() => {
     stopQualityMonitor();
@@ -596,35 +487,145 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }, QUALITY_SAMPLE_MS);
   }, [sampleQuality, stopQualityMonitor]);
 
-  /* --------------------------- Reconnexion et négociation --------------------------- */
+  /* ------------------------------ Qui parle ------------------------------- */
 
-  /** Candidat retenu : « relay » confirme que le TURN fait le travail. */
-  const inspectCandidate = useCallback((pc: RTCPeerConnection) => {
-    void pc
-      .getStats()
-      .then((report: any) => {
-        const locals = new Map<string, any>();
-        const pairs: any[] = [];
-        report.forEach((entry: any) => {
-          if (entry.type === 'local-candidate') {
-            locals.set(entry.id, entry);
-          } else if (entry.type === 'candidate-pair' && entry.state === 'succeeded') {
-            pairs.push(entry);
-          }
-        });
-        const pair = pairs.find((entry) => entry.selected) ?? pairs[0];
-        const local = pair ? locals.get(pair.localCandidateId) : null;
-        if (local?.candidateType) {
-          setNetworkPath(local.candidateType);
-          if (__DEV__) {
-            console.log(
-              `[call] candidat ICE: ${local.candidateType}/${local.protocol} (${local.address ?? '?'})`,
-            );
-          }
-        }
-      })
-      .catch(() => undefined);
+  const stopSpeakingMonitor = useCallback(() => {
+    if (speakingTimerRef.current) {
+      clearInterval(speakingTimerRef.current);
+      speakingTimerRef.current = null;
+    }
+    setSpeaking([]);
   }, []);
+
+  /** Le niveau des flux reçus désigne le locuteur, sans jamais réordonner les tuiles. */
+  const sampleSpeaking = useCallback(async () => {
+    if (linksRef.current.size === 0) {
+      return;
+    }
+    const active: string[] = [];
+    for (const [peerId, link] of linksRef.current) {
+      if (link.connectionState !== 'connected') {
+        continue;
+      }
+      const stats = await link.readStats();
+      const previous = audioBytesRef.current.get(peerId) ?? 0;
+      const flowing = stats.audioBytesReceived > previous;
+      audioBytesRef.current.set(peerId, stats.audioBytesReceived);
+      // Silence réel (pas d'octets) = niveau nul : l'anneau retombe vite.
+      const level = flowing ? stats.audioLevel : 0;
+      const state = updateSpeaking(speakingRef.current.get(peerId) ?? IDLE_SPEAKING, level);
+      speakingRef.current.set(peerId, state);
+      if (state.speaking) {
+        active.push(peerId);
+      }
+    }
+    setSpeaking((current) =>
+      current.length === active.length && current.every((id, index) => id === active[index])
+        ? current
+        : active,
+    );
+  }, []);
+
+  const startSpeakingMonitor = useCallback(() => {
+    stopSpeakingMonitor();
+    speakingTimerRef.current = setInterval(() => {
+      void sampleSpeaking();
+    }, SPEAKING_SAMPLE_MS);
+  }, [sampleSpeaking, stopSpeakingMonitor]);
+
+  /* --------------------------- Fin d'appel et reconnexion --------------------------- */
+
+  const closeLink = useCallback((peerId: string) => {
+    const link = linksRef.current.get(peerId);
+    linksRef.current.delete(peerId);
+    audioBytesRef.current.delete(peerId);
+    try {
+      link?.close();
+    } catch {
+      /* déjà fermé */
+    }
+  }, []);
+
+  const closeAllLinks = useCallback(() => {
+    for (const peerId of [...linksRef.current.keys()]) {
+      closeLink(peerId);
+    }
+  }, [closeLink]);
+
+  const closePeer = useCallback(() => {
+    closeAllLinks();
+    stopQualityMonitor();
+    stopSpeakingMonitor();
+    const media = mediaRef.current;
+    mediaRef.current = null;
+    void media?.release();
+    stopCallAudio();
+    void setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+  }, [closeAllLinks, stopQualityMonitor, stopSpeakingMonitor]);
+
+  /** Fin d'appel locale : ferme le média et affiche l'état final brièvement. */
+  const finish = useCallback(
+    (reason: string) => {
+      if (ringGuardRef.current) {
+        clearTimeout(ringGuardRef.current);
+        ringGuardRef.current = null;
+      }
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      if (weakTimerRef.current) {
+        clearTimeout(weakTimerRef.current);
+        weakTimerRef.current = null;
+      }
+      stopRing();
+      closePeer();
+      callIdRef.current = null;
+      pendingVideoRef.current = null;
+      speakerRef.current = false;
+      mutedRef.current = false;
+      videoCallRef.current = false;
+      cameraOnRef.current = false;
+      facingRef.current = 'user';
+      resumeCameraRef.current = false;
+      bitrateRef.current = CALL_VIDEO_MAX_BITRATE;
+      qualityRef.current.clear();
+      healthRef.current.clear();
+      speakingRef.current.clear();
+      for (const attempt of retryRef.current.values()) {
+        if (attempt.timer) clearTimeout(attempt.timer);
+      }
+      retryRef.current.clear();
+      setSpeakerOn(false);
+      setMuted(false);
+      setStartedAt(null);
+      setMinimized(false);
+      setVideoCall(false);
+      setLocalCameraOn(false);
+      setRemoteCameraOn(false);
+      setLocalStream(null);
+      setRemoteStream(null);
+      setStreams({});
+      setFacing('user');
+      setWeakConnection(false);
+      setNetworkPath(null);
+      setMode('DIRECT');
+      modeRef.current = 'DIRECT';
+      setGroup(null);
+      setPeers([]);
+      setSpeaking([]);
+      setEndReason(reason);
+      setPhase('ended');
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = setTimeout(() => {
+        idleTimerRef.current = null;
+        setPeer(null);
+        setEndReason(null);
+        setPhase('idle');
+      }, IDLE_DELAY_MS);
+    },
+    [closePeer, setPhase],
+  );
 
   const clearReconnect = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -636,8 +637,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, [setPhase]);
 
+  /**
+   * Un lien perdu ne coupe pas l'appel des autres : on ne raccroche que si
+   * aucun autre lien n'est en cause.
+   */
   const beginReconnect = useCallback(() => {
     if (statusRef.current !== 'active' && statusRef.current !== 'connecting') {
+      return;
+    }
+    if (modeRef.current === 'GROUP' && linksRef.current.size > 1) {
       return;
     }
     setPhase('reconnecting');
@@ -647,155 +655,189 @@ export function CallProvider({ children }: { children: ReactNode }) {
     reconnectTimerRef.current = setTimeout(() => {
       reconnectTimerRef.current = null;
       if (callIdRef.current) {
-        emit('call:end', { callId: callIdRef.current });
+        emit(modeRef.current === 'GROUP' ? 'gcall:leave' : 'call:end', {
+          callId: callIdRef.current,
+        });
       }
       finish('Connexion perdue');
     }, CALL_RECONNECT_GRACE_MS);
   }, [emit, finish, setPhase]);
 
-  /** Négociation parfaite : le poli cède (rollback), l'impoli ignore. */
-  const negotiate = useCallback(async () => {
-    const pc = pcRef.current;
-    if (!pc || !callIdRef.current) return;
-    // Une réponse en cours va stabiliser la session : on repartira après.
-    if (pc.signalingState !== 'stable') return;
-    try {
-      makingOfferRef.current = true;
-      const offer = await pc.createOffer({});
-      await pc.setLocalDescription(offer);
-      emit('call:offer', { callId: callIdRef.current, sdp: (pc.localDescription as any)?.sdp });
-    } catch {
-      finish('Connexion impossible');
-    } finally {
-      makingOfferRef.current = false;
-    }
-  }, [emit, finish]);
+  /* ---------------------------------- Liens ---------------------------------- */
 
-  /* ------------------------------ Média WebRTC ------------------------------ */
-
-  const ensurePeer = useCallback(() => {
-    if (pcRef.current) return pcRef.current;
-    const pc = new RTCPeerConnection({ iceServers: buildIceServers() });
-    pc.addEventListener('icecandidate', (event: any) => {
-      const candidate = event?.candidate;
-      if (candidate) {
-        emit('call:ice', { callId: callIdRef.current, candidate: candidate.toJSON?.() ?? candidate });
+  const openLink = useCallback(
+    (peerId: string, options: LinkOptions) => {
+      const existing = linksRef.current.get(peerId);
+      if (existing) {
+        return existing;
       }
-    });
-    pc.addEventListener('negotiationneeded', () => {
-      void negotiate();
-    });
-    pc.addEventListener('track', (event: any) => {
-      const track = event?.track;
-      if (!track) return;
-      if (track.kind === 'video') {
-        const stream = event.streams?.[0] ?? new MediaStream([track]);
+      if (iceRef.current.length === 0) {
+        iceRef.current = buildIceServers();
+      }
+      const link = new RtcLink(peerId, {
+        iceServers: iceRef.current,
+        polite: options.polite,
+        send: (event, payload) => {
+          const callId = callIdRef.current;
+          if (!callId) {
+            return;
+          }
+          emit(
+            options.group ? `gcall:${event}` : `call:${event}`,
+            options.group ? { callId, to: peerId, ...payload } : { callId, ...payload },
+          );
+        },
+      });
+      link.onRemoteTrack((track, stream) => {
+        if (track.kind !== 'video') {
+          return;
+        }
+        setVideoMode(true);
+        if (options.group) {
+          setStreams((previous) => ({ ...previous, [peerId]: stream }));
+          markPeer(peerId, { video: true });
+          return;
+        }
         setRemoteStream(stream);
         setRemoteCameraOn(true);
-        setVideoMode(true);
-        try {
-          track.addEventListener?.('ended', () => setRemoteCameraOn(false));
-        } catch {
-          /* l'événement n'existe pas sur toutes les plateformes */
+      });
+      link.onStateChange((state) => {
+        if (state === 'connected') {
+          const pending = retryRef.current.get(peerId);
+          if (pending?.timer) {
+            clearTimeout(pending.timer);
+          }
+          retryRef.current.delete(peerId);
+          markPeer(peerId, { connected: true, reconnecting: false });
+          if (statusRef.current === 'reconnecting') {
+            clearReconnect();
+          }
+          if (statusRef.current === 'connecting') {
+            setStartedAt(Date.now());
+            setPhase('active');
+          } else if (statusRef.current === 'reconnecting') {
+            clearReconnect();
+          }
+          const sender = link.videoSenderRef;
+          if (sender) {
+            void applyVideoBitrate(sender, bitrateRef.current, fpsRef.current);
+          }
+          void link.readStats().then((stats) => {
+            if (stats.candidateType) {
+              setNetworkPath(stats.candidateType);
+              if (__DEV__) {
+                console.log(`[call] candidat ICE: ${stats.candidateType}`);
+              }
+            }
+          });
+          startQualityMonitor();
+        } else if (state === 'disconnected' || state === 'failed') {
+          markPeer(peerId, { connected: false, reconnecting: true });
+          setPhase(statusRef.current === 'active' ? 'reconnecting' : statusRef.current);
+          // Redémarrage ICE à attente croissante : on garde le média et la
+          // piste micro, seule la connectivité est renégociée.
+          retryLinkRef.current(peerId, options);
         }
+      });
+      linksRef.current.set(peerId, link);
+      return link;
+    },
+    [clearReconnect, emit, markPeer, setPhase, setVideoMode, startQualityMonitor],
+  );
+
+  /** Ferme un lien tombé et le rouvre : l'autre côté n'a rien à faire. */
+  useEffect(() => {
+    retryLinkRef.current = (peerId, options) => {
+      if (statusRef.current === 'idle' || statusRef.current === 'ended') {
+        return;
       }
-    });
-    pc.addEventListener('connectionstatechange', () => {
-      const state = (pc as any).connectionState;
-      if (state === 'connected') {
-        if (statusRef.current === 'connecting') {
-          setStartedAt(Date.now());
-          setPhase('active');
-        } else if (statusRef.current === 'reconnecting') {
-          clearReconnect();
+      const state = retryRef.current.get(peerId) ?? {
+        count: 0,
+        deadline: Date.now() + CALL_LINK_RETRY_WINDOW_MS,
+        timer: null,
+      };
+      const giveUp = () => {
+        retryRef.current.delete(peerId);
+        if (options.group) {
+          markPeer(peerId, { connected: false, reconnecting: false });
+          closeLink(peerId);
+          return;
         }
-        const sender = videoSenderRef.current;
-        if (sender) void applyVideoParams(sender, bitrateRef.current);
-        inspectCandidate(pc);
-        startQualityMonitor();
-      } else if (state === 'disconnected') {
-        beginReconnect();
-      } else if (state === 'failed') {
-        if (callIdRef.current) emit('call:end', { callId: callIdRef.current });
+        if (callIdRef.current) {
+          emit('call:end', { callId: callIdRef.current });
+        }
         finish('Connexion perdue');
+      };
+      if (Date.now() > state.deadline) {
+        giveUp();
+        return;
       }
-    });
-    pcRef.current = pc;
-    return pc;
-  }, [
-    applyVideoParams,
-    beginReconnect,
-    clearReconnect,
-    emit,
-    finish,
-    inspectCandidate,
-    negotiate,
-    setPhase,
-    setVideoMode,
-    startQualityMonitor,
-  ]);
-
-  const ensureLocalStream = useCallback(async () => {
-    if (audioStreamRef.current) return audioStreamRef.current;
-    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-    const stream = (await mediaDevices.getUserMedia({
-      audio: true,
-      video: false,
-    })) as MediaStream;
-    stream.getAudioTracks().forEach((track) => {
-      track.enabled = !mutedRef.current;
-    });
-    audioStreamRef.current = stream;
-    const pc = ensurePeer();
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-    return stream;
-  }, [ensurePeer]);
-
-  const applyPendingCandidates = useCallback(async () => {
-    const pc = pcRef.current;
-    if (!pc) return;
-    const queued = pendingCandidatesRef.current.splice(0);
-    for (const candidate of queued) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate as any));
-      } catch {
-        /* candidat tardif ignoré */
+      if (state.timer) {
+        return;
       }
-    }
-  }, []);
+      const delay = Math.min(
+        CALL_ICE_RESTART_BASE_MS * 2 ** state.count,
+        CALL_ICE_RESTART_MAX_MS,
+      );
+      state.timer = setTimeout(() => {
+        state.timer = null;
+        const link = linksRef.current.get(peerId);
+        if (!link) {
+          retryRef.current.delete(peerId);
+          return;
+        }
+        if (link.connectionState === 'connected') {
+          retryRef.current.delete(peerId);
+          return;
+        }
+        state.count += 1;
+        link.restartIce();
+        retryRef.current.set(peerId, state);
+        if (Date.now() + delay < state.deadline) {
+          retryLinkRef.current(peerId, options);
+        } else {
+          giveUp();
+        }
+      }, delay);
+      retryRef.current.set(peerId, state);
+    };
+  }, [closeLink, emit, finish, markPeer]);
 
-  /* ------------------------------- Cycle d'appel ------------------------------- */
+  /* ------------------------------- Cycle un à un ------------------------------- */
 
   const startCall = useCallback(
     async (conversationId: string, options?: { video?: boolean }) => {
       if (statusRef.current !== 'idle' || !token) {
         return;
       }
+      const media = getMedia();
+      modeRef.current = 'DIRECT';
+      setMode('DIRECT');
       setPhase('preparing');
-      const micAllowed = await askMicrophone();
+      const micAllowed = await media.askMicrophone();
       if ((statusRef.current as CallStatus) !== 'preparing') {
         return;
       }
       if (!micAllowed) {
         setPhase('idle');
-        showMicrophoneDenied();
+        media.showMicrophoneDenied();
         return;
       }
 
       let wantVideo = options?.video === true;
       let cameraTrack: MediaStreamTrack | null = null;
       if (wantVideo && CAMERA_UNAVAILABLE_EMULATOR) {
-        showCameraEmulator();
+        media.showCameraEmulator();
         wantVideo = false;
       }
       if (wantVideo) {
-        const cameraAllowed = await askCamera();
+        const cameraAllowed = await media.askCamera();
         if (!cameraAllowed) {
-          showCameraDenied();
+          media.showCameraDenied();
           wantVideo = false;
         } else {
           try {
-            cameraTrack = await getVideoTrack(facingRef.current);
+            cameraTrack = await media.openCameraTrack();
           } catch {
             Alert.alert('Caméra indisponible', 'L’appel démarre en vocal.');
             wantVideo = false;
@@ -803,18 +845,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }
       }
       if ((statusRef.current as CallStatus) !== 'preparing') {
-        cameraTrack?.stop();
+        media.stopCameraTrack();
         return;
       }
 
       setEndReason(null);
       setMinimized(false);
-      politeRef.current = false;
       setVideoMode(wantVideo);
       applySpeaker(wantVideo);
       if (cameraTrack) {
-        videoTrackRef.current = cameraTrack;
         cameraOnRef.current = true;
+        facingRef.current = media.cameraFacing;
+        setFacing(media.cameraFacing);
         setLocalCameraOn(true);
         setLocalStream(new MediaStream([cameraTrack]));
       }
@@ -843,38 +885,33 @@ export function CallProvider({ children }: { children: ReactNode }) {
           }
           callIdRef.current = ack.callId;
           setPeer(ack.peer ?? null);
+          if (ack.peer) {
+            // Le lien est prêt à répondre ; micro et caméra ne partent qu'au décroché.
+            openLink(ack.peer.id, { polite: false, group: false });
+            pendingVideoRef.current = cameraTrack;
+          }
         },
       );
     },
-    [
-      applySpeaker,
-      askCamera,
-      askMicrophone,
-      finish,
-      getVideoTrack,
-      setPhase,
-      setVideoMode,
-      showCameraDenied,
-      showCameraEmulator,
-      showMicrophoneDenied,
-      token,
-    ],
+    [applySpeaker, finish, getMedia, openLink, setPhase, setVideoMode, token],
   );
 
   const accept = useCallback(
     async (withVideo = false) => {
       const callId = callIdRef.current;
-      if (!callId || statusRef.current !== 'incoming') return;
+      const peerId = peer?.id;
+      if (!callId || !peerId || statusRef.current !== 'incoming') return;
       setPhase('connecting');
       stopRing();
-      const micAllowed = await askMicrophone();
+      const media = getMedia();
+      const micAllowed = await media.askMicrophone();
       // L'appel a pu être annulé pendant la demande de permission.
       if ((statusRef.current as CallStatus) !== 'connecting') {
         return;
       }
       if (!micAllowed) {
         emit('call:reject', { callId, reason: 'declined' });
-        showMicrophoneDenied();
+        media.showMicrophoneDenied();
         finish('Micro inaccessible');
         return;
       }
@@ -882,24 +919,24 @@ export function CallProvider({ children }: { children: ReactNode }) {
       let wantedVideo = withVideo;
       let cameraTrack: MediaStreamTrack | null = null;
       if (wantedVideo && CAMERA_UNAVAILABLE_EMULATOR) {
-        showCameraEmulator();
+        media.showCameraEmulator();
         wantedVideo = false;
       }
       if (wantedVideo) {
-        const cameraAllowed = await askCamera();
+        const cameraAllowed = await media.askCamera();
         if (!cameraAllowed) {
-          showCameraDenied();
+          media.showCameraDenied();
           wantedVideo = false;
         } else {
           try {
-            cameraTrack = await getVideoTrack(facingRef.current);
+            cameraTrack = await media.openCameraTrack();
           } catch {
             wantedVideo = false;
           }
         }
       }
       if ((statusRef.current as CallStatus) !== 'connecting') {
-        cameraTrack?.stop();
+        media.stopCameraTrack();
         return;
       }
 
@@ -909,11 +946,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
       startCallAudio(handleProximity);
       // Après `start` : c'est lui qui remet la route audio par défaut.
       applySpeaker(videoCallRef.current);
+      const link = openLink(peerId, { polite: true, group: false });
       try {
-        await ensureLocalStream();
+        await publishMicro();
         if (cameraTrack) {
-          videoTrackRef.current = cameraTrack;
           cameraOnRef.current = true;
+          facingRef.current = media.cameraFacing;
+          setFacing(media.cameraFacing);
           setLocalCameraOn(true);
           setLocalStream(new MediaStream([cameraTrack]));
           await attachVideoTrack(cameraTrack);
@@ -923,24 +962,22 @@ export function CallProvider({ children }: { children: ReactNode }) {
         finish('Micro inaccessible');
         return;
       }
+      link.initiate();
       emit('call:accept', { callId, video: wantedVideo });
       pendingActionRef.current = null;
     },
     [
       applySpeaker,
-      askCamera,
-      askMicrophone,
       attachVideoTrack,
       emit,
-      ensureLocalStream,
       finish,
-      getVideoTrack,
+      getMedia,
       handleProximity,
+      openLink,
+      peer?.id,
+      publishMicro,
       setPhase,
       setVideoMode,
-      showCameraDenied,
-      showCameraEmulator,
-      showMicrophoneDenied,
     ],
   );
 
@@ -955,8 +992,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const hangup = useCallback(() => {
     const callId = callIdRef.current;
     if (callId) {
-      const wasRinging = statusRef.current === 'outgoing';
-      emit(wasRinging ? 'call:cancel' : 'call:end', { callId });
+      if (modeRef.current === 'GROUP') {
+        emit('gcall:leave', { callId });
+      } else {
+        const wasRinging = statusRef.current === 'outgoing';
+        emit(wasRinging ? 'call:cancel' : 'call:end', { callId });
+      }
     }
     finish('Appel terminé');
   }, [emit, finish]);
@@ -965,16 +1006,58 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setMuted((previous) => {
       const next = !previous;
       mutedRef.current = next;
-      audioStreamRef.current?.getAudioTracks().forEach((track) => {
-        track.enabled = !next;
-      });
+      mediaRef.current?.setMuted(next);
+      if (modeRef.current === 'GROUP' && callIdRef.current) {
+        emit('gcall:mute', { callId: callIdRef.current, muted: next });
+      }
+      tap('light');
       return next;
     });
-  }, []);
+  }, [emit, tap]);
 
   const toggleSpeaker = useCallback(() => {
     applySpeaker(!speakerRef.current);
   }, [applySpeaker]);
+
+  const toggleCamera = useCallback(async () => {
+    const current = statusRef.current;
+    if (
+      current !== 'outgoing' &&
+      current !== 'connecting' &&
+      current !== 'active' &&
+      current !== 'reconnecting'
+    ) {
+      return;
+    }
+    const media = getMedia();
+    if (media.cameraBusy) return;
+    media.setCameraBusy(true);
+    try {
+      if (cameraOnRef.current) {
+        await disableCamera(true);
+      } else {
+        await enableCamera();
+      }
+    } finally {
+      media.setCameraBusy(false);
+    }
+  }, [disableCamera, enableCamera, getMedia]);
+
+  /** Bascule avant/arrière via `applyConstraints` : pas de seconde session de capture. */
+  const flipCamera = useCallback(async () => {
+    const media = getMedia();
+    if (!cameraOnRef.current || media.cameraBusy) return;
+    media.setCameraBusy(true);
+    try {
+      const next = await media.flipCamera();
+      facingRef.current = next;
+      setFacing(next);
+    } catch {
+      Alert.alert('Caméra indisponible', 'Impossible de changer de caméra.');
+    } finally {
+      media.setCameraBusy(false);
+    }
+  }, [getMedia]);
 
   const minimize = useCallback(() => {
     const current = statusRef.current;
@@ -985,20 +1068,22 @@ export function CallProvider({ children }: { children: ReactNode }) {
       current === 'reconnecting'
     ) {
       // Réduit : la caméra s'arrête (batterie/données), l'audio continue.
-      if (cameraOnRef.current && !cameraBusyRef.current) {
+      const media = getMedia();
+      if (cameraOnRef.current && !media.cameraBusy) {
         resumeCameraRef.current = true;
-        cameraBusyRef.current = true;
+        media.setCameraBusy(true);
         void disableCamera(true).finally(() => {
-          cameraBusyRef.current = false;
+          media.setCameraBusy(false);
         });
       }
       setMinimized(true);
     }
-  }, [disableCamera]);
+  }, [disableCamera, getMedia]);
 
   const restore = useCallback(() => {
     setMinimized(false);
-    if (!resumeCameraRef.current || cameraBusyRef.current) return;
+    const media = getMedia();
+    if (!resumeCameraRef.current || media.cameraBusy) return;
     resumeCameraRef.current = false;
     const current = statusRef.current;
     if (
@@ -1007,12 +1092,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
       current === 'active' ||
       current === 'reconnecting'
     ) {
-      cameraBusyRef.current = true;
+      media.setCameraBusy(true);
       void enableCamera().finally(() => {
-        cameraBusyRef.current = false;
+        media.setCameraBusy(false);
       });
     }
-  }, [enableCamera]);
+  }, [enableCamera, getMedia]);
 
   const handleDeepLink = useCallback(
     (input: { callId?: string; action?: string }) => {
@@ -1031,33 +1116,180 @@ export function CallProvider({ children }: { children: ReactNode }) {
     [accept, reject],
   );
 
+  /* ------------------------------ Cycle de groupe ------------------------------ */
+
+  const beginGroupCall = useCallback(
+    async (ack: Extract<GroupCallAck, { ok: true }>) => {
+      callIdRef.current = ack.callId;
+      modeRef.current = 'GROUP';
+      setMode('GROUP');
+      setMedia(ack.media);
+      setMaxParticipants(ack.maxParticipants);
+      setGroup(ack.group);
+      setOffer(null);
+      setMinimized(false);
+      setStartedAt(Date.now());
+      setPhase('connecting');
+      startCallAudio();
+      // Écouteur par défaut, comme en un à un : le haut-parleur reste un choix.
+      applySpeaker(false);
+      const others = ack.members.filter((member) => member.id !== myIdRef.current);
+      setPeers(
+        others.map((member: GroupCallMember) => ({ ...member, connected: false, video: false })),
+      );
+      // On est l'arrivant : c'est nous qui ouvrons chaque lien.
+      for (const member of others) {
+        openLink(member.id, { polite: (myIdRef.current ?? '') > member.id, group: true });
+      }
+      try {
+        await publishMicro();
+        const track = getMedia().cameraTrack;
+        if (track) {
+          await attachVideoTrack(track);
+        }
+      } catch {
+        emit('gcall:leave', { callId: ack.callId });
+        finish('Micro inaccessible');
+        return;
+      }
+      linksRef.current.forEach((link) => link.initiate());
+      startSpeakingMonitor();
+      if (others.length === 0) {
+        setPhase('active');
+      }
+    },
+    [applySpeaker, attachVideoTrack, emit, finish, getMedia, openLink, publishMicro, setPhase, startSpeakingMonitor],
+  );
+
+  const startGroupCall = useCallback(
+    async (conversationId: string, options?: { video?: boolean }) => {
+      if (!token || statusRef.current !== 'idle') {
+        return;
+      }
+      const media = getMedia();
+      const micAllowed = await media.askMicrophone();
+      if (!micAllowed) {
+        media.showMicrophoneDenied();
+        return;
+      }
+      setEndReason(null);
+      setPhase('connecting');
+      if (options?.video === true) {
+        await enableCamera({ notify: false });
+      }
+      connectSocket(token).emit(
+        'gcall:start',
+        { conversationId, media: options?.video === true ? 'VIDEO' : 'AUDIO' },
+        (ack: GroupCallAck) => {
+          if (!ack?.ok) {
+            finish(
+              ack?.error === 'full'
+                ? 'Appel complet'
+                : ack?.error === 'busy'
+                  ? 'Vous êtes déjà dans un appel'
+                  : 'Appel de groupe impossible',
+            );
+            return;
+          }
+          void beginGroupCall(ack);
+        },
+      );
+    },
+    [beginGroupCall, enableCamera, finish, getMedia, setPhase, token],
+  );
+
+  const joinOffer = useCallback(async () => {
+    const conversationId = offer?.conversationId;
+    setOffer(null);
+    if (conversationId) {
+      await startGroupCall(conversationId);
+    }
+  }, [offer?.conversationId, startGroupCall]);
+
+  const dismissOffer = useCallback(() => {
+    stopRing();
+    setOffer(null);
+  }, []);
+
+
+  /** Refuser une invitation : l'appel continue pour les autres. */
+  const declineOffer = useCallback(() => {
+    const callId = offer?.callId;
+    stopRing();
+    setOffer(null);
+    if (callId) {
+      emit('gcall:decline', { callId });
+    }
+  }, [emit, offer]);
+
+  /** Rappeler des membres du groupe sans quitter l'écran d'appel. */
+  const inviteMembers = useCallback(
+    (userIds: string[]) => {
+      if (callIdRef.current && userIds.length > 0) {
+        emit('gcall:add', { callId: callIdRef.current, userIds });
+      }
+    },
+    [emit],
+  );
+
+  /** Un administrateur sort quelqu'un de l'appel ; l'appel continue. */
+  const kickMember = useCallback(
+    (userId: string) => {
+      if (callIdRef.current) {
+        emit('gcall:kick', { callId: callIdRef.current, userId });
+      }
+    },
+    [emit],
+  );
+
   /* ------------------------- Événements de signalisation ------------------------- */
+
+  useEffect(() => {
+    myIdRef.current = user?.id ?? null;
+  }, [user?.id]);
+
+  // STUN/TURN servis par l'API : jamais d'identifiants dans le bundle.
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    let cancelled = false;
+    void ensureIceServers(token).then((servers) => {
+      if (!cancelled && servers.length > 0) {
+        iceRef.current = servers;
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
     const socket = connectSocket(token);
 
-    const onIncoming = (payload: {
-      callId: string;
-      from: CallPeer;
-      video?: boolean;
-    }) => {
+    /* ------------------------------- un à un ------------------------------- */
+
+    const onIncoming = (payload: { callId: string; from: CallPeer; video?: boolean }) => {
       if (statusRef.current !== 'idle') {
         // Déjà en appel : le serveur gère le « busy » ; on ignore simplement.
         return;
       }
       callIdRef.current = payload.callId;
+      modeRef.current = 'DIRECT';
+      setMode('DIRECT');
       setPeer(payload.from);
       setEndReason(null);
       setMinimized(false);
       setRemoteCameraOn(false);
-      politeRef.current = true;
       if (payload.video === true) {
         setVideoMode(true);
       } else {
         setVideoMode(false);
         applySpeaker(false);
       }
+      // Le lien est créé dès l'invitation : il attend l'offer en pair « poli ».
+      openLink(payload.from.id, { polite: true, group: false });
       setPhase('incoming');
       void startIncomingRing();
       const pending = pendingActionRef.current;
@@ -1072,80 +1304,42 @@ export function CallProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    const onAccepted = async (payload: { video?: boolean }) => {
+    const onAccepted = async () => {
       if (statusRef.current !== 'outgoing') return;
       setPhase('connecting');
       stopRing();
       startCallAudio(handleProximity);
       // Après `start` : c'est lui qui remet la route audio par défaut.
       applySpeaker(videoCallRef.current);
+      const pendingTrack = pendingVideoRef.current;
+      pendingVideoRef.current = null;
       try {
-        await ensureLocalStream();
-        const pendingTrack = videoTrackRef.current;
+        await publishMicro();
         if (pendingTrack) {
           await attachVideoTrack(pendingTrack);
         }
       } catch {
         emit('call:end', { callId: callIdRef.current });
         finish('Connexion impossible');
-        return;
-      }
-      if (payload.video === true) {
-        setRemoteCameraOn(true);
       }
     };
 
+    const directLink = () => linksRef.current.values().next().value as RtcLink | undefined;
+
     const onOffer = async (payload: { callId: string; sdp: string }) => {
       if (callIdRef.current !== payload.callId) return;
-      const pc = ensurePeer();
-      // Une offer déjà reçue et en cours de traitement : on ignore la copie.
-      if (pc.signalingState === 'have-remote-offer') return;
-      const polite = politeRef.current;
-      const collision = makingOfferRef.current || pc.signalingState !== 'stable';
-      ignoreOfferRef.current = collision && !polite;
-      if (ignoreOfferRef.current) {
-        return;
-      }
-      try {
-        if (collision && polite && pc.signalingState === 'have-local-offer') {
-          await pc.setLocalDescription({ type: 'rollback' } as any);
-        }
-        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: payload.sdp }));
-        remoteReadyRef.current = true;
-        await applyPendingCandidates();
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        emit('call:answer', { callId: callIdRef.current, sdp: (pc.localDescription as any)?.sdp });
-      } catch {
-        finish('Connexion impossible');
-      }
+      const result = await directLink()?.handleOffer(payload.sdp);
+      if (result === 'failed') finish('Connexion impossible');
     };
 
     const onAnswer = async (payload: { callId: string; sdp: string }) => {
       if (callIdRef.current !== payload.callId) return;
-      const pc = pcRef.current;
-      if (!pc) return;
-      try {
-        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: payload.sdp }));
-        remoteReadyRef.current = true;
-        await applyPendingCandidates();
-      } catch {
-        /* answer déjà appliquée */
-      }
+      await directLink()?.handleAnswer(payload.sdp);
     };
 
     const onIce = async (payload: { callId: string; candidate: unknown }) => {
       if (callIdRef.current !== payload.callId) return;
-      const pc = pcRef.current;
-      if (!pc || !remoteReadyRef.current) {
-        pendingCandidatesRef.current.push(payload.candidate);
-        return;
-      }
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(payload.candidate as any));
-      } catch {
-        /* candidat obsolète */
-      }
+      await directLink()?.handleCandidate(payload.candidate);
     };
 
     const onVideoToggle = (payload: { callId: string; video: boolean }) => {
@@ -1164,7 +1358,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         finish('Appel annulé');
       }
     };
-    const onEnded = (payload: { reason: string; durationMs: number }) => {
+    const onEnded = (payload: { reason: string }) => {
       if (!callIdRef.current) return;
       const reason =
         payload.reason === 'timeout'
@@ -1178,6 +1372,111 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (statusRef.current === 'incoming') finish('Appel manqué');
     };
 
+    /* -------------------------------- groupe -------------------------------- */
+
+    const onGroupIncoming = (payload: GroupCallInvite) => {
+      if (!payload?.callId || callIdRef.current === payload.callId) return;
+      setOffer(payload);
+      // Seuls ceux qui ne sont pas déjà en appel entendent la sonnerie.
+      if (statusRef.current === 'idle') {
+        void startIncomingRing();
+      }
+    };
+
+    // Occupé ailleurs : simple notification, pas de sonnerie.
+    const onGroupBusy = (payload: GroupCallInvite) => {
+      if (!payload?.callId || callIdRef.current === payload.callId) return;
+      setOffer(payload);
+    };
+
+    const onGroupKicked = (payload: { callId: string }) => {
+      if (callIdRef.current !== payload?.callId) return;
+      tap('warning');
+      finish('Retiré de l’appel');
+    };
+
+    const onGroupMedia = (payload: { callId: string; media: GroupCallMedia }) => {
+      if (callIdRef.current !== payload?.callId) return;
+      setMedia(payload.media);
+    };
+
+    const onGroupVideo = (payload: { callId: string; userId: string; video: boolean }) => {
+      if (callIdRef.current !== payload?.callId) return;
+      markPeer(payload.userId, { video: payload.video });
+    };
+
+    const onGroupJoined = (payload: { callId: string; peer: GroupCallMember }) => {
+      if (callIdRef.current !== payload?.callId || !payload?.peer) return;
+      const joined = payload.peer;
+      tap('light');
+      say(`${joined.displayName} a rejoint`);
+      setPeers((previous) =>
+        previous.some((entry) => entry.id === joined.id)
+          ? previous.map((entry) => (entry.id === joined.id ? { ...entry, ...joined } : entry))
+          : [...previous, { ...joined, connected: false, video: false }],
+      );
+      if (linksRef.current.has(joined.id)) {
+        // Lien déjà ouvert : l'arrivant a négocié, on répondra sur celui-là.
+        return;
+      }
+      const link = openLink(joined.id, {
+        polite: (myIdRef.current ?? '') > joined.id,
+        group: true,
+      });
+      publishMicroTo(link);
+    };
+
+    const onGroupOffer = async (payload: { callId: string; from: string; sdp: string }) => {
+      if (callIdRef.current !== payload?.callId) return;
+      const link = openLink(payload.from, {
+        polite: (myIdRef.current ?? '') > payload.from,
+        group: true,
+      });
+      publishMicroTo(link);
+      await link.handleOffer(payload.sdp);
+    };
+
+    const onGroupAnswer = async (payload: { callId: string; from: string; sdp: string }) => {
+      if (callIdRef.current !== payload?.callId) return;
+      await linksRef.current.get(payload.from)?.handleAnswer(payload.sdp);
+    };
+
+    const onGroupIce = async (payload: { callId: string; from: string; candidate: unknown }) => {
+      if (callIdRef.current !== payload?.callId) return;
+      await linksRef.current.get(payload.from)?.handleCandidate(payload.candidate);
+    };
+
+    const onGroupMute = (payload: { callId: string; userId: string; muted: boolean }) => {
+      if (callIdRef.current !== payload?.callId) return;
+      markPeer(payload.userId, { muted: payload.muted });
+    };
+
+    const onGroupPeerLeft = (payload: { callId: string; userId: string }) => {
+      if (callIdRef.current !== payload?.callId) return;
+      const gone = peersRef.current.find((entry) => entry.id === payload.userId);
+      if (gone) {
+        say(`${gone.displayName} est parti`);
+      }
+      closeLink(payload.userId);
+      setStreams((previous) => {
+        const next = { ...previous };
+        delete next[payload.userId];
+        return next;
+      });
+      setPeers((previous) => previous.filter((entry) => entry.id !== payload.userId));
+    };
+
+    const onGroupEnded = (payload: { callId: string }) => {
+      if (callIdRef.current === payload?.callId) {
+        finish('Appel terminé');
+        return;
+      }
+      if (offer?.callId === payload?.callId) {
+        stopRing();
+        setOffer(null);
+      }
+    };
+
     socket.on('call:incoming', onIncoming);
     socket.on('call:accepted', onAccepted);
     socket.on('call:offer', onOffer);
@@ -1188,6 +1487,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
     socket.on('call:cancelled', onCancelled);
     socket.on('call:ended', onEnded);
     socket.on('call:missed', onMissed);
+    socket.on('gcall:incoming', onGroupIncoming);
+    socket.on('gcall:busy', onGroupBusy);
+    socket.on('gcall:kicked', onGroupKicked);
+    socket.on('gcall:media', onGroupMedia);
+    socket.on('gcall:video', onGroupVideo);
+    socket.on('gcall:joined', onGroupJoined);
+    socket.on('gcall:offer', onGroupOffer);
+    socket.on('gcall:answer', onGroupAnswer);
+    socket.on('gcall:ice', onGroupIce);
+    socket.on('gcall:mute', onGroupMute);
+    socket.on('gcall:peer-left', onGroupPeerLeft);
+    socket.on('gcall:ended', onGroupEnded);
 
     return () => {
       socket.off('call:incoming', onIncoming);
@@ -1200,24 +1511,41 @@ export function CallProvider({ children }: { children: ReactNode }) {
       socket.off('call:cancelled', onCancelled);
       socket.off('call:ended', onEnded);
       socket.off('call:missed', onMissed);
+      socket.off('gcall:incoming', onGroupIncoming);
+      socket.off('gcall:busy', onGroupBusy);
+      socket.off('gcall:kicked', onGroupKicked);
+      socket.off('gcall:media', onGroupMedia);
+      socket.off('gcall:video', onGroupVideo);
+      socket.off('gcall:joined', onGroupJoined);
+      socket.off('gcall:offer', onGroupOffer);
+      socket.off('gcall:answer', onGroupAnswer);
+      socket.off('gcall:ice', onGroupIce);
+      socket.off('gcall:mute', onGroupMute);
+      socket.off('gcall:peer-left', onGroupPeerLeft);
+      socket.off('gcall:ended', onGroupEnded);
     };
   }, [
     accept,
-    applyPendingCandidates,
     applySpeaker,
     attachVideoTrack,
+    closeLink,
     emit,
-    ensureLocalStream,
-    ensurePeer,
     finish,
     handleProximity,
+    markPeer,
+    offer?.callId,
+    openLink,
+    publishMicro,
+    publishMicroTo,
     reject,
+    say,
     setPhase,
     setVideoMode,
+    tap,
     token,
   ]);
 
-  // Socket perdu pendant un appel : « Reconnexion… » puis fin après la grâce.
+  // Socket coupé pendant un appel : « Reconnexion… » puis fin après la grâce.
   useEffect(() => {
     const off = onConnection((connected) => {
       if (!connected) {
@@ -1226,8 +1554,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }
         return;
       }
-      const pcState = (pcRef.current as any)?.connectionState;
-      if (statusRef.current === 'reconnecting' && pcState === 'connected') {
+      const anyLive = [...linksRef.current.values()].some((l) => l.connectionState === 'connected');
+      if (statusRef.current === 'reconnecting' && anyLive) {
         clearReconnect();
       }
     });
@@ -1249,6 +1577,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const value: CallContextValue = {
     status,
     peer,
+    mode,
+    group,
+    peers,
+    streams,
+    speaking,
+    offer,
+    media,
+    maxParticipants,
+    mention,
     muted,
     startedAt,
     endReason,
@@ -1263,6 +1600,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
     weakConnection,
     networkPath,
     startCall,
+    startGroupCall,
+    joinOffer,
+    dismissOffer,
+    declineOffer,
+    inviteMembers,
+    kickMember,
+    self: user ? { id: user.id, displayName: user.displayName, avatarUrl: user.avatarUrl ?? null } : null,
     accept,
     reject,
     hangup,

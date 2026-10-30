@@ -47,6 +47,10 @@ interface AvatarProps {
   variant?: 'user' | 'group';
   /** 'circle' (défaut) ou 'rounded' : carré à coins arrondis, façon WeChat. */
   shape?: 'circle' | 'rounded';
+  /** Emoji d'identité d'un groupe, affiché quand il n'y a pas de photo. */
+  emoji?: string | null;
+  /** Couleur de fond de l'emoji (hex). */
+  color?: string | null;
 }
 
 /**
@@ -61,6 +65,8 @@ export function Avatar({
   gender,
   variant = 'user',
   shape = 'circle',
+  emoji,
+  color,
 }: AvatarProps) {
   const scheme = useColorScheme();
   const [failedUri, setFailedUri] = useState<string | null>(null);
@@ -68,7 +74,11 @@ export function Avatar({
   const fontSize = size * 0.38;
   const radius = shape === 'rounded' ? size * 0.2 : size / 2;
   const clip = shape === 'rounded' ? 'hidden' : undefined;
-  const fullUri = uri ? (uri.startsWith('http') ? uri : `${API_URL}${uri}`) : null;
+  const fullUri = uri
+    ? uri.startsWith('http') || uri.startsWith('data:')
+      ? uri
+      : `${API_URL}${uri}`
+    : null;
   const showPhoto = Boolean(fullUri && failedUri !== fullUri);
 
   if (showPhoto && fullUri) {
@@ -84,6 +94,28 @@ export function Avatar({
   }
 
   if (variant === 'group') {
+    const background = color ?? PALETTE[paletteIndex(name)];
+    if (emoji) {
+      return (
+        <View
+          style={[
+            styles.root,
+            {
+              width: size,
+              height: size,
+              borderRadius: radius,
+              overflow: clip,
+              backgroundColor: background,
+            },
+            style,
+          ]}
+          accessibilityLabel={`Avatar du groupe ${name}`}>
+          <ThemedText style={{ fontSize: size * 0.5, lineHeight: size * 0.62 }}>
+            {emoji}
+          </ThemedText>
+        </View>
+      );
+    }
     return (
       <View
         style={[
@@ -93,7 +125,7 @@ export function Avatar({
             height: size,
             borderRadius: radius,
             overflow: clip,
-            backgroundColor: PALETTE[paletteIndex(name)],
+            backgroundColor: background,
           },
           style,
         ]}>

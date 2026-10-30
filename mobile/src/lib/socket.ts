@@ -3,6 +3,17 @@ import { io, type Socket } from 'socket.io-client';
 import { refreshAccessToken } from './api';
 import { API_URL } from './config';
 import { getCachedAccessToken } from './token-storage';
+import type { ReactionSummary } from './types';
+
+/** Réactions proposées : stickers de la panthère Mbolo (liste fermée côté serveur). */
+export const REACTION_STICKERS = [
+  'mbolo-panther-2d/amour',
+  'mbolo-panther-2d/fou-rire',
+  'mbolo-panther-2d/pouce-leve',
+  'mbolo-panther-2d/choc',
+  'mbolo-panther-2d/tristesse',
+  'mbolo-panther-2d/colere',
+] as const;
 
 let socket: Socket | null = null;
 /** Un seul rafraîchissement de jeton à la fois, même si plusieurs
@@ -138,6 +149,28 @@ export function onConnection(listener: (connected: boolean) => void): () => void
 export function reportDelivered(messageIds: string[]): void {
   if (!socket?.connected || messageIds.length === 0) return;
   socket.emit('message:ack', { messageIds });
+}
+
+/**
+ * Ajoute ou retire une réaction et renvoie le résumé autoritatif du serveur.
+ * Les erreurs remontent : l'appelant peut revenir à l'état précédent.
+ */
+export async function toggleReaction(
+  token: string,
+  conversationId: string,
+  messageId: string,
+  reaction: string,
+): Promise<ReactionSummary[]> {
+  const active = await ensureSocket(token);
+  const ack = (await active
+    .timeout(10_000)
+    .emitWithAck('message:react', { conversationId, messageId, reaction })) as
+    | { reactions?: ReactionSummary[]; error?: string }
+    | undefined;
+  if (ack?.error) {
+    throw new Error(ack.error);
+  }
+  return Array.isArray(ack?.reactions) ? ack.reactions : [];
 }
 
 /**

@@ -52,7 +52,7 @@ import { GifMessageBubble } from '@/features/media/GifMessageBubble';
 import type { RecentGif } from '@/features/media/GifPanel';
 import { StickerMessageBubble } from '@/features/stickers/StickerMessageBubble';
 import { findSticker } from '@/features/stickers/stickerPacks';
-import { StickerMessage } from '@/features/stickers/StickerView';
+import { StickerMessage, StickerView } from '@/features/stickers/StickerView';
 import {
   PERSONAL_PACK_ID,
   receivedStickerId,
@@ -109,24 +109,59 @@ import {
   subscribe as subscribeOutbox,
   type OutboxItem,
 } from '@/lib/outbox';
-import { connectSocket, deleteMessage, getSocket, onConnection, reportDelivered } from '@/lib/socket';
+import {
+  connectSocket,
+  deleteMessage,
+  getSocket,
+  onConnection,
+  reportDelivered,
+  REACTION_STICKERS,
+  toggleReaction,
+} from '@/lib/socket';
 import { advanceCursor, onMissedMessages } from '@/lib/sync';
 import type {
+  ConversationRemovedEvent,
   ConversationSummary,
+  GroupUpdatedEvent,
   Message,
   MessageAttachment,
   MessageQuote,
+  MessageReactionEvent,
   MessageReceipt,
+  ReactionSummary,
 } from '@/lib/types';
 
 type ListRow =
   | { key: string; type: 'date'; label: string }
   | { key: string; type: 'time'; label: string }
   | { key: string; type: 'unread'; count: number }
-  | { key: string; type: 'message'; message: Message }
-  | { key: string; type: 'album'; messages: Message[] };
+  | { key: string; type: 'message'; message: Message; continuation?: boolean }
+  | { key: string; type: 'album'; messages: Message[]; continuation?: boolean };
 
 const TYPING_STEP_MS = 170;
+
+/** Bascule locale d'une réaction, avant la confirmation du serveur. */
+function toggleLocalReaction(
+  reactions: ReactionSummary[],
+  reaction: string,
+): ReactionSummary[] {
+  const existing = reactions.find((entry) => entry.reaction === reaction);
+  if (!existing) {
+    return [...reactions, { reaction, count: 1, mine: true }];
+  }
+  if (existing.mine) {
+    return existing.count <= 1
+      ? reactions.filter((entry) => entry.reaction !== reaction)
+      : reactions.map((entry) =>
+          entry.reaction === reaction
+            ? { ...entry, count: entry.count - 1, mine: false }
+            : entry,
+        );
+  }
+  return reactions.map((entry) =>
+    entry.reaction === reaction ? { ...entry, count: entry.count + 1, mine: true } : entry,
+  );
+}
 /** Au-delà de ce défilement, la pastille de retour en bas apparaît. */
 const JUMP_AFTER_PX = 320;
 /** Double coche bleue : le message a été lu. */
@@ -431,34 +466,99 @@ function TypingLine({ name, text }: { name: string; text: string }) {
   );
 }
 
+function ReactionChips({
+  reactions,
+  alignEnd,
+  onToggle,
+}: {
+  reactions: ReactionSummary[];
+  alignEnd: boolean;
+  onToggle: (reaction: string) => void;
+}) {
+  const theme = useTheme();
+  // Les messages mis en cache avant le passage aux stickers peuvent porter
+  // d'anciennes réactions Unicode : on ignore tout ce qui n'est pas une réf.
+  const visible = reactions.filter(
+    (entry) => typeof entry.reaction === 'string' && entry.reaction.length > 0,
+  );
+  if (visible.length === 0) {
+    return null;
+  }
+  return (
+    <View style={[styles.reactionChips, alignEnd && styles.reactionChipsEnd]}>
+      {visible.map((reaction) => {
+        const sticker = findSticker(reaction.reaction);
+        return (
+          <Pressable
+            key={reaction.reaction}
+            onPress={() => onToggle(reaction.reaction)}
+            accessibilityRole="button"
+            accessibilityLabel={`${
+              sticker
+                ? sticker.kind === 'image'
+                  ? (sticker.name ?? sticker.alt)
+                  : sticker.label
+                : 'Réaction'
+            }, ${reaction.count}`}
+            style={[
+              styles.reactionChip,
+              {
+                backgroundColor: reaction.mine ? theme.accentSoft : theme.backgroundElement,
+                borderColor: reaction.mine ? theme.accent : theme.border,
+              },
+            ]}>
+            {sticker ? (
+              <StickerView sticker={sticker} size={24} />
+            ) : (
+              <ThemedText type="micro">?</ThemedText>
+            )}
+            {reaction.count > 1 ? (
+              <ThemedText type="micro" themeColor="textSecondary">
+                {reaction.count}
+              </ThemedText>
+            ) : null}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function ChatHeaderTitle({
   title,
   subtitle,
   presenceUserId,
+  avatar,
   onPress,
 }: {
   title: string;
   subtitle: string;
   presenceUserId?: string;
+  avatar?: React.ReactNode;
   onPress?: () => void;
 }) {
   const chat = useChatColors();
   const content = (
     <View style={styles.headerTitleBody}>
-      <ThemedText numberOfLines={1} style={[styles.headerName, { color: chat.headerText }]}>
-        {title}
-      </ThemedText>
-      {presenceUserId ? (
-        <PresenceSubtitle
-          userId={presenceUserId}
-          onlineColor={chat.send}
-          offlineColor={chat.headerSubtitle}
-        />
-      ) : subtitle ? (
-        <ThemedText numberOfLines={1} style={[styles.headerSubtitle, { color: chat.headerSubtitle }]}>
-          {subtitle}
+      {avatar}
+      <View style={styles.headerTitleText}>
+        <ThemedText numberOfLines={1} style={[styles.headerName, { color: chat.headerText }]}>
+          {title}
         </ThemedText>
-      ) : null}
+        {presenceUserId ? (
+          <PresenceSubtitle
+            userId={presenceUserId}
+            onlineColor={chat.send}
+            offlineColor={chat.headerSubtitle}
+          />
+        ) : subtitle ? (
+          <ThemedText
+            numberOfLines={1}
+            style={[styles.headerSubtitle, { color: chat.headerSubtitle }]}>
+            {subtitle}
+          </ThemedText>
+        ) : null}
+      </View>
     </View>
   );
 
@@ -515,6 +615,8 @@ export default function ChatScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [input, setInput] = useState('');
+  /** Brouillon persistant de cette conversation. */
+  const [draft, setDraft] = useState(() => (id ? cache.getDraft(id) : ''));
   const [typing, setTyping] = useState<{ userId: string; text: string } | null>(null);
   /** Anti-double-appui : deux stickers identiques ne partent pas en rafale. */
   const lastStickerSendAt = useRef(0);
@@ -541,6 +643,8 @@ export default function ChatScreen() {
   const [replyBarHeight, setReplyBarHeight] = useState(0);
   /** Bulle dont le menu d'appui long est ouvert. */
   const [menuFor, setMenuFor] = useState<Message | null>(null);
+  /** Message dont on consulte la liste des lecteurs (groupes). */
+  const [seenFor, setSeenFor] = useState<Message | null>(null);
   /** Waveforms des vocaux de cette session, indexées par clientId/URI locale. */
   const [voiceWaveforms, setVoiceWaveforms] = useState<Record<string, number[]>>({});
   const [playedVoiceIds, setPlayedVoiceIds] = useState<Set<string>>(() => new Set());
@@ -562,6 +666,10 @@ export default function ChatScreen() {
   /** Vide le brouillon et remonte le compositeur (après une pièce jointe). */
   const resetComposer = useCallback(() => {
     setInput('');
+    setDraft('');
+    if (id) {
+      cache.clearDraft(id);
+    }
     setComposerKey((key) => key + 1);
     if (token && id) {
       connectSocket(token).emit('typing', { conversationId: id, text: '' });
@@ -601,6 +709,10 @@ export default function ChatScreen() {
   const onInputChange = useCallback(
     (value: string) => {
       setInput(value);
+      setDraft(value);
+      if (id) {
+        cache.setDraft(id, value);
+      }
       if (!token || !id) return;
       const wait = 150 - (Date.now() - lastTypingEmitRef.current);
       if (wait <= 0) {
@@ -776,6 +888,51 @@ export default function ChatScreen() {
     socket.on('typing', onTyping);
     socket.on('receipt', onReceipt);
     socket.on('message:deleted', onDeleted);
+
+    // Le groupe a changé (identité, membres, rôle) : l'en-tête et les noms
+    // d'expéditeurs suivent sans rechargement.
+    const onGroupUpdated = (event: GroupUpdatedEvent) => {
+      if (event.conversationId !== id) return;
+      setConversation((prev) => {
+        if (!prev) return prev;
+        const next: ConversationSummary = {
+          ...prev,
+          name: event.group.name,
+          description: event.group.description,
+          emoji: event.group.emoji,
+          color: event.group.color,
+          avatarUrl: event.group.avatarUrl,
+          ownerId: event.group.ownerId,
+          whoCanSend: event.group.whoCanSend,
+          whoCanAdd: event.group.whoCanAdd,
+          members: event.members,
+          updatedAt: event.group.updatedAt,
+        };
+        cache.setConversation(next);
+        return next;
+      });
+    };
+    const onConversationRemoved = (event: ConversationRemovedEvent) => {
+      if (event.conversationId !== id) return;
+      cache.removeConversation(id);
+      router.replace('/chats');
+    };
+    const onReaction = (event: MessageReactionEvent) => {
+      if (event.conversationId !== id) return;
+      setMessages((previous) => {
+        const next = previous.map((message) =>
+          message.id === event.messageId
+            ? { ...message, reactions: event.reactions }
+            : message,
+        );
+        cache.setMessages(id, next);
+        return next;
+      });
+    };
+    socket.on('group:updated', onGroupUpdated);
+    socket.on('members:changed', onGroupUpdated);
+    socket.on('conversation:removed', onConversationRemoved);
+    socket.on('message:reaction', onReaction);
     const offMissed = onMissedMessages(append);
     // La file a la confirmation d'un envoi : on l'affiche même si la diffusion
     // temps réel de mon propre message s'était perdue.
@@ -791,6 +948,10 @@ export default function ChatScreen() {
       socket.off('typing', onTyping);
       socket.off('receipt', onReceipt);
       socket.off('message:deleted', onDeleted);
+      socket.off('group:updated', onGroupUpdated);
+      socket.off('members:changed', onGroupUpdated);
+      socket.off('conversation:removed', onConversationRemoved);
+      socket.off('message:reaction', onReaction);
       socket.off('connect', join);
       offMissed();
       offSent();
@@ -799,7 +960,7 @@ export default function ChatScreen() {
       // Le socket reste ouvert : la liste des discussions continue de
       // recevoir les messages en temps réel après le retour.
     };
-  }, [token, id, user]);
+  }, [token, id, user, router]);
 
   // Quitter l'écran (profil, retour à la liste…) réautorise les notifications.
   useFocusEffect(
@@ -883,15 +1044,22 @@ export default function ChatScreen() {
     const chronological: ListRow[] = [];
     let lastLabel = '';
     let lastMs: number | null = null;
+    let lastSenderId: string | null = null;
     let unreadPlaced = !unreadFrom;
     for (const cluster of clusterMessages(all, orderAt)) {
       const first = cluster.messages[0];
       const displayIso = new Date(cluster.firstAt).toISOString();
       const label = formatDateLabel(displayIso);
+      // Messages consécutifs du même expéditeur : un seul avatar et un seul nom.
+      const continuation =
+        lastSenderId === first.sender.id &&
+        lastMs !== null &&
+        cluster.firstAt - lastMs <= CHAT_TIME_GAP_MS;
       if (label !== lastLabel) {
         chronological.push({ key: `date-${first.id}`, type: 'date', label });
         lastLabel = label;
         lastMs = null;
+        lastSenderId = null;
       } else if (lastMs !== null && cluster.firstAt - lastMs > CHAT_TIME_GAP_MS) {
         chronological.push({
           key: `time-${first.id}`,
@@ -912,11 +1080,18 @@ export default function ChatScreen() {
           key: `album-${first.id}-${cluster.messages[cluster.messages.length - 1].id}`,
           type: 'album',
           messages: cluster.messages,
+          continuation,
         });
       } else {
-        chronological.push({ key: first.id, type: 'message', message: first });
+        chronological.push({
+          key: first.id,
+          type: 'message',
+          message: first,
+          continuation,
+        });
       }
       lastMs = cluster.lastAt;
+      lastSenderId = first.sender.id;
     }
     return chronological.reverse();
   }, [messages, queued, user, id, unreadFrom]);
@@ -1043,9 +1218,18 @@ export default function ChatScreen() {
   }, [queued, messages, receipts, user]);
 
   const title = conversation && user ? conversationTitle(conversation, user.id) : '';
-  const isGroup = Boolean(conversation?.name);
+  const isGroup = conversation?.type === 'GROUP';
   const other = user ? conversation?.members.find((member) => member.id !== user.id) : undefined;
-  const subtitle = isGroup ? `${conversation?.members.length ?? 0} membres` : '';
+  const typingName =
+    isGroup && typing
+      ? (conversation?.members.find((member) => member.id === typing.userId)?.displayName ??
+        'Quelqu’un')
+      : null;
+  const subtitle = isGroup
+    ? typingName
+      ? `${typingName} est en train d’écrire…`
+      : `${conversation?.members.length ?? 0} membres`
+    : '';
 
   // Les callbacks et l'en-tête sont mémorisés : chaque frappe dans le champ
   // ne doit pas reconstruire l'en-tête ni les bulles de la liste.
@@ -1066,12 +1250,28 @@ export default function ChatScreen() {
   }, [other, router]);
 
   const openConversationSettings = useCallback(() => {
-    if (id) {
-      router.push({ pathname: '/conversation-settings/[id]', params: { id } });
+    if (!id) return;
+    if (conversation?.type === 'GROUP') {
+      router.push({ pathname: '/group/[id]', params: { id } });
+      return;
     }
-  }, [id, router]);
+    router.push({ pathname: '/conversation-settings/[id]', params: { id } });
+  }, [conversation?.type, id, router]);
 
   const calls = useCalls();
+  const onGroupCallPress = useCallback(
+    (kind: 'audio' | 'video') => {
+      if (!conversation || conversation.type !== 'GROUP') {
+        return;
+      }
+      if (calls.status !== 'idle') {
+        calls.restore();
+        return;
+      }
+      void calls.startGroupCall(conversation.id, { video: kind === 'video' });
+    },
+    [calls, conversation],
+  );
 
   const onCallPress = useCallback(
     (kind: 'voice' | 'video') => {
@@ -1107,14 +1307,50 @@ export default function ChatScreen() {
           presenceUserId={
             conversation?.type === 'DIRECT' && other ? other.id : undefined
           }
-          onPress={conversation?.type === 'DIRECT' && other ? openOtherProfile : undefined}
+          avatar={
+            conversation?.type === 'GROUP' ? (
+              <Avatar
+                name={title}
+                uri={conversation.avatarUrl}
+                emoji={conversation.emoji}
+                color={conversation.color}
+                variant="group"
+                size={34}
+              />
+            ) : undefined
+          }
+          onPress={
+            conversation?.type === 'GROUP'
+              ? openConversationSettings
+              : conversation?.type === 'DIRECT' && other
+                ? openOtherProfile
+                : undefined
+          }
         />
       ),
       headerRight: () =>
         conversation?.type === 'GROUP' ? (
-          <Pressable onPress={openConversationSettings} hitSlop={8}>
-            <ThemedText style={[styles.headerAction, { color: chat.headerText }]}>Infos</ThemedText>
-          </Pressable>
+          <View style={styles.headerCallActions}>
+            <Pressable
+              onPress={() => onGroupCallPress('video')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Appel vidéo de groupe"
+              style={({ pressed }) => pressed && styles.pressedHeaderAction}>
+              <Video size={26} color={chat.headerText} />
+            </Pressable>
+            <Pressable
+              onPress={() => onGroupCallPress('audio')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Appel vocal de groupe"
+              style={({ pressed }) => pressed && styles.pressedHeaderAction}>
+              {/* Combiné retourné (sens « raccroché »), comme en un à un. */}
+              <View style={styles.phoneFlipped}>
+                <Phone size={22} color={chat.headerText} />
+              </View>
+            </Pressable>
+          </View>
         ) : conversation?.type === 'DIRECT' ? (
           <View style={styles.headerCallActions}>
             <Pressable
@@ -1147,6 +1383,7 @@ export default function ChatScreen() {
       openOtherProfile,
       openConversationSettings,
       onCallPress,
+      onGroupCallPress,
       chat,
     ],
   );
@@ -1222,18 +1459,6 @@ export default function ChatScreen() {
     // l'historique ne doit pas vous ramener en bas.
   }, [rows, scrollToBottom]);
 
-  const listEmpty = useMemo(
-    () =>
-      ready ? (
-        <ThemedView style={styles.center}>
-          <ThemedText themeColor="textSecondary" style={styles.emptyText}>
-            Aucun message. Dis bonjour !
-          </ThemedText>
-        </ThemedView>
-      ) : undefined,
-    [ready],
-  );
-
   /** Relance un message que le serveur a refusé (le réseau est revenu, etc.). */
   const resend = useCallback(
     (clientId: string) => {
@@ -1244,6 +1469,35 @@ export default function ChatScreen() {
       });
     },
     [token],
+  );
+
+  /** Applique un résumé de réactions à un message (mémoire + cache disque). */
+  const applyReactions = useCallback(
+    (messageId: string, reactions: ReactionSummary[]) => {
+      setMessages((previous) => {
+        const next = previous.map((message) =>
+          message.id === messageId ? { ...message, reactions } : message,
+        );
+        if (id) {
+          cache.setMessages(id, next);
+        }
+        return next;
+      });
+    },
+    [id],
+  );
+
+  /** Réaction optimiste : l'état bascule tout de suite, le serveur confirme. */
+  const reactToMessage = useCallback(
+    (message: Message, reaction: string) => {
+      if (!token || !id) return;
+      const previous = message.reactions ?? [];
+      applyReactions(message.id, toggleLocalReaction(previous, reaction));
+      void toggleReaction(token, id, message.id, reaction)
+        .then((server) => applyReactions(message.id, server))
+        .catch(() => applyReactions(message.id, previous));
+    },
+    [applyReactions, id, token],
   );
 
   /** Répondre : la bulle citée s'accroche au-dessus du champ de saisie. */
@@ -1515,7 +1769,7 @@ export default function ChatScreen() {
                     mine ? styles.mediaBlockMine : styles.mediaBlockOther,
                     { width: albumWidth },
                   ]}>
-                  {!mine && isGroup ? (
+                  {!mine && isGroup && !item.continuation ? (
                     <ThemedText
                       type="smallBold"
                       style={[styles.senderName, chatStyles.senderName]}>
@@ -1553,6 +1807,18 @@ export default function ChatScreen() {
           </View>
         );
       }
+      if (message.type === 'system') {
+        return (
+          <View style={styles.systemRow}>
+            <ThemedText
+              type="caption"
+              style={[styles.systemText, chatStyles.systemText]}
+              accessibilityRole="text">
+              {message.content}
+            </ThemedText>
+          </View>
+        );
+      }
       if (message.deleted) {
         return (
           <View style={styles.systemRow}>
@@ -1563,6 +1829,12 @@ export default function ChatScreen() {
         );
       }
       const mine = message.sender.id === user?.id;
+      const readByCount =
+        mine && isGroup
+          ? (receipts[message.id] ?? []).filter(
+              (receipt) => receipt.userId !== user?.id && receipt.readAt !== null,
+            ).length
+          : 0;
       const attachment = message.attachment;
       const tick = mine ? tickById[message.id] : undefined;
       const stuck = tick === 'failed' ? queuedById.get(message.id) : undefined;
@@ -1581,9 +1853,27 @@ export default function ChatScreen() {
       );
       const row = (content: ReactNode) => (
         <View style={styles.messageRow}>
-          {mine ? null : avatar}
-          <View style={styles.bubbleColumn}>{content}</View>
-          {mine ? avatar : null}
+          {mine || item.continuation ? null : avatar}
+          <View style={styles.bubbleColumn}>
+            {content}
+            <ReactionChips
+              reactions={message.reactions ?? []}
+              alignEnd={mine}
+              onToggle={(reaction) => reactToMessage(message, reaction)}
+            />
+            {mine && isGroup && readByCount > 0 ? (
+              <Pressable
+                onPress={() => setSeenFor(message)}
+                accessibilityRole="button"
+                accessibilityLabel={`Vu par ${readByCount}`}
+                style={styles.seenByRow}>
+                <ThemedText type="micro" themeColor="textSecondary">
+                  Vu par {readByCount}
+                </ThemedText>
+              </Pressable>
+            ) : null}
+          </View>
+          {mine && !item.continuation ? avatar : null}
         </View>
       );
 
@@ -1600,7 +1890,7 @@ export default function ChatScreen() {
                 styles.stickerMessageBlock,
                 mine ? styles.stickerMessageBlockMine : null,
               ]}>
-              {!mine && isGroup ? (
+              {!mine && isGroup && !item.continuation ? (
                 <ThemedText type="smallBold" style={[styles.senderName, chatStyles.senderName]}>
                   {message.sender.displayName}
                 </ThemedText>
@@ -1680,7 +1970,7 @@ export default function ChatScreen() {
                   styles.emojiOnlyBlock,
                   mine ? styles.emojiOnlyBlockMine : null,
                 ]}>
-                {!mine && isGroup ? (
+                {!mine && isGroup && !item.continuation ? (
                   <ThemedText type="smallBold" style={[styles.senderName, chatStyles.senderName]}>
                     {message.sender.displayName}
                   </ThemedText>
@@ -1789,7 +2079,7 @@ export default function ChatScreen() {
                   />
                 </View>
               ) : null}
-              {!mine && isGroup ? (
+              {!mine && isGroup && !item.continuation ? (
                 <ThemedText type="smallBold" style={[styles.senderName, chatStyles.senderName]}>
                   {message.sender.displayName}
                 </ThemedText>
@@ -1843,7 +2133,7 @@ export default function ChatScreen() {
                 styles.stickerBlock,
                 mine ? styles.mediaBlockMine : styles.mediaBlockOther,
               ]}>
-              {!mine && isGroup ? (
+              {!mine && isGroup && !item.continuation ? (
                 <ThemedText type="smallBold" style={[styles.senderName, chatStyles.senderName]}>
                   {message.sender.displayName}
                 </ThemedText>
@@ -1943,7 +2233,7 @@ export default function ChatScreen() {
                 mine ? styles.mediaBlockMine : styles.mediaBlockOther,
                 { width: blockWidth },
               ]}>
-              {!mine && isGroup ? (
+              {!mine && isGroup && !item.continuation ? (
                 <ThemedText
                   type="smallBold"
                   style={[styles.senderName, chatStyles.senderName]}>
@@ -2085,7 +2375,7 @@ export default function ChatScreen() {
               onPress={() => jumpToMessage(message.replyTo?.id)}
             />
           ) : null}
-          {!mine && isGroup ? (
+          {!mine && isGroup && !item.continuation ? (
             <ThemedText type="smallBold" style={[styles.senderName, chatStyles.senderName]}>
               {message.sender.displayName}
             </ThemedText>
@@ -2125,10 +2415,12 @@ export default function ChatScreen() {
       theme,
       isGroup,
       tickById,
+      receipts,
       queuedById,
       resend,
       startReply,
       jumpToMessage,
+      reactToMessage,
       voiceWaveforms,
       playedVoiceIds,
       handleFirstVoicePlay,
@@ -2313,6 +2605,8 @@ export default function ChatScreen() {
       }
       setError(null);
       await enqueue({ conversationId: id, content, replyTo: replyTo?.id ?? null });
+      cache.clearDraft(id);
+      setDraft('');
       setReplyTo(null);
       void drain(token);
     },
@@ -2458,9 +2752,57 @@ export default function ChatScreen() {
             }
           }}
           scrollEventThrottle={160}
-          ListEmptyComponent={listEmpty}
           renderItem={renderItem}
         />
+
+        {ready && messages.length === 0 ? (
+          <View
+            pointerEvents="box-none"
+            style={[styles.emptyOverlay, { bottom: (composerHeight || 92) + Spacing.two }]}>
+            <Avatar
+              name={title}
+              uri={isGroup ? conversation?.avatarUrl : other?.avatarUrl}
+              emoji={isGroup ? conversation?.emoji : null}
+              color={isGroup ? conversation?.color : null}
+              variant={isGroup ? 'group' : 'user'}
+              gender={isGroup ? null : other?.gender}
+              size={72}
+            />
+            <ThemedText type="sectionTitle" style={styles.emptyTitle}>
+              {isGroup ? 'Dis bonjour à ton nouveau groupe' : 'Dis bonjour !'}
+            </ThemedText>
+            <ThemedText type="caption" themeColor="textSecondary" style={styles.emptyText}>
+              {isGroup
+                ? 'Un petit message pour lancer la discussion.'
+                : 'Écris le premier message.'}
+            </ThemedText>
+            <View style={styles.suggestions}>
+              {(isGroup
+                ? ['Salut tout le monde 👋', 'Bienvenue dans le groupe 🎉', 'On commence ?']
+                : ['Salut 👋', 'Comment ça va ?']
+              ).map((suggestion) => (
+                <Pressable
+                  key={suggestion}
+                  onPress={() => {
+                    void sendText(suggestion);
+                    resetComposer();
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Envoyer « ${suggestion} »`}
+                  style={({ pressed }) => [
+                    styles.suggestion,
+                    {
+                      backgroundColor: theme.backgroundElement,
+                      borderColor: theme.border,
+                    },
+                    pressed && { opacity: 0.7 },
+                  ]}>
+                  <ThemedText type="caption">{suggestion}</ThemedText>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
 
         {showJump ? (
           <Pressable
@@ -2543,10 +2885,38 @@ export default function ChatScreen() {
               Vous ne pouvez plus discuter avec cette personne.
             </ThemedText>
           </View>
+        ) : conversation?.type === 'GROUP' &&
+          conversation.whoCanSend === 'admins' &&
+          conversation.myRole !== 'admin' ? (
+          <View
+            style={[
+              styles.blockedBar,
+              {
+                backgroundColor: chat.composer,
+                borderTopColor: chat.border,
+                paddingBottom: Spacing.four + insets.bottom,
+              },
+            ]}>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.blockedText}>
+              Seuls les administrateurs peuvent écrire dans ce groupe.
+            </ThemedText>
+          </View>
         ) : (
         <ChatComposer
           key={composerKey}
           theme={composerTheme}
+          initialText={draft}
+          mentionCandidates={
+            isGroup && conversation
+              ? conversation.members
+                  .filter((member) => member.id !== user?.id)
+                  .map((member) => ({
+                    id: member.id,
+                    username: member.username,
+                    displayName: member.displayName,
+                  }))
+              : undefined
+          }
           onSendText={sendText}
           onSendSticker={(ref) => void sendSticker(ref)}
           onSendPersonalSticker={(sticker) => void sendPersonalSticker(sticker)}
@@ -2577,8 +2947,59 @@ export default function ChatScreen() {
       <ActionSheet
         visible={menuFor !== null}
         title="Message"
+        header={
+          menuFor ? (
+            <View style={styles.reactionPicker}>
+              {REACTION_STICKERS.map((reaction) => {
+                const sticker = findSticker(reaction);
+                return (
+                  <Pressable
+                    key={reaction}
+                    onPress={() => {
+                      const target = menuFor;
+                      setMenuFor(null);
+                      reactToMessage(target, reaction);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Réagir avec ${
+                      sticker
+                        ? sticker.kind === 'image'
+                          ? (sticker.name ?? sticker.alt)
+                          : sticker.label
+                        : 'la panthère'
+                    }`}
+                    style={({ pressed }) => [
+                      styles.reactionPickerItem,
+                      pressed && { opacity: 0.6 },
+                    ]}>
+                    {sticker ? <StickerView sticker={sticker} size={36} /> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null
+        }
         actions={menuActions}
         onClose={() => setMenuFor(null)}
+      />
+
+      <ActionSheet
+        visible={seenFor !== null}
+        title="Vu par"
+        actions={
+          seenFor
+            ? (receipts[seenFor.id] ?? [])
+                .filter((receipt) => receipt.userId !== user?.id && receipt.readAt !== null)
+                .map((receipt, index) => ({
+                  key: `${receipt.userId}-${index}`,
+                  label:
+                    conversation?.members.find((member) => member.id === receipt.userId)
+                      ?.displayName ?? 'Membre',
+                  onPress: () => setSeenFor(null),
+                }))
+            : []
+        }
+        onClose={() => setSeenFor(null)}
       />
 
       {imageViewer ? (
@@ -2679,8 +3100,14 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerTitleBody: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: Spacing.two,
     maxWidth: 240,
+  },
+  headerTitleText: {
+    flexShrink: 1,
+    alignItems: 'center',
   },
   headerName: {
     fontSize: 17,
@@ -2704,6 +3131,62 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     textAlign: 'center',
+  },
+  emptyChat: {
+    gap: Spacing.two,
+  },
+  emptyOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.four,
+    gap: Spacing.two,
+  },
+  reactionChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.one,
+    marginTop: Spacing.half,
+  },
+  reactionChipsEnd: { justifyContent: 'flex-end' },
+  reactionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  reactionChipEmoji: { fontSize: 12, lineHeight: 16 },
+  reactionPicker: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  reactionPickerItem: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
+  reactionPickerEmoji: { fontSize: 24, lineHeight: 30 },
+  seenByRow: { alignItems: 'flex-end', paddingTop: 1 },
+  emptyTitle: {
+    textAlign: 'center',
+    marginTop: Spacing.two,
+  },
+  suggestions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+  },
+  suggestion: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   listContent: {
     paddingHorizontal: Spacing.two,

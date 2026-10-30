@@ -19,6 +19,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { JwtPayload } from '../auth/jwt-payload.js';
 import { ConversationsService } from './conversations.service.js';
 import { CreateConversationDto } from './dto/create-conversation.dto.js';
+import { UpdateGroupDto } from './dto/update-group.dto.js';
+import { UpdateMemberRoleDto } from './dto/update-member-role.dto.js';
 import { UpdatePreferencesDto } from './dto/update-preferences.dto.js';
 
 @Controller('conversations')
@@ -28,7 +30,13 @@ export class ConversationsController {
 
   @Post()
   create(@CurrentUser() current: JwtPayload, @Body() dto: CreateConversationDto) {
-    return this.conversationsService.create(current.sub, dto.memberIds, dto.type, dto.name);
+    return this.conversationsService.create(current.sub, dto.memberIds, dto.type, dto.name, {
+      emoji: dto.emoji,
+      color: dto.color,
+      description: dto.description,
+      whoCanSend: dto.whoCanSend,
+      whoCanAdd: dto.whoCanAdd,
+    });
   }
 
   @Get()
@@ -65,12 +73,36 @@ export class ConversationsController {
   }
 
   @Patch(':id')
-  rename(
+  updateGroup(
     @CurrentUser() current: JwtPayload,
     @Param('id') id: string,
-    @Body() body: { name?: string },
+    @Body() dto: UpdateGroupDto,
   ) {
-    return this.conversationsService.rename(id, current.sub, body?.name ?? '');
+    return this.conversationsService.updateGroup(id, current.sub, {
+      name: dto.name,
+      description: dto.description,
+      emoji: dto.emoji,
+      color: dto.color,
+      whoCanSend: dto.whoCanSend,
+      whoCanAdd: dto.whoCanAdd,
+    });
+  }
+
+  @Post(':id/photo')
+  uploadPhoto(
+    @CurrentUser() current: JwtPayload,
+    @Param('id') id: string,
+    @Body() body: { data?: string; mimeType?: string },
+  ) {
+    if (!body?.data) {
+      throw new BadRequestException('Missing image data');
+    }
+    return this.conversationsService.uploadPhoto(id, current.sub, body.data, body.mimeType);
+  }
+
+  @Delete(':id/photo')
+  deletePhoto(@CurrentUser() current: JwtPayload, @Param('id') id: string) {
+    return this.conversationsService.deletePhoto(id, current.sub);
   }
 
   @Patch(':id/preferences')
@@ -102,6 +134,37 @@ export class ConversationsController {
     @Param('userId') userId: string,
   ) {
     return this.conversationsService.removeMember(id, current.sub, userId);
+  }
+
+  @Patch(':id/members/:userId/role')
+  updateMemberRole(
+    @CurrentUser() current: JwtPayload,
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @Body() dto: UpdateMemberRoleDto,
+  ) {
+    return this.conversationsService.updateMemberRole(id, current.sub, userId, dto.role);
+  }
+
+  /** Médias (pièces jointes) et liens partagés dans la conversation. */
+  @Get(':id/media')
+  media(
+    @CurrentUser() current: JwtPayload,
+    @Param('id') id: string,
+    @Query('limit', new DefaultValuePipe(60), ParseIntPipe) limit: number,
+  ) {
+    return this.conversationsService.listMedia(id, current.sub, limit);
+  }
+
+  /** Recherche simple dans l'historique de la conversation. */
+  @Get(':id/search')
+  search(
+    @CurrentUser() current: JwtPayload,
+    @Param('id') id: string,
+    @Query('q') query?: string,
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit?: number,
+  ) {
+    return this.conversationsService.searchMessages(id, current.sub, query ?? '', limit);
   }
 
   @Get(':id/messages')

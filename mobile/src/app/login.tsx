@@ -1,4 +1,4 @@
-import { Link, Redirect, useRouter } from 'expo-router';
+import { Link, Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,14 +18,20 @@ export default function LoginScreen() {
   const { token, signIn } = useAuth();
   const theme = useTheme();
   const router = useRouter();
+  const { next } = useLocalSearchParams<{ next?: string }>();
   const keyboardHeight = useKeyboardHeight();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Reprise après connexion (ex. invitation ouverte depuis un lien partagé).
+  const destination = (next && next.startsWith('/') && !next.startsWith('//')
+    ? next
+    : '/chats') as Href;
+
   if (token) {
-    return <Redirect href="/chats" />;
+    return <Redirect href={destination} />;
   }
 
   const onSubmit = async () => {
@@ -47,7 +53,7 @@ export default function LoginScreen() {
     try {
       const result = await api.login({ emailOrUsername: cleanIdentifier, password });
       await signIn(result.accessToken, result.refreshToken, result.user);
-      router.replace('/chats');
+      router.replace(destination);
     } catch (err) {
       setError(
         err instanceof ApiError

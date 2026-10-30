@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, count, eq, ilike, inArray, ne, or } from 'drizzle-orm';
+import { and, asc, count, eq, ilike, inArray, max, ne, notInArray, or } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../db/db.module.js';
 import {
   blocks,
@@ -274,6 +274,84 @@ export class UsersService {
         messages: messagesRow?.value ?? 0,
         conversations: conversationsCount,
       },
+    };
+  }
+
+  /**
+   * Suggestions de contacts : d'abord les personnes avec qui on discute
+   * récemment, puis les autres comptes par ordre alphabétique. Les comptes
+   * bloqués (dans un sens ou dans l'autre) n'apparaissent jamais.
+   */
+  async suggestions(
+    userId: string,
+    limit = 50,
+  ): Promise<{ recent: PublicUser[]; contacts: PublicUser[] }> {
+    const capped = Math.min(Math.max(limit, 1), 100);
+    const blockRows = await this.db
+      .select({ blockerId: blocks.blockerId, blockedId: blocks.blockedId })
+      .from(blocks)
+      .where(or(eq(blocks.blockerId, userId), eq(blocks.blockedId, userId)));
+    const blocked = new Set<string>();
+    for (const row of blockRows) {
+      blocked.add(row.blockerId === userId ? row.blockedId : row.blockerId);
+    }
+
+    const mine = await this.db
+      .select({ conversationId: conversationMembers.conversationId })
+      .from(conversationMembers)
+      .where(eq(conversationMembers.userId, userId));
+    const conversationIds = mine.map((row) => row.conversationId);
+
+    const recents: { user: User; at: number }[] = [];
+    if (conversationIds.length > 0) {
+      const memberRows = await this.db
+        .select({ user: users, conversationId: conversationMembers.conversationId })
+        .from(conversationMembers)
+        .innerJoin(users, eq(users.id, conversationMembers.userId))
+        .where(inArray(conversationMembers.conversationId, conversationIds));
+      const lastRows = await this.db
+        .select({
+          conversationId: messages.conversationId,
+          last: max(messages.createdAt),
+        })
+        .from(messages)
+        .where(inArray(messages.conversationId, conversationIds))
+        .groupBy(messages.conversationId);
+      const lastMap = new Map(
+        lastRows.map((row) => [
+          row.conversationId,
+          row.last ? new Date(row.last).getTime() : 0,
+        ]),
+      );
+      const seen = new Set<string>();
+      for (const row of memberRows) {
+        const member = row.user;
+        if (member.id === userId || blocked.has(member.id) || seen.has(member.id)) {
+          continue;
+        }
+        seen.add(member.id);
+        recents.push({ user: member, at: lastMap.get(row.conversationId) ?? 0 });
+      }
+      recents.sort((a, b) => b.at - a.at);
+    }
+
+    const recentUsers = recents.slice(0, 20);
+    const excluded = new Set<string>([
+      userId,
+      ...blocked,
+      ...recentUsers.map((entry) => entry.user.id),
+    ]);
+
+    const others = await this.db
+      .select()
+      .from(users)
+      .where(notInArray(users.id, [...excluded]))
+      .orderBy(asc(users.displayName))
+      .limit(Math.max(capped - recentUsers.length, 0));
+
+    return {
+      recent: recentUsers.map((entry) => toPublicUser(entry.user)),
+      contacts: others.map(toPublicUser),
     };
   }
 

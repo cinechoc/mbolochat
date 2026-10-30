@@ -227,12 +227,27 @@ const benRenamed = await call(`/conversations/${groupId}`, {
 });
 check('un membre ne renomme pas le groupe', benRenamed.status === 403, `statut ${benRenamed.status}`);
 
+const dan = await register('Hana', 'Secure');
 const benInvites = await call(`/conversations/${groupId}/members`, {
   method: 'POST',
   headers: { Authorization: `Bearer ${ben.token}` },
-  body: JSON.stringify({ memberIds: [carl.id] }),
+  body: JSON.stringify({ memberIds: [dan.id] }),
 });
-check('un membre n’invite pas', benInvites.status === 403, `statut ${benInvites.status}`);
+check('un membre peut ajouter quelqu’un', benInvites.status === 201, `statut ${benInvites.status}`);
+
+const benChangesRole = await call(`/conversations/${groupId}/members/${dan.id}/role`, {
+  method: 'PATCH',
+  headers: { Authorization: `Bearer ${ben.token}` },
+  body: JSON.stringify({ role: 'admin' }),
+});
+check('un membre ne change pas les rôles', benChangesRole.status === 403, `statut ${benChangesRole.status}`);
+
+const benCreatesInvite = await call(`/conversations/${groupId}/invites`, {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${ben.token}` },
+  body: JSON.stringify({ expiresInHours: 24 }),
+});
+check('un membre crée un lien d’invitation', benCreatesInvite.status === 201, `statut ${benCreatesInvite.status}`);
 
 const benEvicts = await call(`/conversations/${groupId}/members/${ana.id}`, {
   method: 'DELETE',
@@ -265,6 +280,19 @@ const promoted = await pool.query(
 );
 const admins = promoted.rows.filter((row) => row.role === 'admin');
 check('il reste un administrateur après le départ du créateur', admins.length === 1, promoted.rows.map((r) => `${r.user_id.slice(0, 4)}:${r.role}`).join(' '));
+
+// Les identifiants TURN ne sortent que pour une session authentifiée.
+const iceAnon = await fetch(`${API}/calls/ice-servers`);
+check('ICE refusé sans jeton', iceAnon.status === 401, `statut ${iceAnon.status}`);
+const iceAuth = await fetch(`${API}/calls/ice-servers`, {
+  headers: { Authorization: `Bearer ${ana.token}` },
+});
+const iceBody = await iceAuth.json();
+check(
+  'ICE servi avec un jeton',
+  iceAuth.status === 200 && Array.isArray(iceBody.servers) && iceBody.servers.length > 0,
+  `statut ${iceAuth.status}, ${iceBody.servers?.length ?? 0} serveur(s)`,
+);
 
 socket.disconnect();
 await pool.end();

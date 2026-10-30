@@ -3,9 +3,16 @@ import { File } from 'expo-file-system';
 import { API_URL } from './config';
 import type {
   AuthResult,
+  ConversationLinkItem,
+  ConversationMediaItem,
+  ConversationSearchHit,
   ConversationSummary,
   ForgotPasswordResult,
   Gender,
+  GroupInvite,
+  InvitePreview,
+  JoinInviteResult,
+  JoinRequest,
   Message,
   MessageReceipt,
   PresenceSettings,
@@ -316,6 +323,14 @@ export const api = {
     return request<User[]>(`/users/search?q=${encodeURIComponent(query)}`, { token });
   },
 
+  /** Suggestions : récents puis alphabétique, hors comptes bloqués. */
+  suggestContacts(token: string, limit = 50) {
+    return request<{ recent: User[]; contacts: User[] }>(
+      `/users/suggestions?limit=${limit}`,
+      { token },
+    );
+  },
+
   listConversations(token: string) {
     return request<ConversationSummary[]>('/conversations', { token });
   },
@@ -324,12 +339,55 @@ export const api = {
     return request<ConversationSummary>(`/conversations/${id}`, { token });
   },
 
-  createConversation(token: string, body: { memberIds: string[]; name?: string; type?: 'DIRECT' | 'GROUP' }) {
+  createConversation(
+    token: string,
+    body: {
+      memberIds: string[];
+      name?: string;
+      type?: 'DIRECT' | 'GROUP';
+      emoji?: string;
+      color?: string;
+      description?: string;
+    },
+  ) {
     return request<ConversationSummary>('/conversations', { method: 'POST', token, body });
   },
 
-  renameConversation(token: string, id: string, name: string) {
-    return request<ConversationSummary>(`/conversations/${id}`, { method: 'PATCH', token, body: { name } });
+  updateGroup(
+    token: string,
+    id: string,
+    body: {
+      name?: string;
+      description?: string;
+      emoji?: string;
+      color?: string;
+      whoCanSend?: 'all' | 'admins';
+      whoCanAdd?: 'all' | 'admins';
+    },
+  ) {
+    return request<ConversationSummary>(`/conversations/${id}`, { method: 'PATCH', token, body });
+  },
+
+  uploadGroupPhoto(token: string, id: string, data: string, mimeType: string) {
+    return request<ConversationSummary>(`/conversations/${id}/photo`, {
+      method: 'POST',
+      token,
+      body: { data, mimeType },
+    });
+  },
+
+  deleteGroupPhoto(token: string, id: string) {
+    return request<ConversationSummary>(`/conversations/${id}/photo`, {
+      method: 'DELETE',
+      token,
+    });
+  },
+
+  updateMemberRole(token: string, id: string, userId: string, role: 'admin' | 'member') {
+    return request<ConversationSummary>(
+      `/conversations/${id}/members/${encodeURIComponent(userId)}/role`,
+      { method: 'PATCH', token, body: { role } },
+    );
   },
 
   addConversationMembers(token: string, id: string, memberIds: string[]) {
@@ -338,6 +396,59 @@ export const api = {
 
   removeConversationMember(token: string, id: string, userId: string) {
     return request<void>(`/conversations/${id}/members/${userId}`, { method: 'DELETE', token });
+  },
+
+  /* ----------------------------- invitations ----------------------------- */
+
+  createInvite(
+    token: string,
+    id: string,
+    body: { expiresInHours?: number; maxUses?: number; requiresApproval?: boolean },
+  ) {
+    return request<GroupInvite>(`/conversations/${id}/invites`, {
+      method: 'POST',
+      token,
+      body,
+    });
+  },
+
+  listInvites(token: string, id: string) {
+    return request<GroupInvite[]>(`/conversations/${id}/invites`, { token });
+  },
+
+  revokeInvite(token: string, id: string, inviteId: string) {
+    return request<void>(`/conversations/${id}/invites/${encodeURIComponent(inviteId)}`, {
+      method: 'DELETE',
+      token,
+    });
+  },
+
+  /** Aperçu public d'une invitation : fonctionne sans être connecté. */
+  previewInvite(inviteToken: string) {
+    return request<InvitePreview>(`/invites/${encodeURIComponent(inviteToken)}`);
+  },
+
+  joinInvite(token: string, inviteToken: string) {
+    return request<JoinInviteResult>(`/invites/${encodeURIComponent(inviteToken)}/join`, {
+      method: 'POST',
+      token,
+    });
+  },
+
+  listJoinRequests(token: string, id: string) {
+    return request<JoinRequest[]>(`/conversations/${id}/join-requests`, { token });
+  },
+
+  resolveJoinRequest(
+    token: string,
+    id: string,
+    requestId: string,
+    action: 'approve' | 'reject',
+  ) {
+    return request<JoinInviteResult>(
+      `/conversations/${id}/join-requests/${encodeURIComponent(requestId)}/resolve`,
+      { method: 'POST', token, body: { action } },
+    );
   },
 
   listMessages(
@@ -360,6 +471,22 @@ export const api = {
    */
   syncSince(token: string, since: string) {
     return request<Message[]>(`/conversations/sync?since=${encodeURIComponent(since)}`, { token });
+  },
+
+  /** Médias (pièces jointes) et liens partagés dans la conversation. */
+  listConversationMedia(token: string, conversationId: string) {
+    return request<{
+      attachments: ConversationMediaItem[];
+      links: ConversationLinkItem[];
+    }>(`/conversations/${conversationId}/media`, { token });
+  },
+
+  /** Recherche simple dans l'historique de la conversation. */
+  searchConversation(token: string, conversationId: string, query: string) {
+    return request<ConversationSearchHit[]>(
+      `/conversations/${conversationId}/search?q=${encodeURIComponent(query)}`,
+      { token },
+    );
   },
 
   /** Accusés de réception des messages que j'ai envoyés (coches reçue / lue). */

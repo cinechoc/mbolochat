@@ -2,9 +2,11 @@ import {
   Body,
   BadRequestException,
   Controller,
+  DefaultValuePipe,
   Delete,
   Get,
   Param,
+  ParseIntPipe,
   Patch,
   Post,
   Query,
@@ -126,6 +128,15 @@ export class UsersController {
       return [];
     }
     return this.usersService.search(query, current.sub);
+  }
+
+  /** Suggestions de contacts : récents puis alphabétique, hors blocages. */
+  @Get('suggestions')
+  async suggestions(
+    @CurrentUser() current: JwtPayload,
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
+  ) {
+    return this.usersService.suggestions(current.sub, limit);
   }
 
   /** Comptes bloqués par l'utilisateur courant. */

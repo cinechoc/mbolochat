@@ -18,6 +18,10 @@ import {
   type MessageDto,
   type ReceiptChange,
 } from '../conversations/conversations.service.js';
+import {
+  ConversationEventsService,
+  type ConversationChange,
+} from '../conversations/conversation-events.service.js';
 import { PushService } from '../push/push.service.js';
 import { MediaService } from '../media/media.service.js';
 import { PresenceService, type PresenceChange } from '../presence/presence.service.js';
@@ -47,10 +51,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     { userId: string; targets: Set<string> }
   >();
   private readonly presenceChanges: Subscription;
+  private readonly conversationChanges: Subscription;
 
   constructor(
     private readonly jwtService: JwtService,
     private readonly conversationsService: ConversationsService,
+    private readonly conversationEvents: ConversationEventsService,
     private readonly pushService: PushService,
     private readonly media: MediaService,
     private readonly presence: PresenceService,
@@ -59,10 +65,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     this.presenceChanges = this.presence.changes$.subscribe((change) => {
       void this.broadcastPresenceChange(change);
     });
+    this.conversationChanges = this.conversationEvents.changes$.subscribe((change) => {
+      void this.broadcastConversationChange(change);
+    });
   }
 
   onModuleDestroy(): void {
     this.presenceChanges.unsubscribe();
+    this.conversationChanges.unsubscribe();
   }
 
   async handleConnection(client: Socket) {
@@ -269,6 +279,32 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
    * » ne change que la vue de celui qui le demande : les autres membres
    * continuent de lire le message, et son propre appareil ne le reverra plus.
    */
+  /** Ajoute ou retire une réaction, puis diffuse le résumé à tout le groupe. */
+  @SubscribeMessage('message:react')
+  async react(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { conversationId?: string; messageId?: string; reaction?: string },
+  ) {
+    const userId = client.data.userId as string | undefined;
+    const conversationId = body?.conversationId;
+    const messageId = body?.messageId;
+    if (!userId || !conversationId || !messageId || typeof body?.reaction !== 'string') {
+      throw new WsException('Réaction invalide');
+    }
+    const reactions = await this.conversationsService.toggleReaction(
+      conversationId,
+      messageId,
+      userId,
+      body.reaction,
+    );
+    const payload = { conversationId, messageId, reactions };
+    const memberIds = await this.conversationsService.listMemberIds(conversationId);
+    this.server
+      .to([roomOf(conversationId), ...memberIds.map((memberId) => userRoomOf(memberId))])
+      .emit('message:reaction', payload);
+    return { reactions };
+  }
+
   @SubscribeMessage('message:delete')
   async remove(
     @ConnectedSocket() client: Socket,
@@ -470,6 +506,105 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
    * Diffusion ciblée : uniquement les sockets abonnés à la cible, avec le
    * filtrage propre à chaque spectateur.
    */
+  /**
+   * Diffuse les mutations de groupe. Un membre retiré doit aussi sortir du
+   * salon : sinon il continuerait de recevoir les messages après son exclusion.
+   */
+  private async broadcastConversationChange(change: ConversationChange): Promise<void> {
+    if (!this.server) return;
+
+    if (change.kind === 'message') {
+      const memberIds = await this.conversationsService.listMemberIds(change.conversationId);
+      this.server
+        .to([
+          roomOf(change.conversationId),
+          ...memberIds.map((memberId) => userRoomOf(memberId)),
+        ])
+        .emit('message:new', change.message);
+      return;
+    }
+
+    if (change.kind === 'created') {
+      for (const userId of change.userIds) {
+        this.server
+          .to(userRoomOf(userId))
+          .emit('conversation:added', { conversationId: change.conversationId });
+      }
+      return;
+    }
+
+    let state;
+    try {
+      state = await this.conversationsService.groupState(change.conversationId);
+    } catch {
+      // Conversation supprimée entre-temps : plus rien à diffuser.
+      return;
+    }
+
+    const members = state.members.map((member) => ({
+      ...member,
+      avatarUrl: this.media.signOrNull(member.avatarUrl),
+    }));
+    const group = {
+      id: state.id,
+      name: state.name,
+      description: state.description,
+      emoji: state.emoji,
+      color: state.color,
+      avatarUrl: this.media.signOrNull(state.avatarUrl),
+      ownerId: state.ownerId,
+      whoCanSend: state.whoCanSend,
+      whoCanAdd: state.whoCanAdd,
+      memberCount: state.memberCount,
+      updatedAt: state.updatedAt,
+    };
+    const rooms = [
+      roomOf(change.conversationId),
+      ...members.map((member) => userRoomOf(member.id)),
+    ];
+
+    if (change.kind === 'updated') {
+      this.server.to(rooms).emit('group:updated', {
+        conversationId: change.conversationId,
+        group,
+        members,
+      });
+      return;
+    }
+
+    if (change.action === 'added') {
+      for (const userId of change.userIds) {
+        this.server
+          .to(userRoomOf(userId))
+          .emit('conversation:added', { conversationId: change.conversationId });
+      }
+    }
+
+    if (change.action === 'removed' || change.action === 'left') {
+      for (const userId of change.userIds) {
+        this.server.to(userRoomOf(userId)).emit('conversation:removed', {
+          conversationId: change.conversationId,
+          reason: change.action === 'left' ? 'left' : 'removed',
+        });
+        this.server.in(userRoomOf(userId)).socketsLeave(roomOf(change.conversationId));
+        for (const [socketId, entry] of this.viewing) {
+          if (entry.userId === userId && entry.conversationId === change.conversationId) {
+            this.viewing.delete(socketId);
+          }
+        }
+      }
+    }
+
+    this.server.to(rooms).emit('members:changed', {
+      conversationId: change.conversationId,
+      action: change.action,
+      actorId: change.actorId,
+      userIds: change.userIds,
+      group,
+      members,
+    });
+  }
+
   private async broadcastPresenceChange(change: PresenceChange): Promise<void> {
     if (!this.server) return;
     await this.broadcastToSubscribers(change.userId);

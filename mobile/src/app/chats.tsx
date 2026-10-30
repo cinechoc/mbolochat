@@ -8,18 +8,21 @@ import {
   EyeOff,
   Info,
   LogOut,
+  MessageSquarePlus,
   Pin,
   PinOff,
   Plus,
   Trash2,
   UserCheck,
   UserRound,
+  Users,
 } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ActionSheet, type SheetAction } from '@/components/action-sheet';
+import { Avatar } from '@/components/avatar';
 import { ConversationRow, type TypingEntry } from '@/components/conversation-row';
 import { FilterTabs } from '@/components/filter-tabs';
 import { SwipeableRow, type SwipeAction } from '@/components/swipeable-row';
@@ -30,6 +33,7 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { useCalls } from '@/features/calls/CallProvider';
 import { cache } from '@/lib/cache';
 import {
   conversationSectionLabel,
@@ -38,7 +42,7 @@ import {
 } from '@/lib/format';
 import { connectSocket, onConnection } from '@/lib/socket';
 import { onMissedMessages } from '@/lib/sync';
-import type { ConversationSummary, Message } from '@/lib/types';
+import type { ConversationRemovedEvent, ConversationSummary, GroupUpdatedEvent, Message } from '@/lib/types';
 
 type ListRow =
   | { key: string; type: 'section'; label: string }
@@ -68,6 +72,13 @@ const listKeyExtractor = (item: ListRow) => item.key;
 
 export default function ChatsScreen() {
   const { token, user } = useAuth();
+  const calls = useCalls();
+  const liveCallId =
+    calls.mode === 'GROUP'
+      ? calls.status !== 'idle'
+        ? (calls.group?.conversationId ?? null)
+        : (calls.offer?.conversationId ?? null)
+      : null;
   const theme = useTheme();
   const router = useRouter();
   const [conversations, setConversations] = useState<ConversationSummary[]>(
@@ -283,11 +294,56 @@ export default function ChatsScreen() {
     socket.on('read', onRead);
     socket.on('message:deleted', onDeleted);
 
+    // Identité ou membres d'un groupe modifiés : la ligne de liste se met à jour
+    // sans attendre le prochain focus.
+    const onGroupUpdated = (event: GroupUpdatedEvent) => {
+      setConversations((previous) => {
+        if (!previous.some((item) => item.id === event.conversationId)) {
+          void refresh();
+          return previous;
+        }
+        const next = previous.map((conversation) =>
+          conversation.id === event.conversationId
+            ? {
+                ...conversation,
+                name: event.group.name,
+                description: event.group.description,
+                emoji: event.group.emoji,
+                color: event.group.color,
+                avatarUrl: event.group.avatarUrl,
+                ownerId: event.group.ownerId,
+                members: event.members,
+                updatedAt: event.group.updatedAt,
+              }
+            : conversation,
+        );
+        cache.setConversationList(next);
+        return next;
+      });
+    };
+    const onConversationAdded = () => {
+      void refresh();
+    };
+    const onConversationRemoved = (event: ConversationRemovedEvent) => {
+      cache.removeConversation(event.conversationId);
+      setConversations((previous) =>
+        previous.filter((conversation) => conversation.id !== event.conversationId),
+      );
+    };
+    socket.on('group:updated', onGroupUpdated);
+    socket.on('members:changed', onGroupUpdated);
+    socket.on('conversation:added', onConversationAdded);
+    socket.on('conversation:removed', onConversationRemoved);
+
     return () => {
       socket.off('message:new', onMessage);
       socket.off('typing', onTyping);
       socket.off('read', onRead);
       socket.off('message:deleted', onDeleted);
+      socket.off('group:updated', onGroupUpdated);
+      socket.off('members:changed', onGroupUpdated);
+      socket.off('conversation:added', onConversationAdded);
+      socket.off('conversation:removed', onConversationRemoved);
     };
   }, [token, user?.id, refresh]);
 
@@ -555,6 +611,7 @@ export default function ChatsScreen() {
             conversation={conversation}
             currentUserId={user?.id ?? ''}
             typing={typingMap[conversation.id] ?? null}
+            liveCall={conversation.id === liveCallId}
             onPress={openConversation}
             onLongPress={openConversationActions}
           />
@@ -563,6 +620,7 @@ export default function ChatsScreen() {
     },
     [
       applyPreferences,
+      liveCallId,
       markConversationRead,
       openConversation,
       openConversationActions,
@@ -714,7 +772,7 @@ export default function ChatsScreen() {
                 onPress: () => {
                   const id = actionTarget.id;
                   setActionTarget(null);
-                  router.push({ pathname: '/conversation-settings/[id]', params: { id } });
+                  router.push({ pathname: '/group/[id]', params: { id } });
                 },
               },
             ] satisfies SheetAction[])
@@ -755,17 +813,30 @@ export default function ChatsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.flex} edges={['top', 'left', 'right']}>
+      <SafeAreaView style={styles.flex} edges={['top', 'left', 'right', 'bottom']}>
         <ThemedView style={styles.header}>
           <ThemedView style={styles.headerTitleRow}>
             <ThemedText style={styles.brandTitle}>MboloChat</ThemedText>
           </ThemedView>
           <ThemedView style={styles.headerActions}>
             <Pressable
+              onPress={() => router.push('/profile')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Mon profil"
+              style={({ pressed }) => pressed && styles.pressed}>
+              <Avatar
+                name={user?.displayName ?? 'Moi'}
+                uri={user?.avatarUrl}
+                gender={user?.gender}
+                size={34}
+              />
+            </Pressable>
+            <Pressable
               onPress={() => setHeaderMenu(true)}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel="Actions"
+              accessibilityLabel="Nouveau"
               style={({ pressed }) => pressed && styles.pressed}>
               <Plus size={26} strokeWidth={2.2} color={theme.text} />
             </Pressable>
@@ -805,24 +876,24 @@ export default function ChatsScreen() {
 
         <ActionSheet
           visible={headerMenu}
-          title="Actions"
+          title="Nouveau"
           actions={[
             {
-              key: 'new',
-              label: 'Nouvelle discussion',
-              icon: Plus,
+              key: 'message',
+              label: 'Nouveau message',
+              icon: MessageSquarePlus,
               onPress: () => {
                 setHeaderMenu(false);
-                router.push('/new-chat');
+                router.push('/new-message');
               },
             },
             {
-              key: 'profile',
-              label: 'Mon profil',
-              icon: UserRound,
+              key: 'group',
+              label: 'Nouveau groupe',
+              icon: Users,
               onPress: () => {
                 setHeaderMenu(false);
-                router.push('/profile');
+                router.push('/new-group');
               },
             },
             ...(totalUnread > 0
@@ -844,7 +915,6 @@ export default function ChatsScreen() {
 
         <ActionSheet
           visible={blockTarget !== null}
-          variant="center"
           title={blockTargetUser ? `Bloquer ${blockTargetUser.displayName} ?` : 'Bloquer ?'}
           subtitle="Cette personne ne pourra plus t’envoyer de messages."
           actions={[
@@ -861,7 +931,6 @@ export default function ChatsScreen() {
 
         <ActionSheet
           visible={actionTarget !== null}
-          variant="center"
           title={actionTarget ? conversationTitle(actionTarget, user.id) : undefined}
           subtitle={
             actionTarget
@@ -876,7 +945,6 @@ export default function ChatsScreen() {
 
         <ActionSheet
           visible={leaveTarget !== null}
-          variant="center"
           title={leaveTarget ? conversationTitle(leaveTarget, user.id) : undefined}
           subtitle={
             leaveTarget?.type === 'GROUP'

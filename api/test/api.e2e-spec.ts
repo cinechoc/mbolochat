@@ -1,5 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { eq } from 'drizzle-orm';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
@@ -7,6 +8,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { ConversationsService } from '../src/conversations/conversations.service.js';
 import { DRIZZLE, type Database } from '../src/db/db.module.js';
+import { conversationInvites, users } from '../src/db/schema.js';
 
 describe('MboloChat API (e2e)', () => {
   let app: INestApplication;
@@ -427,5 +429,423 @@ describe('MboloChat API (e2e)', () => {
       .post('/auth/reset-password')
       .send({ emailOrUsername: user.user.username, code: '123456', newPassword: 'whatever123' })
       .expect(400);
+  });
+
+  describe('group conversations', () => {
+    const account = async (firstName: string, lastName: string) => {
+      const body = (await register(firstName, lastName)).body;
+      return {
+        token: body.accessToken as string,
+        id: body.user.id as string,
+        username: body.user.username as string,
+      };
+    };
+
+    const dbUpdateExpired = async (token: string) => {
+      await app
+        .get<Database>(DRIZZLE)
+        .update(conversationInvites)
+        .set({ expiresAt: new Date(Date.now() - 60_000) })
+        .where(eq(conversationInvites.token, token));
+    };
+
+    it('creates a group with identity, lets any member add, and enforces admin rights', async () => {
+      const alice = await account('Gaelle', 'Roux');
+      const bob = await account('Hugo', 'Noir');
+      const charlie = await account('Ines', 'Verdier');
+
+      const group = await request(app.getHttpServer())
+        .post('/conversations')
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({
+          type: 'GROUP',
+          name: 'Les Randonneurs',
+          emoji: '🌴',
+          color: '#2fbf71',
+          description: 'Préparer le trek',
+          memberIds: [bob.id],
+        })
+        .expect(201);
+
+      expect(group.body.ownerId).toBe(alice.id);
+      expect(group.body.emoji).toBe('🌴');
+      expect(group.body.color).toBe('#2fbf71');
+      expect(group.body.description).toBe('Préparer le trek');
+      const groupId = group.body.id;
+
+      // Un simple membre peut ajouter quelqu'un (comportement Snapchat).
+      const added = await request(app.getHttpServer())
+        .post(`/conversations/${groupId}/members`)
+        .set('Authorization', `Bearer ${bob.token}`)
+        .send({ memberIds: [charlie.id] })
+        .expect(201);
+      expect(added.body.members).toHaveLength(3);
+
+      // En revanche, l'identité et les rôles restent réservés aux admins.
+      await request(app.getHttpServer())
+        .patch(`/conversations/${groupId}`)
+        .set('Authorization', `Bearer ${bob.token}`)
+        .send({ name: 'Pirate' })
+        .expect(403);
+
+      await request(app.getHttpServer())
+        .patch(`/conversations/${groupId}/members/${charlie.id}/role`)
+        .set('Authorization', `Bearer ${bob.token}`)
+        .send({ role: 'admin' })
+        .expect(403);
+
+      const promoted = await request(app.getHttpServer())
+        .patch(`/conversations/${groupId}/members/${bob.id}/role`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ role: 'admin' })
+        .expect(200);
+      expect(
+        promoted.body.members.find((member: { id: string }) => member.id === bob.id).role,
+      ).toBe('admin');
+
+      // Le propriétaire ne peut pas être rétrogradé, et il reste toujours un admin.
+      await request(app.getHttpServer())
+        .patch(`/conversations/${groupId}/members/${alice.id}/role`)
+        .set('Authorization', `Bearer ${bob.token}`)
+        .send({ role: 'member' })
+        .expect(403);
+
+      await request(app.getHttpServer())
+        .patch(`/conversations/${groupId}/members/${bob.id}/role`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ role: 'member' })
+        .expect(200);
+
+      // Bob n'est plus admin : il ne peut plus exclure.
+      await request(app.getHttpServer())
+        .delete(`/conversations/${groupId}/members/${charlie.id}`)
+        .set('Authorization', `Bearer ${bob.token}`)
+        .expect(403);
+    });
+
+    it('suggests recent contacts before the alphabetical list', async () => {
+      const alice = await account('Romy', 'Sugg');
+      const bob = await account('Sam', 'Sugg');
+
+      await request(app.getHttpServer())
+        .post('/conversations')
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ memberIds: [bob.id] })
+        .expect(201);
+
+      const suggestions = await request(app.getHttpServer())
+        .get('/users/suggestions')
+        .set('Authorization', `Bearer ${alice.token}`)
+        .expect(200);
+
+      expect(suggestions.body.recent[0].id).toBe(bob.id);
+      expect(suggestions.body.contacts.length).toBeGreaterThan(0);
+      // On ne se suggère jamais soi-même, ni un contact déjà en tête de liste.
+      const people = [...suggestions.body.recent, ...suggestions.body.contacts];
+      expect(people.some((user: { id: string }) => user.id === alice.id)).toBe(false);
+      expect(
+        suggestions.body.contacts.some((user: { id: string }) => user.id === bob.id),
+      ).toBe(false);
+    });
+
+    it('toggles emoji reactions and aggregates them', async () => {
+      const alice = await account('Uma', 'React');
+      const bob = await account('Vic', 'React');
+      const conversation = await request(app.getHttpServer())
+        .post('/conversations')
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ memberIds: [bob.id] })
+        .expect(201);
+
+      const service = app.get(ConversationsService);
+      const message = await service.createMessage(conversation.body.id, alice.id, 'Bonjour');
+
+      const first = await service.toggleReaction(
+        conversation.body.id,
+        message.id,
+        bob.id,
+        'mbolo-panther-2d/amour',
+      );
+      expect(first).toEqual([
+        { reaction: 'mbolo-panther-2d/amour', count: 1, mine: true },
+      ]);
+
+      const removed = await service.toggleReaction(
+        conversation.body.id,
+        message.id,
+        bob.id,
+        'mbolo-panther-2d/amour',
+      );
+      expect(removed).toEqual([]);
+
+      await expect(
+        service.toggleReaction(conversation.body.id, message.id, bob.id, 'abc'),
+      ).rejects.toBeTruthy();
+    });
+
+    it('lists links and searches the conversation history', async () => {
+      const alice = await account('Wendy', 'Search');
+      const bob = await account('Xavier', 'Search');
+      const conversation = await request(app.getHttpServer())
+        .post('/conversations')
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ memberIds: [bob.id] })
+        .expect(201);
+
+      const service = app.get(ConversationsService);
+      await service.createMessage(
+        conversation.body.id,
+        alice.id,
+        'Regarde https://example.com/page.',
+      );
+      await service.createMessage(
+        conversation.body.id,
+        bob.id,
+        'Message secret pour la recherche',
+      );
+
+      const media = await request(app.getHttpServer())
+        .get(`/conversations/${conversation.body.id}/media`)
+        .set('Authorization', `Bearer ${bob.token}`)
+        .expect(200);
+      expect(media.body.attachments).toEqual([]);
+      expect(media.body.links[0].url).toBe('https://example.com/page');
+
+      const hits = await request(app.getHttpServer())
+        .get(`/conversations/${conversation.body.id}/search`)
+        .query({ q: 'secret' })
+        .set('Authorization', `Bearer ${bob.token}`)
+        .expect(200);
+      expect(hits.body).toHaveLength(1);
+      expect(hits.body[0].content).toContain('Message secret');
+
+      await request(app.getHttpServer())
+        .get(`/conversations/${conversation.body.id}/search`)
+        .query({ q: 'secret' })
+        .expect(401);
+    });
+
+    it('writes system messages for creation and additions', async () => {
+      const alice = await account('Yara', 'Systeme');
+      const bob = await account('Zack', 'Systeme');
+      const charlie = await account('Anna', 'Systeme');
+
+      const group = await request(app.getHttpServer())
+        .post('/conversations')
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ type: 'GROUP', name: 'Journal', memberIds: [bob.id] })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post(`/conversations/${group.body.id}/members`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ memberIds: [charlie.id] })
+        .expect(201);
+
+      const history = await request(app.getHttpServer())
+        .get(`/conversations/${group.body.id}/messages`)
+        .set('Authorization', `Bearer ${bob.token}`)
+        .expect(200);
+
+      const systemMessages = history.body.filter(
+        (message: { type: string }) => message.type === 'system',
+      );
+      expect(systemMessages.length).toBeGreaterThanOrEqual(2);
+      expect(
+        systemMessages.some((message: { content: string }) =>
+          message.content.includes('a créé le groupe'),
+        ),
+      ).toBe(true);
+      expect(
+        systemMessages.some((message: { content: string }) =>
+          message.content.includes('a ajouté'),
+        ),
+      ).toBe(true);
+    });
+
+    it('enforces who-can-write and who-can-add permissions', async () => {
+      const alice = await account('Bea', 'Perm');
+      const bob = await account('Cedric', 'Perm');
+      const charlie = await account('Diane', 'Perm');
+
+      const group = await request(app.getHttpServer())
+        .post('/conversations')
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ type: 'GROUP', name: 'Restreint', memberIds: [bob.id] })
+        .expect(201);
+
+      const updated = await request(app.getHttpServer())
+        .patch(`/conversations/${group.body.id}`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ whoCanSend: 'admins', whoCanAdd: 'admins' })
+        .expect(200);
+      expect(updated.body.whoCanSend).toBe('admins');
+      expect(updated.body.whoCanAdd).toBe('admins');
+
+      const service = app.get(ConversationsService);
+      await expect(
+        service.createMessage(group.body.id, bob.id, 'Je ne devrais pas pouvoir'),
+      ).rejects.toBeTruthy();
+      const sent = await service.createMessage(group.body.id, alice.id, 'Message admin');
+      expect(sent.content).toBe('Message admin');
+
+      await request(app.getHttpServer())
+        .post(`/conversations/${group.body.id}/members`)
+        .set('Authorization', `Bearer ${bob.token}`)
+        .send({ memberIds: [charlie.id] })
+        .expect(403);
+
+      await request(app.getHttpServer())
+        .post(`/conversations/${group.body.id}/members`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ memberIds: [charlie.id] })
+        .expect(201);
+    });
+
+    it('enforces the 100-member cap', async () => {
+      const alice = await account('Jade', 'Leroy');
+      const db = app.get<Database>(DRIZZLE);
+      const fakeUsers = await db
+        .insert(users)
+        .values(
+          Array.from({ length: 100 }, (_, index) => ({
+            email: `fake_${suffix}_${index}@e2e.dev`,
+            username: `fake_${suffix}_${index}`,
+            displayName: `Fake ${index}`,
+            passwordHash: 'x',
+          })),
+        )
+        .returning({ id: users.id });
+
+      const group = await request(app.getHttpServer())
+        .post('/conversations')
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({
+          type: 'GROUP',
+          name: 'Grand groupe',
+          memberIds: fakeUsers.slice(0, 99).map((user) => user.id),
+        })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post(`/conversations/${group.body.id}/members`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ memberIds: [fakeUsers[99].id] })
+        .expect(409);
+    });
+
+    it('supports invite links with preview, join, expiry and approval', async () => {
+      const alice = await account('Kenza', 'Moreau');
+      const bob = await account('Lucas', 'Faure');
+      const dina = await account('Maya', 'Costa');
+
+      const group = await request(app.getHttpServer())
+        .post('/conversations')
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ type: 'GROUP', name: 'Cercle', memberIds: [bob.id] })
+        .expect(201);
+
+      const invite = await request(app.getHttpServer())
+        .post(`/conversations/${group.body.id}/invites`)
+        .set('Authorization', `Bearer ${bob.token}`)
+        .send({ expiresInHours: 24, maxUses: 2 })
+        .expect(201);
+      expect(invite.body.token).toBeTruthy();
+      expect(invite.body.status).toBe('ok');
+
+      // L'aperçu est public et ne dévoile aucun membre.
+      const preview = await request(app.getHttpServer())
+        .get(`/invites/${invite.body.token}`)
+        .expect(200);
+      expect(preview.body.group.name).toBe('Cercle');
+      expect(preview.body.group.memberCount).toBe(2);
+
+      const joined = await request(app.getHttpServer())
+        .post(`/invites/${invite.body.token}/join`)
+        .set('Authorization', `Bearer ${dina.token}`)
+        .expect(200);
+      expect(joined.body.status).toBe('joined');
+
+      const members = await request(app.getHttpServer())
+        .get(`/conversations/${group.body.id}`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .expect(200);
+      expect(members.body.members).toHaveLength(3);
+
+      // Invitation avec approbation : la demande attend un admin.
+      const approvalInvite = await request(app.getHttpServer())
+        .post(`/conversations/${group.body.id}/invites`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ requiresApproval: true, maxUses: 1 })
+        .expect(201);
+      const newcomer = await account('Nina', 'Baron');
+      const pending = await request(app.getHttpServer())
+        .post(`/invites/${approvalInvite.body.token}/join`)
+        .set('Authorization', `Bearer ${newcomer.token}`)
+        .expect(200);
+      expect(pending.body.status).toBe('pending');
+
+      const requests = await request(app.getHttpServer())
+        .get(`/conversations/${group.body.id}/join-requests`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .expect(200);
+      expect(requests.body).toHaveLength(1);
+
+      await request(app.getHttpServer())
+        .post(`/conversations/${group.body.id}/join-requests/${requests.body[0].id}/resolve`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ action: 'approve' })
+        .expect(201);
+
+      const afterApproval = await request(app.getHttpServer())
+        .get(`/conversations/${group.body.id}`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .expect(200);
+      expect(afterApproval.body.members).toHaveLength(4);
+
+      // Un lien expiré est refusé avec 410.
+      const expiredInvite = await request(app.getHttpServer())
+        .post(`/conversations/${group.body.id}/invites`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ expiresInHours: 1 })
+        .expect(201);
+      await dbUpdateExpired(expiredInvite.body.token);
+      const late = await account('Olga', 'Simon');
+      await request(app.getHttpServer())
+        .post(`/invites/${expiredInvite.body.token}/join`)
+        .set('Authorization', `Bearer ${late.token}`)
+        .expect(410);
+    });
+
+    it('uploads and removes the group photo', async () => {
+      const alice = await account('Pauline', 'Girard');
+      const bob = await account('Quentin', 'Aubert');
+      const group = await request(app.getHttpServer())
+        .post('/conversations')
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ type: 'GROUP', name: 'Photo', memberIds: [bob.id] })
+        .expect(201);
+
+      const png =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+      const uploaded = await request(app.getHttpServer())
+        .post(`/conversations/${group.body.id}/photo`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .send({ data: png, mimeType: 'image/png' })
+        .expect(201);
+      expect(uploaded.body.avatarUrl).toBeTruthy();
+
+      await request(app.getHttpServer())
+        .post(`/conversations/${group.body.id}/photo`)
+        .set('Authorization', `Bearer ${bob.token}`)
+        .send({ data: png, mimeType: 'image/png' })
+        .expect(403);
+
+      const removed = await request(app.getHttpServer())
+        .delete(`/conversations/${group.body.id}/photo`)
+        .set('Authorization', `Bearer ${alice.token}`)
+        .expect(200);
+      expect(removed.body.avatarUrl).toBeNull();
+    });
   });
 });

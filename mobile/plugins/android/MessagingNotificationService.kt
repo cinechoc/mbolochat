@@ -61,6 +61,7 @@ class MessagingNotificationService : FirebaseMessagingService() {
     val senderName = data["senderName"]?.takeIf { it.isNotEmpty() } ?: title
     val groupName = data["groupName"]?.takeIf { it.isNotEmpty() }
     val avatarUrl = data["avatarUrl"]?.takeIf { it.isNotEmpty() }
+    val groupAvatarUrl = data["groupAvatarUrl"]?.takeIf { it.isNotEmpty() }
     val silent = data["silent"] == "1"
     val unread = data["unreadCount"]?.toIntOrNull()
 
@@ -68,7 +69,8 @@ class MessagingNotificationService : FirebaseMessagingService() {
     Thread {
       try {
         val avatar = avatarUrl?.let { download(it) }
-        showMessage(conversationId, title, text, senderName, groupName, avatar, silent, unread)
+        val groupAvatar = groupAvatarUrl?.let { download(it) }
+        showMessage(conversationId, title, text, senderName, groupName, avatar, groupAvatar, silent, unread)
       } finally {
         stopSelf()
       }
@@ -80,6 +82,8 @@ class MessagingNotificationService : FirebaseMessagingService() {
   }
 
   private val prefs by lazy { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+
+  private fun countKey(conversationId: String) = COUNT_PREFIX + conversationId
 
   private fun download(url: String): Bitmap? = runCatching {
     val connection = URL(url).openConnection() as HttpURLConnection
@@ -129,6 +133,7 @@ class MessagingNotificationService : FirebaseMessagingService() {
     senderName: String,
     groupName: String?,
     avatar: Bitmap?,
+    groupAvatar: Bitmap?,
     silent: Boolean,
     unread: Int?,
   ) {
@@ -162,10 +167,24 @@ class MessagingNotificationService : FirebaseMessagingService() {
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
+    // L'avatar ne s'attache qu'à la personne du message courant : l'historique
+    // garde les noms, pas les images (elles ne survivent pas au processus).
+    val avatarPerson = avatar?.let {
+      Person.Builder()
+        .setName(senderName)
+        .setKey(conversationId)
+        .setIcon(IconCompat.createWithBitmap(circular(it)))
+        .build()
+    }
+
     val style = NotificationCompat.MessagingStyle(Person.Builder().setName("Moi").build())
       .setConversationTitle(groupName)
     for (entry in history) {
-      val person = Person.Builder().setName(entry.sender).setKey(conversationId).build()
+      val person = if (avatarPerson != null && (entry === current || entry.time == current.time)) {
+        avatarPerson
+      } else {
+        Person.Builder().setName(entry.sender).setKey(conversationId).build()
+      }
       style.addMessage(entry.text, entry.time, person)
     }
 
@@ -189,31 +208,10 @@ class MessagingNotificationService : FirebaseMessagingService() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       builder.setShortcutId(conversationId)
     }
-    if (avatar != null) {
-      val sender = Person.Builder()
-        .setName(senderName)
-        .setKey(conversationId)
-        .setIcon(IconCompat.createWithBitmap(circular(avatar)))
-        .build()
-      // L'avatar ne s'attache qu'à la personne du message courant : l'historique
-      // garde les noms, pas les images (elles ne survivent pas au processus).
-      builder.setStyle(
-        NotificationCompat.MessagingStyle(Person.Builder().setName("Moi").build())
-          .setConversationTitle(groupName)
-          .apply {
-            for (entry in history) {
-              if (entry === current || entry.time == current.time) {
-                addMessage(entry.text, entry.time, sender)
-              } else {
-                addMessage(
-                  entry.text,
-                  entry.time,
-                  Person.Builder().setName(entry.sender).setKey(conversationId).build(),
-                )
-              }
-            }
-          },
-      )
+    // Dans un groupe, la grande icône est celle du groupe ; la personne du
+    // message garde sa propre photo dans le fil de la conversation.
+    if (groupAvatar != null) {
+      builder.setLargeIcon(circular(groupAvatar))
     }
 
     // Tag = identifiant de conversation : une notification par discussion.

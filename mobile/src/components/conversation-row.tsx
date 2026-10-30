@@ -22,8 +22,7 @@ import Animated, {
 
 import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { accentColor } from '@/components/ui';
+
 import { Spacing } from '@/constants/theme';
 import { EmojiText } from '@/features/emoji/EmojiText';
 import { PresenceDot } from '@/features/presence/PresenceDot';
@@ -42,6 +41,8 @@ interface ConversationRowProps {
   conversation: ConversationSummary;
   currentUserId: string;
   typing?: TypingEntry | null;
+  /** Un appel de groupe est ouvert dans cette discussion. */
+  liveCall?: boolean;
   /** Reçoit la conversation : la fonction peut rester stable entre les rendus. */
   onPress: (conversation: ConversationSummary) => void;
   onLongPress: (conversation: ConversationSummary) => void;
@@ -51,6 +52,7 @@ function ConversationRowComponent({
   conversation,
   currentUserId,
   typing,
+  liveCall,
   onPress,
   onLongPress,
 }: ConversationRowProps) {
@@ -60,7 +62,7 @@ function ConversationRowComponent({
   const unread = conversation.unreadCount > 0;
   const preview = conversationPreview(conversation, currentUserId);
   const other = conversation.members.find((member) => member.id !== currentUserId);
-  const avatarUri = isGroup ? null : (other?.avatarUrl ?? null);
+  const avatarUri = isGroup ? (conversation.avatarUrl ?? null) : (other?.avatarUrl ?? null);
   const timestamp = formatListTimestamp(
     conversation.lastMessage?.createdAt ?? conversation.createdAt,
   );
@@ -76,7 +78,11 @@ function ConversationRowComponent({
     ),
   }));
 
-  const previewText = typing ? 'En train d’écrire' : preview.text;
+  const previewText = typing
+    ? isGroup
+      ? `${typing.name} écrit…`
+      : 'En train d’écrire'
+    : preview.text;
 
   return (
     <AnimatedPressable
@@ -102,6 +108,8 @@ function ConversationRowComponent({
           gender={isGroup ? null : other?.gender}
           variant={isGroup ? 'group' : 'user'}
           shape="rounded"
+          emoji={isGroup ? conversation.emoji : null}
+          color={isGroup ? conversation.color : null}
         />
         {!isGroup && other ? <PresenceDot userId={other.id} /> : null}
       </View>
@@ -110,6 +118,9 @@ function ConversationRowComponent({
           <ThemedText numberOfLines={1} style={[styles.title, unread && styles.bold]}>
             {title}
           </ThemedText>
+          {liveCall ? (
+            <Phone size={13} strokeWidth={2.6} color={theme.accent} style={styles.icon} />
+          ) : null}
           {conversation.pinned ? (
             <Pin size={13} strokeWidth={2.4} color={theme.textSecondary} style={styles.icon} />
           ) : null}
@@ -122,7 +133,7 @@ function ConversationRowComponent({
             <Phone size={14} strokeWidth={2.2} color={theme.textSecondary} />
           ) : !typing && preview.mine ? (
             preview.read ? (
-              <CheckCheck size={14} strokeWidth={2.4} color={accentColor} />
+              <CheckCheck size={14} strokeWidth={2.4} color={theme.accent} />
             ) : (
               <Check size={14} strokeWidth={2.4} color={theme.textSecondary} />
             )
@@ -149,7 +160,7 @@ function ConversationRowComponent({
             numberOfLines={1}
             style={[
               styles.previewText,
-              { color: typing ? accentColor : theme.textSecondary },
+              { color: typing ? theme.accent : theme.textSecondary },
               unread && styles.bold,
               typing ? styles.typing : null,
             ]}>
@@ -161,15 +172,23 @@ function ConversationRowComponent({
         <ThemedText
           type="small"
           themeColor="textSecondary"
-          style={unread ? styles.timeUnread : undefined}>
+          style={[unread ? styles.timeUnread : undefined, unread ? { color: theme.accent } : null]}>
           {timestamp}
         </ThemedText>
-        {unread && !conversation.muted ? (
-          <ThemedView style={styles.badge}>
-            <ThemedText style={styles.badgeText}>
+        {unread ? (
+          <View
+            style={[
+              styles.badge,
+              { backgroundColor: conversation.muted ? theme.backgroundElement : theme.accent },
+            ]}>
+            <ThemedText
+              style={[
+                styles.badgeText,
+                conversation.muted ? { color: theme.textSecondary } : null,
+              ]}>
               {conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}
             </ThemedText>
-          </ThemedView>
+          </View>
         ) : null}
       </View>
     </AnimatedPressable>
@@ -223,7 +242,6 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   timeUnread: {
-    color: accentColor,
     fontWeight: '700',
   },
   badge: {
@@ -231,7 +249,6 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     paddingHorizontal: 6,
-    backgroundColor: accentColor,
     alignItems: 'center',
     justifyContent: 'center',
   },

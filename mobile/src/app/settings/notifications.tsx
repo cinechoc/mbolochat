@@ -262,9 +262,11 @@ export default function NotificationSettingsScreen() {
                   <Avatar
                     name={title}
                     size={36}
-                    uri={isGroup ? null : other?.avatarUrl}
+                    uri={isGroup ? conversation.avatarUrl : other?.avatarUrl}
                     gender={other?.gender}
                     variant={isGroup ? 'group' : 'user'}
+                    emoji={isGroup ? conversation.emoji : null}
+                    color={isGroup ? conversation.color : null}
                   />
                   <ThemedText style={styles.rowLabel} numberOfLines={1}>
                     {title}

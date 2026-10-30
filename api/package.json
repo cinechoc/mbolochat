@@ -25,6 +25,7 @@
     "smoke": "node scripts/ws-smoke.mjs",
     "push:smoke": "node scripts/push-smoke.mjs",
     "reliability:smoke": "node scripts/reliability-smoke.mjs",
+    "calls:smoke": "node scripts/group-call-smoke.mjs",
     "security:smoke": "node scripts/security-smoke.mjs"
   },
   "dependencies": {

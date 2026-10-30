@@ -59,7 +59,20 @@ export const conversations = pgTable('conversations', {
     .$defaultFn(() => crypto.randomUUID()),
   type: conversationTypeEnum('type').notNull(),
   name: text('name'),
+  /** Photo du groupe (même stockage que les avatars utilisateurs). */
+  avatarUrl: text('avatar_url'),
+  /** Identité de repli quand il n'y a pas de photo. */
+  emoji: text('emoji'),
+  color: text('color'),
+  description: text('description'),
+  /** Créateur du groupe : badge « propriétaire », non révocable par les autres. */
+  ownerId: text('owner_id').references(() => users.id, { onDelete: 'set null' }),
+  /** Qui peut écrire : `all` (défaut) ou `admins`. */
+  sendPermission: text('send_permission').notNull().default('all'),
+  /** Qui peut ajouter des membres : `all` (défaut) ou `admins`. */
+  addPermission: text('add_permission').notNull().default('all'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const conversationRoleEnum = pgEnum('conversation_role', ['admin', 'member']);
@@ -86,6 +99,74 @@ export const conversationMembers = pgTable(
     role: conversationRoleEnum('role').notNull().default('member'),
   },
   (table) => [primaryKey({ columns: [table.conversationId, table.userId] })],
+);
+
+/**
+ * Lien d'invitation à rejoindre un groupe. Le jeton est la seule chose que
+ * porte le lien partagé : il ne permet rien d'autre que de demander l'entrée.
+ */
+export const conversationInvites = pgTable(
+  'conversation_invites',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    conversationId: text('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    createdById: text('created_by_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    token: text('token').notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** `null` = illimité. */
+    maxUses: integer('max_uses'),
+    uses: integer('uses').notNull().default(0),
+    /** L'admin doit approuver chaque demande avant l'entrée. */
+    requiresApproval: boolean('requires_approval').notNull().default(false),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('conversation_invites_conversation_idx').on(table.conversationId)],
+);
+
+export const joinRequestStatusEnum = pgEnum('join_request_status', [
+  'pending',
+  'approved',
+  'rejected',
+]);
+
+/** Demande d'entrée déposée via un lien d'invitation. */
+export const conversationJoinRequests = pgTable(
+  'conversation_join_requests',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    conversationId: text('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    inviteId: text('invite_id')
+      .notNull()
+      .references(() => conversationInvites.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: joinRequestStatusEnum('status').notNull().default('pending'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolvedById: text('resolved_by_id').references(() => users.id, { onDelete: 'set null' }),
+  },
+  (table) => [
+    uniqueIndex('conversation_join_requests_invite_user_idx').on(
+      table.inviteId,
+      table.userId,
+    ),
+    index('conversation_join_requests_conversation_status_idx').on(
+      table.conversationId,
+      table.status,
+    ),
+  ],
 );
 
 /** Comptes bloqués par un utilisateur. */
@@ -252,6 +333,27 @@ export const messageReceipts = pgTable(
   (table) => [
     primaryKey({ columns: [table.messageId, table.userId] }),
     index('message_receipts_user_idx').on(table.userId),
+  ],
+);
+
+/** Réactions emoji : une par membre et par emoji sur un message. */
+export const messageReactions = pgTable(
+  'message_reactions',
+  {
+    messageId: text('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Référence de sticker (« mbolo-panther-2d/amour »). La colonne garde son
+     *  ancien nom SQL `emoji` : aucun changement de schéma n'est nécessaire. */
+    reaction: text('emoji').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.userId, table.reaction] }),
+    index('message_reactions_message_idx').on(table.messageId),
   ],
 );
 

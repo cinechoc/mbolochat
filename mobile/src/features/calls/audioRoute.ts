@@ -1,5 +1,9 @@
 import { DeviceEventEmitter, type EmitterSubscription } from 'react-native';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import InCallManager from 'react-native-incall-manager';
+
+/** Étiquette du verrou d'écran : un seul appel à la fois dans l'application. */
+const KEEP_AWAKE_TAG = 'mbolochat-call';
 
 /**
  * Routage audio de l'appel : écouteur/haut-parleur, capteur de proximité et
@@ -20,6 +24,8 @@ export function startCallAudio(listener?: (near: boolean) => void): void {
   } catch {
     started = false;
   }
+  // L'écran reste allumé hors proximité ; le capteur l'éteint à l'oreille.
+  void activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
   proximitySubscription?.remove();
   proximitySubscription = DeviceEventEmitter.addListener(
     'Proximity',
@@ -35,6 +41,7 @@ export function stopCallAudio(): void {
     return;
   }
   started = false;
+  deactivateKeepAwake(KEEP_AWAKE_TAG);
   try {
     InCallManager.stop();
   } catch {

@@ -47,7 +47,7 @@ export interface UserProfile extends User {
 export type MessageAttachmentType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE' | 'GIF' | 'STICKER';
 
 /** Texte Unicode normal, sticker référencé, ou message système d'appel. */
-export type MessageType = 'text' | 'sticker' | 'call';
+export type MessageType = 'text' | 'sticker' | 'call' | 'system';
 
 /** Pièce jointe d'un message (photo pour l'instant). */
 export interface MessageAttachment {
@@ -122,6 +122,14 @@ export interface MessageQuote {
   deleted: boolean;
 }
 
+export interface ReactionSummary {
+  /** Référence de sticker panthère (« mbolo-panther-2d/amour »). */
+  reaction: string;
+  count: number;
+  /** J'ai réagi avec ce sticker. */
+  mine: boolean;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -136,8 +144,17 @@ export interface Message {
   deleted: boolean;
   /** Message cité par une réponse. */
   replyTo: MessageQuote | null;
+  /** Réactions emoji agrégées. */
+  reactions: ReactionSummary[];
   createdAt: string;
   sender: SenderInfo;
+}
+
+/** Charge utile de l'événement temps réel « message:reaction ». */
+export interface MessageReactionEvent {
+  conversationId: string;
+  messageId: string;
+  reactions: ReactionSummary[];
 }
 
 /** Accusé de réception d'un message envoyé par moi, par destinataire. */
@@ -152,7 +169,19 @@ export interface ConversationSummary {
   id: string;
   type: 'DIRECT' | 'GROUP';
   name: string | null;
+  /** Photo du groupe (URL signée) ; null s'il n'y en a pas. */
+  avatarUrl: string | null;
+  /** Identité de repli du groupe quand il n'y a pas de photo. */
+  emoji: string | null;
+  color: string | null;
+  description: string | null;
+  /** Créateur du groupe : badge propriétaire. */
+  ownerId: string | null;
+  /** Qui peut écrire / ajouter des membres. */
+  whoCanSend: 'all' | 'admins';
+  whoCanAdd: 'all' | 'admins';
   createdAt: string;
+  updatedAt: string;
   members: MemberInfo[];
   lastMessage: Message | null;
   unreadCount: number;
@@ -204,3 +233,111 @@ export interface ForgotPasswordResult {
 export interface ResetPasswordResult {
   message: string;
 }
+
+/* ------------------------------- groupes -------------------------------- */
+
+export type InviteStatus = 'ok' | 'expired' | 'revoked' | 'exhausted' | 'full';
+
+/** Invitation telle que la voit un membre du groupe. */
+export interface GroupInvite {
+  id: string;
+  token: string;
+  conversationId: string;
+  expiresAt: string;
+  maxUses: number | null;
+  uses: number;
+  requiresApproval: boolean;
+  createdAt: string;
+  status: InviteStatus;
+}
+
+/** Aperçu public d'une invitation : aucune identité de membre. */
+export interface InvitePreview {
+  group: {
+    id: string;
+    name: string | null;
+    description: string | null;
+    emoji: string | null;
+    color: string | null;
+    avatarUrl: string | null;
+    memberCount: number;
+  };
+  requiresApproval: boolean;
+  expiresAt: string;
+  status: InviteStatus;
+}
+
+export interface JoinRequest {
+  id: string;
+  inviteId: string;
+  createdAt: string;
+  user: SenderInfo;
+}
+
+export interface JoinInviteResult {
+  status: 'joined' | 'pending' | 'rejected';
+  conversationId: string;
+  requestId?: string;
+}
+
+/** État diffusé en temps réel sur le salon du groupe. */
+export interface GroupInfo {
+  id: string;
+  name: string | null;
+  description: string | null;
+  emoji: string | null;
+  color: string | null;
+  avatarUrl: string | null;
+  ownerId: string | null;
+  whoCanSend: 'all' | 'admins';
+  whoCanAdd: 'all' | 'admins';
+  memberCount: number;
+  updatedAt: string;
+}
+
+export interface GroupUpdatedEvent {
+  conversationId: string;
+  group: GroupInfo;
+  members: MemberInfo[];
+}
+
+export interface MembersChangedEvent extends GroupUpdatedEvent {
+  action: 'added' | 'removed' | 'left' | 'role';
+  actorId: string;
+  userIds: string[];
+}
+
+export interface ConversationRemovedEvent {
+  conversationId: string;
+  reason: 'removed' | 'left';
+}
+
+/* ------------------------- médias et recherche -------------------------- */
+
+export interface ConversationMediaItem {
+  messageId: string;
+  type: MessageAttachmentType;
+  url: string;
+  mime: string;
+  name: string | null;
+  width?: number;
+  height?: number;
+  duration?: number;
+  createdAt: string;
+  senderName: string;
+}
+
+export interface ConversationLinkItem {
+  messageId: string;
+  url: string;
+  createdAt: string;
+  senderName: string;
+}
+
+export interface ConversationSearchHit {
+  messageId: string;
+  content: string;
+  createdAt: string;
+  senderName: string;
+}
+

@@ -46,6 +46,10 @@ interface ExpoPushMessage {
     avatarUrl: string;
     /** Nom du groupe (vide pour une discussion directe). */
     groupName: string;
+    /** URL absolue de la photo du groupe (vide s'il n'y en a pas). */
+    groupAvatarUrl: string;
+    /** Emoji d'identité du groupe (vide pour une discussion directe). */
+    groupEmoji: string;
     /** Nombre de non-lus de la conversation pour ce destinataire. */
     unreadCount: string;
     /** « 1 » : notification silencieuse (préférence du compte). */
@@ -165,6 +169,8 @@ export class PushService {
         .select({
           type: conversations.type,
           name: conversations.name,
+          avatarUrl: conversations.avatarUrl,
+          emoji: conversations.emoji,
         })
         .from(conversations)
         .where(eq(conversations.id, message.conversationId))
@@ -230,7 +236,7 @@ export class PushService {
         from conversation_members cm
         left join messages m on m.conversation_id = cm.conversation_id
           and m.sender_id <> cm.user_id
-          and m.type <> 'call'
+          and m.type not in ('call', 'system')
           and (cm.last_read_at is null or m.created_at > cm.last_read_at)
           and not exists (
             select 1 from message_hides mh
@@ -243,15 +249,21 @@ export class PushService {
       const unreadByUser = new Map(unreadRows.rows.map((row) => [row.userId, Number(row.cnt)]));
       const prefsByUser = new Map(members.map((member) => [member.userId, member]));
 
-      const title =
-        conversation.type === 'GROUP'
-          ? (conversation.name?.trim() || 'Groupe')
-          : message.sender.displayName;
+      const isGroup = conversation.type === 'GROUP';
+      const groupLabel = conversation.name?.trim() || 'Groupe';
+      const title = isGroup
+        ? conversation.emoji
+          ? `${conversation.emoji} ${groupLabel}`
+          : groupLabel
+        : message.sender.displayName;
 
       // L'avatar part en URL absolue dans la notification : il doit être signé
       // ici aussi, la notification ne passe pas par la réponse HTTP.
       const avatarPath = this.media.signOrNull(message.sender.avatarUrl);
-      const groupName = conversation.type === 'GROUP' ? title : '';
+      const groupAvatarPath = isGroup
+        ? this.media.signOrNull(conversation.avatarUrl)
+        : null;
+      const groupName = isGroup ? title : '';
 
       const payload: ExpoPushMessage[] = tokens.map(({ userId, token, baseUrl }) => {
         const prefs = prefsByUser.get(userId);
@@ -259,6 +271,7 @@ export class PushService {
         const text = notificationText(message, prefs?.notificationPreview ?? true);
         const body = conversation.type === 'GROUP' ? `${message.sender.displayName} : ${text}` : text;
         const avatar = avatarPath ? absoluteMediaUrl(avatarPath, baseUrl) : null;
+        const groupAvatar = groupAvatarPath ? absoluteMediaUrl(groupAvatarPath, baseUrl) : null;
         return {
           to: token,
           priority: 'high',
@@ -271,6 +284,8 @@ export class PushService {
             senderName: message.sender.displayName,
             avatarUrl: avatar ?? '',
             groupName,
+            groupAvatarUrl: groupAvatar ?? '',
+            groupEmoji: isGroup ? (conversation.emoji ?? '') : '',
             unreadCount: String(Math.max(1, unreadByUser.get(userId) ?? 1)),
             silent: prefs?.notificationSound === false ? '1' : '0',
           },
