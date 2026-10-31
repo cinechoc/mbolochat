@@ -1,4 +1,15 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { toPublicUser, UsersService } from '../users/users.service.js';
 import { AuthService } from './auth.service.js';
@@ -19,15 +30,23 @@ export class AuthController {
 
   @Post('register')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  register(
+    @Body() dto: RegisterDto,
+    @Headers('x-device-name') deviceName?: string,
+    @Headers('x-platform') platform?: string,
+  ) {
+    return this.authService.register(dto, { name: deviceName, platform });
   }
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  login(
+    @Body() dto: LoginDto,
+    @Headers('x-device-name') deviceName?: string,
+    @Headers('x-platform') platform?: string,
+  ) {
+    return this.authService.login(dto, { name: deviceName, platform });
   }
 
   @Post('refresh')
@@ -61,6 +80,42 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  /** Appareils connectés (sessions de rafraîchissement encore valides). */
+  @Get('sessions')
+  @UseGuards(JwtAuthGuard)
+  sessions(@CurrentUser() current: JwtPayload) {
+    return this.authService.listSessions(current.sub);
+  }
+
+  /** Déconnexion à distance d'un appareil précis. */
+  @Delete('sessions/:id')
+  @UseGuards(JwtAuthGuard)
+  revokeSession(@CurrentUser() current: JwtPayload, @Param('id') id: string) {
+    return this.authService.revokeSession(current.sub, id);
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  changePassword(
+    @CurrentUser() current: JwtPayload,
+    @Body() body: { currentPassword?: string; newPassword?: string },
+  ) {
+    return this.authService.changePassword(
+      current.sub,
+      body?.currentPassword ?? '',
+      body?.newPassword ?? '',
+    );
+  }
+
+  /** Suppression différée : 30 jours pour revenir, puis anonymisation. */
+  @Delete('account')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  deleteAccount(@CurrentUser() current: JwtPayload, @Body() body: { password?: string }) {
+    return this.authService.requestAccountDeletion(current.sub, body?.password ?? '');
   }
 
   @Get('me')

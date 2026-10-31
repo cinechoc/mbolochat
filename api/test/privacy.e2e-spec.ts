@@ -10,6 +10,7 @@ import { AppModule } from '../src/app.module.js';
 import { DRIZZLE, type Database } from '../src/db/db.module.js';
 import { users } from '../src/db/schema.js';
 import { ConversationsService } from '../src/conversations/conversations.service.js';
+import { AuthService } from '../src/auth/auth.service.js';
 
 describe('Confidentialité du profil (e2e)', () => {
   let app: INestApplication;
@@ -41,7 +42,11 @@ describe('Confidentialité du profil (e2e)', () => {
         gender: 'FEMALE',
       })
       .expect(201);
-    return { ...response.body.user, token: response.body.accessToken as string };
+    return {
+      ...response.body.user,
+      token: response.body.accessToken as string,
+      refreshToken: response.body.refreshToken as string,
+    };
   };
 
   it('refuse toute tentative de fixer la ville depuis le client', async () => {
@@ -211,6 +216,95 @@ describe('Confidentialité du profil (e2e)', () => {
       .set('Authorization', `Bearer ${user.token}`)
       .send({ birthday: '2012-01-01' })
       .expect(400);
+  });
+
+  it('liste et révoque les sessions, protège le mot de passe', async () => {
+    const user = await register('Lina');
+    const login = await request(app.getHttpServer())
+      .post('/auth/login')
+      .set('x-device-name', 'Phone test')
+      .set('x-platform', 'android')
+      .send({ emailOrUsername: user.username, password: 'password123' })
+      .expect(200);
+
+    const sessions = await request(app.getHttpServer())
+      .get('/auth/sessions')
+      .set('Authorization', `Bearer ${user.token}`)
+      .expect(200);
+    expect(sessions.body.length).toBeGreaterThanOrEqual(2);
+    const device = sessions.body.find((entry: any) => entry.deviceName === 'Phone test');
+    expect(device).toBeTruthy();
+
+    await request(app.getHttpServer())
+      .delete(`/auth/sessions/${device.id}`)
+      .set('Authorization', `Bearer ${user.token}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({ refreshToken: login.body.refreshToken })
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .post('/auth/change-password')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ currentPassword: 'mauvais', newPassword: 'nouveaupass123' })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/change-password')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ currentPassword: 'password123', newPassword: 'nouveaupass123' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ emailOrUsername: user.username, password: 'password123' })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ emailOrUsername: user.username, password: 'nouveaupass123' })
+      .expect(200);
+  });
+
+  it('supprime le compte après 30 jours, annulable en se reconnectant', async () => {
+    const user = await register('Malo');
+    await request(app.getHttpServer())
+      .delete('/auth/account')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ password: 'mauvais' })
+      .expect(401);
+    await request(app.getHttpServer())
+      .delete('/auth/account')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ password: 'password123' })
+      .expect(200);
+
+    // Reconnexion dans les 30 jours : la suppression est annulée.
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ emailOrUsername: user.username, password: 'password123' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .delete('/auth/account')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ password: 'password123' })
+      .expect(200);
+
+    const database = app.get<Database>(DRIZZLE);
+    await database
+      .update(users)
+      .set({ deletedAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) })
+      .where(eq(users.id, user.id));
+    const purged = await app.get(AuthService).purgeExpiredDeletions();
+    expect(purged).toBeGreaterThanOrEqual(1);
+
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ emailOrUsername: user.username, password: 'password123' })
+      .expect(401);
+    const [row] = await database.select().from(users).where(eq(users.id, user.id));
+    expect(row.displayName).toBe('Compte supprimé');
+    expect(row.username.startsWith('deleted_')).toBe(true);
   });
 
   it('coupe typing et accusés de lecture côté serveur', async () => {
