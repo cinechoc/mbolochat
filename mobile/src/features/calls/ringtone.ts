@@ -1,6 +1,8 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { Vibration } from 'react-native';
 
+import { getAppPreferences } from '@/lib/app-preferences';
+
 /**
  * Sonneries d'appel : un seul lecteur natif à la fois (boucle) + vibration.
  * Les WAV sont générés localement (assets/sounds) : aucune dépendance réseau.
@@ -26,6 +28,9 @@ export function stopRing(): void {
 
 async function start(kind: 'incoming' | 'outgoing'): Promise<void> {
   stopRing();
+  if (!getAppPreferences().ringtone) {
+    return;
+  }
   try {
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
     const next = createAudioPlayer(SOURCES[kind]);

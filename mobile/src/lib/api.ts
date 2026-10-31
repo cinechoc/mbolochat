@@ -1,4 +1,6 @@
 import { File } from 'expo-file-system';
+import * as Device from 'expo-device';
+import { Platform } from 'react-native';
 
 import { API_URL } from './config';
 import type {
@@ -7,8 +9,10 @@ import type {
   ConversationMediaItem,
   ConversationSearchHit,
   ConversationSummary,
+  DeviceSession,
   ForgotPasswordResult,
   Gender,
+  LocationUpdateResult,
   GroupInvite,
   InvitePreview,
   JoinInviteResult,
@@ -21,6 +25,7 @@ import type {
   UploadResult,
   User,
   UserProfile,
+  UserSettings,
 } from './types';
 
 export class ApiError extends Error {
@@ -37,7 +42,16 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   token?: string;
   body?: unknown;
+  headers?: Record<string, string>;
   _retried?: boolean;
+}
+
+/** Nom lisible de l'appareil, pour la liste des sessions. */
+function deviceHeaders(): Record<string, string> {
+  return {
+    'x-device-name': (Device.modelName ?? Device.deviceName ?? 'Appareil').slice(0, 80),
+    'x-platform': Platform.OS,
+  };
 }
 
 const REQUEST_TIMEOUT_MS = 15000;
@@ -88,6 +102,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       headers: {
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
         ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
+        ...(options.headers ?? {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
       credentials: 'include',
@@ -151,11 +166,19 @@ export const api = {
     birthday: string;
     gender: Gender;
   }) {
-    return request<AuthResult>('/auth/register', { method: 'POST', body });
+    return request<AuthResult>('/auth/register', {
+      method: 'POST',
+      body,
+      headers: deviceHeaders(),
+    });
   },
 
   login(body: { emailOrUsername: string; password: string }) {
-    return request<AuthResult>('/auth/login', { method: 'POST', body });
+    return request<AuthResult>('/auth/login', {
+      method: 'POST',
+      body,
+      headers: deviceHeaders(),
+    });
   },
 
   refresh(refreshToken: string) {
@@ -171,6 +194,68 @@ export const api = {
 
   me(token: string) {
     return request<User>('/auth/me', { token });
+  },
+
+  /* ------------------------- réglages et compte ------------------------- */
+
+  getUserSettings(token: string) {
+    return request<UserSettings>('/users/me/settings', { token });
+  },
+
+  updateUserSettings(
+    token: string,
+    body: {
+      privacy?: Partial<UserSettings['privacy']>;
+      readReceipts?: boolean;
+      typingIndicator?: boolean;
+      notifications?: Partial<UserSettings['notifications']>;
+      quietHours?: Partial<UserSettings['quietHours']>;
+    },
+  ) {
+    return request<UserSettings>('/users/me/settings', { method: 'PATCH', token, body });
+  },
+
+  setBirthdate(token: string, birthday: string) {
+    return request<UserSettings>('/users/me/birthdate', {
+      method: 'POST',
+      token,
+      body: { birthday },
+    });
+  },
+
+  updateLocation(token: string, input: { latitude: number; longitude: number; mocked?: boolean }) {
+    return request<LocationUpdateResult>('/users/me/location', {
+      method: 'POST',
+      token,
+      body: input,
+    });
+  },
+
+  listSessions(token: string) {
+    return request<DeviceSession[]>('/auth/sessions', { token });
+  },
+
+  revokeSession(token: string, id: string) {
+    return request<{ revoked: boolean }>(`/auth/sessions/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      token,
+    });
+  },
+
+  changePassword(token: string, currentPassword: string, newPassword: string) {
+    return request<{ changed: boolean; signedOut: boolean }>('/auth/change-password', {
+      method: 'POST',
+      token,
+      body: { currentPassword, newPassword },
+    });
+  },
+
+  deleteAccount(token: string, password: string) {
+    return request<{ scheduled: boolean; deleteAt: string }>('/auth/account', {
+      method: 'DELETE',
+      token,
+      body: { password },
+    });
   },
 
   updateProfile(token: string, body: { displayName?: string; bio?: string }) {

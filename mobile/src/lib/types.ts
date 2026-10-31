@@ -33,15 +33,74 @@ export interface User {
   createdAt: string;
 }
 
-/** Profil public « façon Instagram » : infos + quelques statistiques. */
+/** Profil public « façon Instagram » : infos + âge/ville filtrés + statistiques. */
 export interface UserProfile extends User {
   isMe: boolean;
+  /** Âge révolu calculé par le serveur ; null si masqué par la confidentialité. */
+  age: number | null;
+  city: string | null;
+  country: string | null;
+  birthdateSet: boolean;
   stats: {
     /** Nombre de messages envoyés. */
     messages: number;
     /** Nombre de discussions partagées avec le visiteur. */
     conversations: number;
   };
+}
+
+/** Qui peut voir ou faire quoi. */
+export type Visibility = 'everyone' | 'contacts' | 'nobody';
+
+export interface UserSettings {
+  privacy: {
+    profile: Visibility;
+    write: Visibility;
+    groupAdd: Visibility;
+    call: Visibility;
+    discoverability: Visibility;
+  };
+  readReceipts: boolean;
+  typingIndicator: boolean;
+  notifications: {
+    enabled: boolean;
+    messages: boolean;
+    groups: boolean;
+    mentions: boolean;
+    calls: boolean;
+    reactions: boolean;
+    sound: boolean;
+    preview: boolean;
+  };
+  quietHours: {
+    enabled: boolean;
+    startMinute: number;
+    endMinute: number;
+    utcOffsetMinutes: number;
+  };
+  city: string | null;
+  country: string | null;
+  cityUpdatedAt: string | null;
+  birthdateSet: boolean;
+  age: number | null;
+}
+
+/** Appareil connecté (session de rafraîchissement valide). */
+export interface DeviceSession {
+  id: string;
+  deviceName: string | null;
+  platform: string | null;
+  createdAt: string;
+  lastUsedAt: string;
+  expiresAt: string;
+}
+
+export interface LocationUpdateResult {
+  updated: boolean;
+  city: string | null;
+  country: string | null;
+  cityUpdatedAt: string | null;
+  reason?: 'same-city' | 'too-soon' | 'teleport' | 'no-city' | 'geocode';
 }
 
 export type MessageAttachmentType = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE' | 'GIF' | 'STICKER';
