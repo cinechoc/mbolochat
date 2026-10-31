@@ -426,7 +426,7 @@ export default function ChatsScreen() {
         count: (user?.notificationsEnabled ?? true)
           ? conversations.filter((item) => item.unreadCount > 0).length
           : 0,
-        badge: true,
+        dot: true,
       },
       {
         key: 'groups' as const,

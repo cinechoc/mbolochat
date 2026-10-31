@@ -9,10 +9,10 @@ import type { ConversationFilter } from '@/lib/format';
 export interface FilterOption {
   key: ConversationFilter;
   label: string;
-  /** Nombre affiché à côté du libellé (absent = aucun nombre). */
+  /** Nombre affiché en pastille à côté du libellé (absent ou 0 = aucune pastille). */
   count?: number;
-  /** Le compte s'affiche en pastille (et non en simple texte) : réservé aux non-lus. */
-  badge?: boolean;
+  /** Affiche un point d'alerte au lieu du nombre : réservé aux non-lus. */
+  dot?: boolean;
 }
 
 interface FilterTabsProps {
@@ -33,9 +33,7 @@ export function FilterTabs({ options, value, onChange }: FilterTabsProps) {
       keyboardShouldPersistTaps="handled">
       {options.map((option) => {
         const active = option.key === value;
-        // Seule la pastille « non lus » ressemble à un badge : les autres
-        // compteurs sont affichés en texte discret pour ne pas prêter à confusion.
-        const asBadge = option.badge === true && (option.count ?? 0) > 0;
+        const count = option.count ?? 0;
         return (
           <Pressable
             key={option.key}
@@ -52,19 +50,22 @@ export function FilterTabs({ options, value, onChange }: FilterTabsProps) {
               style={[styles.label, active && styles.labelActive]}>
               {option.label}
             </ThemedText>
-            {option.count !== undefined && option.count > 0 ? (
-              asBadge ? (
-                // Simple point d'alerte : indique des non-lus sans afficher le nombre.
+            {count > 0 ? (
+              option.dot ? (
                 <View
                   style={[styles.dot, { backgroundColor: active ? '#ffffff' : accentColor }]}
                 />
               ) : (
-                <ThemedText
-                  type="small"
-                  themeColor={active ? undefined : 'textSecondary'}
-                  style={[styles.countText, active && styles.countTextActive]}>
-                  {option.count}
-                </ThemedText>
+                <View
+                  style={[
+                    styles.badge,
+                    { backgroundColor: active ? '#ffffff' : accentColor },
+                  ]}>
+                  <ThemedText
+                    style={[styles.badgeText, { color: active ? accentColor : '#ffffff' }]}>
+                    {count > 99 ? '99+' : count}
+                  </ThemedText>
+                </View>
               )
             ) : null}
           </Pressable>
@@ -100,16 +101,23 @@ const styles = StyleSheet.create({
   labelActive: {
     color: '#ffffff',
   },
-  countText: {
-    fontWeight: '600',
+  badge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: Radii.full,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 14,
   },
   dot: {
     width: 8,
     height: 8,
     borderRadius: Radii.full,
     marginLeft: 1,
-  },
-  countTextActive: {
-    color: '#ffffff',
   },
 });
