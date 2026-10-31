@@ -167,6 +167,10 @@ const markdown = [
       `| ${row.name} | ${row.version} | ${row.scope} | ${row.license.replace(/\|/g, '\\|')} | ${row.allowed ? 'oui' : 'NON'} | ${row.exception ?? ''} |`,
   ),
   '',
+  '## Exceptions approuvées',
+  '',
+  '- `unicode-ident` — `Unicode-3.0` combinée à MIT/Apache-2.0, dépendance de compilation (proc-macro2), approuvée le 2026-10-31. Non embarquée dans l’APK.',
+  '',
 ].join('\n');
 
 writeFileSync(resolve(crateDir, 'THIRD_PARTY_LICENSES.md'), markdown);

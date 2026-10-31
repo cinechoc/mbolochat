@@ -95,3 +95,7 @@ Règle : MIT/Apache-2.0/ISC pour les dépendances directes, BSD-3-Clause/Zlib to
 | zeroize | 1.9.0 | direct | Apache-2.0 OR MIT | oui |  |
 | zeroize_derive | 1.5.0 | transitive | Apache-2.0 OR MIT | oui |  |
 | zmij | 1.0.23 | transitive | MIT | oui |  |
+
+## Exceptions approuvées
+
+- `unicode-ident` — `Unicode-3.0` combinée à MIT/Apache-2.0, dépendance de compilation (proc-macro2), approuvée le 2026-10-31. Non embarquée dans l’APK.

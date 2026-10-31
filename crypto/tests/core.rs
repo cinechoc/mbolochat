@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use base64::Engine;
 use mbolo_crypto::{
     create_account, create_inbound_and_decrypt, create_outbound_and_encrypt, decrypt, decrypt_file,
-    encrypt, encrypt_file, generate_one_time_keys, CryptoError,
+    encrypt, encrypt_file, generate_one_time_keys, self_test, CryptoError,
 };
 
 const PICKLE_KEY: [u8; 32] = [7u8; 32];
@@ -252,4 +252,18 @@ fn empty_file_roundtrip() {
     .unwrap();
     assert_eq!(written, 0);
     assert_eq!(fs::read(&output).unwrap(), b"");
+}
+
+#[test]
+fn native_self_test_reports_steps_without_secrets() {
+    let dir = temp_dir("selftest");
+    let report = self_test(&dir, 1).unwrap();
+    assert_eq!(report.steps.len(), 7);
+    assert!(report.steps.iter().all(|step| !step.key.is_empty()));
+    assert!(report.plaintext_size > report.file_mb as u64 * 1024 * 1024);
+    assert!(report.ciphertext_size > report.plaintext_size);
+    let serialized = serde_json::to_string(&report).unwrap();
+    assert!(!serialized.contains("curve25519"));
+    assert!(!serialized.contains("pickle"));
+    assert!(!serialized.contains("selftest message"));
 }

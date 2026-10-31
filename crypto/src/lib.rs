@@ -10,6 +10,7 @@ mod error;
 mod filecrypto;
 mod messaging;
 mod models;
+mod selftest;
 
 #[cfg(feature = "jni")]
 mod jni;
@@ -24,3 +25,4 @@ pub use models::{
     AccountCreated, FileEncrypted, InboundCreated, OlmEnvelope, OneTimeKey, OneTimeKeysGenerated,
     OutboundCreated, PlaintextDecrypted,
 };
+pub use selftest::{self_test, SelfTestReport, SelfTestStep};

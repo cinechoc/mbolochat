@@ -70,5 +70,9 @@ class MboloCryptoModule : Module() {
       ->
       native.nativeDecryptFile(inputPath, outputPath, keyB64, nonceB64, expectedSha256)
     }
+
+    AsyncFunction("selfTest") { workDir: String, fileMb: Int ->
+      native.nativeSelfTest(workDir, fileMb)
+    }
   }
 }

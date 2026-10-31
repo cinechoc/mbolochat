@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::error::CryptoError;
 use crate::{
     create_account, create_inbound_and_decrypt, create_outbound_and_encrypt, decrypt, decrypt_file,
-    encrypt, encrypt_file, generate_one_time_keys,
+    encrypt, encrypt_file, generate_one_time_keys, self_test,
 };
 
 fn read_string(env: &mut JNIEnv, value: &JString) -> Result<String, CryptoError> {
@@ -249,5 +249,25 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeDec
             )
             .map(|size| serde_json::json!({ "plaintext_size": size }))
         }),
+    )
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeSelfTest(
+    mut env: JNIEnv,
+    _this: JObject,
+    work_dir: JString,
+    file_mb: jni::sys::jint,
+) -> jstring {
+    let directory = match read_string(&mut env, &work_dir) {
+        Ok(value) => value,
+        Err(error) => return finish::<()>(&mut env, Err(error)),
+    };
+    if file_mb <= 0 {
+        return finish::<()>(&mut env, Err(CryptoError::InvalidInput));
+    }
+    finish(
+        &mut env,
+        guarded(|| self_test(std::path::Path::new(&directory), file_mb as usize)),
     )
 }

@@ -39,4 +39,5 @@ class MboloCryptoNative {
     nonceB64: String,
     expectedSha256: String,
   ): String
+  external fun nativeSelfTest(workDir: String, fileMb: Int): String
 }

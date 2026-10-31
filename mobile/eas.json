@@ -7,7 +7,12 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "android": { "buildType": "apk"}
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_E2EE_DEV_TOOLS": "1"
+      }
     },
     "preview": {
       "distribution": "internal"

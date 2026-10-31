@@ -20,6 +20,14 @@ export type InboundCreated = OlmEnvelope & {
   plaintext_b64: string;
 };
 export type PlaintextDecrypted = { session_pickle: string; plaintext_b64: string };
+export type SelfTestStep = { key: string; ms: number };
+export type SelfTestReport = {
+  file_mb: number;
+  plaintext_size: number;
+  ciphertext_size: number;
+  steps: SelfTestStep[];
+};
+
 export type FileEncrypted = {
   file_key_b64: string;
   nonce_b64: string;
@@ -60,6 +68,7 @@ declare class MboloCryptoModule extends NativeModule {
     nonceB64: string,
     expectedSha256: string,
   ): Promise<string>;
+  selfTest(workDir: string, fileMb: number): Promise<string>;
 }
 
 type NativeResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -114,6 +123,8 @@ export const MboloCrypto = {
     invoke<{ plaintext_size: number }>(
       native.decryptFile(inputPath, outputPath, keyB64, nonceB64, expectedSha256),
     ),
+  selfTest: (workDir: string, fileMb: number) =>
+    invoke<SelfTestReport>(native.selfTest(workDir, fileMb)),
 };
 
 export default MboloCrypto;

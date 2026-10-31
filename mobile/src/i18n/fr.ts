@@ -16,6 +16,27 @@ export const fr = {
     on: 'Oui',
     off: 'Non',
   },
+  e2eeDev: {
+    title: 'Auto-test E2EE',
+    intro:
+      'Écran de développement, exclu des builds de production. Données de test uniquement, aucune clé ni contenu réel n’est affiché ou journalisé.',
+    fileInfo: (mb: number) => `Fichier de test : ${mb} Mo, chiffré en flux.`,
+    run: 'Lancer l’auto-test',
+    running: 'Test en cours…',
+    error: 'Échec de l’auto-test',
+    total: 'Total',
+    stepValue: (ms: number) => `${ms} ms`,
+    sizes: (plain: string, cipher: string) => `Clair ${plain} → chiffré ${cipher}`,
+    steps: {
+      accounts: 'Comptes et clés de test',
+      session: 'Session Olm',
+      reply: 'Message de retour',
+      out_of_order: 'Messages dans le désordre',
+      file_encrypt: 'Chiffrement du fichier',
+      file_decrypt: 'Déchiffrement et empreinte',
+      tamper_rejected: 'Fichier altéré rejeté',
+    },
+  },
   settings: {
     title: 'Paramètres',
     accountTitle: 'Compte',
