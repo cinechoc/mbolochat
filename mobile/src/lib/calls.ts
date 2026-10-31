@@ -49,9 +49,6 @@ export const CALL_ICE_RESTART_MAX_MS = 8_000;
 export const CALL_VIDEO_FPS = 24;
 /** Vidéo de groupe : 15 i/s suffisent et économisent la batterie. */
 export const CALL_GROUP_VIDEO_FPS = 15;
-export const CALL_VIDEO_MAX_BITRATE = 700_000;
-export const CALL_VIDEO_STEP_BITRATE = 500_000;
-export const CALL_VIDEO_LOW_BITRATE = 350_000;
 
 /* ------------------------------ appels de groupe ------------------------------ */
 
@@ -99,6 +96,8 @@ export type GroupCallAck =
       members: GroupCallMember[];
       media: GroupCallMedia;
       maxParticipants: number;
+      /** Caméras simultanées autorisées (CALL_MAX_VIDEO côté serveur). */
+      maxVideoParticipants: number;
     }
   | { ok: false; error: 'invalid' | 'busy' | 'full' | 'forbidden' | 'rate' };
 
@@ -109,4 +108,5 @@ export type GroupCallInvite = GroupCallIdentity & {
   members: GroupCallMember[];
   media: GroupCallMedia;
   maxParticipants: number;
+  maxVideoParticipants: number;
 };

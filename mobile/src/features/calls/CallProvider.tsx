@@ -10,11 +10,9 @@ import {
   CALL_LINK_RETRY_WINDOW_MS,
   CALL_VIDEO_FPS,
   MAX_GROUP_CALL_AUDIO,
+  MAX_GROUP_CALL_VIDEO,
   CALL_RECONNECT_GRACE_MS,
   CALL_RING_GUARD_MS,
-  CALL_VIDEO_LOW_BITRATE,
-  CALL_VIDEO_MAX_BITRATE,
-  CALL_VIDEO_STEP_BITRATE,
   type CallMode,
   type CallParticipant,
   type CallPeer,
@@ -29,16 +27,43 @@ import {
 import { buildIceServers, ensureIceServers, type IceServerConfig } from '@/lib/ice';
 import { onConnection, connectSocket } from '@/lib/socket';
 import { useAuth } from '@/lib/auth-context';
+import { getAppPreferences } from '@/lib/app-preferences';
 import * as Haptics from 'expo-haptics';
 import { setSpeakerphone, startCallAudio, stopCallAudio } from './audioRoute';
 import { startIncomingRing, startOutgoingRing, stopRing } from './ringtone';
 import { CallMedia, CAMERA_UNAVAILABLE_EMULATOR } from './engine/CallMedia';
 import { RtcLink } from './engine/RtcLink';
-import { applyVideoBitrate } from './engine/PeerStats';
+import {
+  applySenderVideoParameters,
+  diffVideoRates,
+  type LinkStats,
+} from './engine/PeerStats';
 import { IDLE_SPEAKING, updateSpeaking, type SpeakingState } from './engine/speaking';
+import { interpretVideoToggleAck } from './engine/videoPolicy';
+import {
+  VIDEO_TUNING,
+  decideVideoTier,
+  initialTierIndex,
+  initialTierState,
+  perLinkBudgetKbps,
+  senderParameters,
+  tiersFor,
+  type CallLinkKind,
+  type LinkVideoSample,
+  type VideoTier,
+  type VideoTierState,
+} from './engine/videoQuality';
 
 type DeepLinkAction = 'accept' | 'decline';
 type LinkOptions = { polite: boolean; group: boolean };
+
+/** État adaptatif d'un lien : palier, relevé précédent, paramètres posés. */
+type LinkVideoState = {
+  tier: VideoTierState;
+  previous: LinkStats | null;
+  lastSampleAt: number;
+  paramsKey: string | null;
+};
 
 type CallContextValue = {
   status: CallStatus;
@@ -57,6 +82,8 @@ type CallContextValue = {
   /** Média de l'appel et plafond imposé par le serveur. */
   media: GroupCallMedia;
   maxParticipants: number;
+  /** Plafond de caméras simultanées imposé par le serveur. */
+  maxVideoParticipants: number;
   /** Mention brève affichée dans l'écran d'appel (« Marie a rejoint »). */
   mention: string | null;
   /** Moi, pour la tuile locale de la grille. */
@@ -113,11 +140,6 @@ const IDLE_DELAY_MS = 1400;
 const QUALITY_SAMPLE_MS = 2_000;
 const SPEAKING_SAMPLE_MS = 700;
 const WEAK_NOTICE_MS = 4_500;
-/** En dessous de cette bande passante estimée, la vidéo n'a plus sa place. */
-const WEAK_BITRATE = 200_000;
-/** Au-dessus, le réseau est confortable : on ne dégrade rien. */
-const COMFORTABLE_BITRATE = 400_000;
-/** Niveau sonore recevable pour désigner celui qui parle. */
 /** Mesures mauvaises d'affilée avant d'afficher « Réseau faible ». */
 const WEAK_AFTER = 3;
 /** Mesures bonnes d'affilée avant de retirer la mention. */
@@ -139,6 +161,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [offer, setOffer] = useState<GroupCallInvite | null>(null);
   const [media, setMedia] = useState<GroupCallMedia>('AUDIO');
   const [maxParticipants, setMaxParticipants] = useState<number>(MAX_GROUP_CALL_AUDIO);
+  const [maxVideoParticipants, setMaxVideoParticipants] =
+    useState<number>(MAX_GROUP_CALL_VIDEO);
   const [mention, setMention] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -163,10 +187,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const videoCallRef = useRef(false);
   const cameraOnRef = useRef(false);
   const facingRef = useRef<CameraFacing>('user');
-  const bitrateRef = useRef(CALL_VIDEO_MAX_BITRATE);
+  /** Hauteur réellement capturée : 480p pour l'instant, 720p après montée. */
+  const captureHeightRef = useRef<number>(VIDEO_TUNING.groupCaptureHeight);
+  /** État adaptatif par lien : palier, mesures précédentes, paramètres posés. */
+  const videoStateRef = useRef<Map<string, LinkVideoState>>(new Map());
   const fpsRef = useRef(CALL_VIDEO_FPS);
-  /** État de qualité par pair : paliers et vidéo éventuellement coupée. */
-  const qualityRef = useRef<Map<string, { bad: number; good: number; video: boolean }>>(new Map());
+  /** Plafond de caméras annoncé par le serveur (CALL_MAX_VIDEO). */
+  const maxVideoRef = useRef(MAX_GROUP_CALL_VIDEO);
   /** Santé audio par pair, avec hystérésis pour éviter le clignotement. */
   const healthRef = useRef<Map<string, { weak: boolean; bad: number; good: number }>>(new Map());
   /** État de parole lissé par pair. */
@@ -301,17 +328,82 @@ export function CallProvider({ children }: { children: ReactNode }) {
     });
   }, [getMedia]);
 
-  /** La caméra est une seule piste, remplacée sur chaque lien, puis renégociée. */
-  const attachVideoTrack = useCallback(async (track: MediaStreamTrack | null) => {
-    const attached = track ? new MediaStream([track]) : null;
-    for (const link of linksRef.current.values()) {
-      await link.setVideoTrack(track, attached);
-      const sender = link.videoSenderRef;
-      if (sender) {
-        await applyVideoBitrate(sender, bitrateRef.current, fpsRef.current);
-      }
-      link.renegotiate();
+  /**
+   * Applique à un lien les paramètres du palier courant : débit borné par le
+   * budget maillé, cadence, facteur de résolution. Idempotent, pour ne pas
+   * reposer les mêmes paramètres toutes les 2 s.
+   */
+  const applyLinkTier = useCallback(async (peerId: string, link: RtcLink, tier?: VideoTier) => {
+    const sender = link.videoSenderRef;
+    if (!sender) {
+      return;
     }
+    const kind: CallLinkKind = modeRef.current === 'GROUP' ? 'GROUP' : 'DIRECT';
+    const state = videoStateRef.current.get(peerId);
+    const target =
+      tier ?? (state ? tiersFor(kind)[state.tier.index] : tiersFor(kind)[initialTierIndex(kind)]);
+    const budget = perLinkBudgetKbps(kind, Math.max(1, linksRef.current.size));
+    const params = senderParameters(target, budget, captureHeightRef.current);
+    const key = `${params.maxBitrate}:${params.maxFramerate}:${params.scaleResolutionDownBy}`;
+    if (state?.paramsKey === key) {
+      return;
+    }
+    const applied = await applySenderVideoParameters(sender, params);
+    if (applied && state) {
+      state.paramsKey = key;
+    }
+  }, []);
+
+  /** La caméra est une seule piste, remplacée sur chaque lien. */
+  const attachVideoTrack = useCallback(
+    async (track: MediaStreamTrack | null) => {
+      const attached = track ? new MediaStream([track]) : null;
+      for (const [peerId, link] of linksRef.current) {
+        const hadVideoSender = Boolean(link.videoSenderRef);
+        await link.setVideoTrack(track, attached);
+        if (track) {
+          await applyLinkTier(peerId, link);
+        }
+        // Première piste vidéo = nouvelle m-line : il faut renégocier. Un
+        // remplacement ou un retrait par `replaceTrack` n'en a pas besoin.
+        if (!hadVideoSender && link.videoSenderRef) {
+          link.renegotiate();
+        }
+      }
+    },
+    [applyLinkTier],
+  );
+
+  /**
+   * Demande d'allumage/extinction de caméra au serveur. En groupe, c'est lui
+   * qui arbitre le plafond (CALL_MAX_VIDEO) ; en un à un, l'accusé vaut
+   * toujours oui. Un accusé muet ne bloque jamais la vidéo.
+   */
+  const requestVideoToggle = useCallback(
+    async (enabled: boolean): Promise<{ allowed: boolean; capped: boolean }> => {
+      const callId = callIdRef.current;
+      if (!callId || !token) {
+        return { allowed: true, capped: false };
+      }
+      const event = modeRef.current === 'GROUP' ? 'gcall:video' : 'call:video-toggle';
+      const socket = connectSocket(token);
+      const ack = await new Promise<unknown>((resolve) => {
+        const timer = setTimeout(() => resolve(null), 1500);
+        socket.emit(event, { callId, video: enabled }, (reply: unknown) => {
+          clearTimeout(timer);
+          resolve(reply ?? null);
+        });
+      });
+      return interpretVideoToggleAck(ack);
+    },
+    [token],
+  );
+
+  const showGroupCameraFull = useCallback(() => {
+    Alert.alert(
+      'Caméras au complet',
+      `${maxVideoRef.current} caméras maximum dans un appel de groupe. L’appel continue en audio.`,
+    );
   }, []);
 
   const enableCamera = useCallback(
@@ -322,17 +414,39 @@ export function CallProvider({ children }: { children: ReactNode }) {
         media.showCameraEmulator();
         return false;
       }
+      if (getAppPreferences().callDataSaver) {
+        Alert.alert(
+          'Mode économie de données',
+          'La vidéo est désactivée pendant les appels. Désactivez ce mode dans les paramètres pour l’utiliser.',
+        );
+        return false;
+      }
+      const active = Boolean(callIdRef.current);
+      const group = modeRef.current === 'GROUP';
+      // En groupe, on réserve la place avant d'ouvrir la caméra : un refus ne
+      // coûte ni permission ni capture, et l'audio n'est jamais interrompu.
+      let reserved = false;
+      if (active && group) {
+        const verdict = await requestVideoToggle(true);
+        if (!verdict.allowed) {
+          if (verdict.capped) showGroupCameraFull();
+          return false;
+        }
+        reserved = true;
+      }
       const allowed = await media.askCamera();
       if (!allowed) {
+        if (reserved) void requestVideoToggle(false);
         media.showCameraDenied();
         return false;
       }
       let track: MediaStreamTrack;
-      const fps = modeRef.current === 'GROUP' ? CALL_GROUP_VIDEO_FPS : CALL_VIDEO_FPS;
+      const fps = group ? CALL_GROUP_VIDEO_FPS : CALL_VIDEO_FPS;
       fpsRef.current = fps;
       try {
         track = await media.openCameraTrack(fps);
       } catch {
+        if (reserved) void requestVideoToggle(false);
         Alert.alert('Caméra indisponible', 'Impossible d’ouvrir la caméra. L’appel continue en vocal.');
         return false;
       }
@@ -347,16 +461,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
       } catch {
         /* la piste sera reprise à la prochaine négociation */
       }
-      if (options?.notify !== false && callIdRef.current) {
-        if (modeRef.current === 'DIRECT') {
-          emit('call:video-toggle', { callId: callIdRef.current, video: true });
-        } else {
-          emit('gcall:video', { callId: callIdRef.current, video: true });
-        }
+      if (active && options?.notify !== false && !group) {
+        // Un à un : simple information à l'autre, aucun plafond à arbitrer.
+        void requestVideoToggle(true);
       }
       return true;
     },
-    [attachVideoTrack, emit, getMedia, setVideoMode],
+    [attachVideoTrack, getMedia, requestVideoToggle, setVideoMode, showGroupCameraFull],
   );
 
   /** Coupe vraiment la capture (batterie/données) et prévient l'autre. */
@@ -373,14 +484,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
         /* piste déjà retirée */
       }
       if (notify && callIdRef.current) {
-        if (modeRef.current === 'DIRECT') {
-          emit('call:video-toggle', { callId: callIdRef.current, video: false });
-        } else {
-          emit('gcall:video', { callId: callIdRef.current, video: false });
-        }
+        void requestVideoToggle(false);
       }
     },
-    [attachVideoTrack, emit, getMedia],
+    [attachVideoTrack, getMedia, requestVideoToggle],
   );
 
   /* --------------------------------- Qualité --------------------------------- */
@@ -402,12 +509,29 @@ export function CallProvider({ children }: { children: ReactNode }) {
    * au profit de l'audio quand son propre lien est trop juste.
    */
   const sampleQuality = useCallback(async () => {
-    const cameraTrack = getMedia().cameraTrack;
+    const media = getMedia();
+    const cameraTrack = media.cameraTrack;
+    const group = modeRef.current === 'GROUP';
+    const kind: CallLinkKind = group ? 'GROUP' : 'DIRECT';
+    const peerLinks = Math.max(1, linksRef.current.size);
+    const now = Date.now();
+
     for (const [peerId, link] of linksRef.current) {
       if (link.connectionState !== 'connected') {
         continue;
       }
       const stats = await link.readStats();
+      const state =
+        videoStateRef.current.get(peerId) ?? {
+          tier: initialTierState(kind),
+          previous: null,
+          lastSampleAt: now,
+          paramsKey: null,
+        };
+      const rates = diffVideoRates(state.previous, stats, now - state.lastSampleAt);
+      state.previous = stats;
+      state.lastSampleAt = now;
+
       // Santé audio : trois mesures mauvaises d'affilée pour prévenir, deux
       // bonnes pour retirer la mention — jamais au moindre incident.
       const health = healthRef.current.get(peerId) ?? { weak: false, bad: 0, good: 0 };
@@ -427,58 +551,57 @@ export function CallProvider({ children }: { children: ReactNode }) {
       }
       healthRef.current.set(peerId, health);
 
-      const state = qualityRef.current.get(peerId) ?? { bad: 0, good: 0, video: true };
-      const available = stats.availableBitrate;
-      if (__DEV__ && cameraTrack && stats.videoBytesSent) {
+      const sample: LinkVideoSample = {
+        availableBitrateBps: stats.availableBitrate,
+        lossRatio: stats.videoIn.lossRatio,
+        roundTripMs: stats.roundTripMs,
+        limitationReason: stats.videoOut.qualityLimitationReason,
+      };
+
+      let tier = tiersFor(kind)[state.tier.index];
+      let action: 'none' | 'step-down' | 'step-up' | 'cut' | 'resume' = 'none';
+      const sending = cameraOnRef.current && Boolean(cameraTrack);
+      if (sending) {
+        const decision = decideVideoTier(state.tier, sample, {
+          kind,
+          peerLinks,
+          captureHeight: captureHeightRef.current,
+        });
+        state.tier = decision.state;
+        tier = decision.tier ?? tier;
+        action = decision.action;
+      }
+
+      if (__DEV__) {
+        const kbps = (value: number | null) =>
+          value === null ? '?' : `${Math.round(value / 1000)}k`;
         console.log(
-          `[call] ${peerId} vidéo ${Math.round(stats.videoBytesSent / 1024)} Ko, dispo ${available ?? '?'} bps`,
+          `[call] ${peerId} ${tier.id}${state.tier.cut ? '(audio)' : ''} ${action} · ` +
+            `reçu ${stats.videoIn.framesPerSecond ?? '?'} i/s, perte ${(stats.videoIn.lossRatio * 100).toFixed(1)} %, ` +
+            `entrant ${kbps(rates.inBps)} · sortant ${kbps(rates.outBps)} · rtt ${stats.roundTripMs ?? '?'} ms · ` +
+            `dispo ${kbps(stats.availableBitrate)} · limite ${stats.videoOut.qualityLimitationReason ?? '-'} · ` +
+            `${stats.candidateType ?? '?'}`,
         );
       }
-      if (!available || available <= 0) {
-        state.bad = 0;
-        qualityRef.current.set(peerId, state);
-        continue;
-      }
-      if (available >= COMFORTABLE_BITRATE) {
-        state.bad = 0;
-        state.good += 1;
-        if (!state.video && state.good >= 2 && cameraOnRef.current && cameraTrack) {
-          // Le lien s'est rétabli : la vidéo revient sur ce pair uniquement.
-          await link.setVideoTrack(cameraTrack, new MediaStream([cameraTrack]));
-          link.renegotiate();
-          state.video = true;
-          state.good = 0;
-        }
-        qualityRef.current.set(peerId, state);
-        continue;
-      }
-      state.good = 0;
-      state.bad += 1;
-      if (state.bad < 2) {
-        qualityRef.current.set(peerId, state);
-        continue;
-      }
-      state.bad = 0;
-      if (available < WEAK_BITRATE) {
-        if (state.video) {
+
+      if (sending && cameraTrack) {
+        if (action === 'cut') {
+          // Dernier recours : on coupe l'envoi de ce lien, l'audio reste.
           await link.setVideoTrack(null, null);
-          link.renegotiate();
-          state.video = false;
-        }
-        showWeakConnection();
-      } else {
-        const tier = Math.max(
-          CALL_VIDEO_LOW_BITRATE,
-          Math.min(CALL_VIDEO_STEP_BITRATE, Math.floor(available * 0.6)),
-        );
-        const sender = link.videoSenderRef;
-        if (sender) {
-          await applyVideoBitrate(sender, tier, fpsRef.current);
+          state.paramsKey = null;
+          showWeakConnection();
+        } else if (action === 'resume') {
+          await link.setVideoTrack(cameraTrack, new MediaStream([cameraTrack]));
+          state.paramsKey = null;
+          await applyLinkTier(peerId, link, tier ?? undefined);
+        } else {
+          await applyLinkTier(peerId, link, tier ?? undefined);
         }
       }
-      qualityRef.current.set(peerId, state);
+
+      videoStateRef.current.set(peerId, state);
     }
-  }, [getMedia, markPeer, showWeakConnection]);
+  }, [applyLinkTier, getMedia, markPeer, showWeakConnection]);
 
   const startQualityMonitor = useCallback(() => {
     stopQualityMonitor();
@@ -539,6 +662,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     const link = linksRef.current.get(peerId);
     linksRef.current.delete(peerId);
     audioBytesRef.current.delete(peerId);
+    videoStateRef.current.delete(peerId);
     try {
       link?.close();
     } catch {
@@ -588,8 +712,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       cameraOnRef.current = false;
       facingRef.current = 'user';
       resumeCameraRef.current = false;
-      bitrateRef.current = CALL_VIDEO_MAX_BITRATE;
-      qualityRef.current.clear();
+      videoStateRef.current.clear();
       healthRef.current.clear();
       speakingRef.current.clear();
       for (const attempt of retryRef.current.values()) {
@@ -609,6 +732,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setFacing('user');
       setWeakConnection(false);
       setNetworkPath(null);
+      maxVideoRef.current = MAX_GROUP_CALL_VIDEO;
+      setMaxVideoParticipants(MAX_GROUP_CALL_VIDEO);
       setMode('DIRECT');
       modeRef.current = 'DIRECT';
       setGroup(null);
@@ -720,7 +845,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
           }
           const sender = link.videoSenderRef;
           if (sender) {
-            void applyVideoBitrate(sender, bitrateRef.current, fpsRef.current);
+            void applyLinkTier(peerId, link);
           }
           void link.readStats().then((stats) => {
             if (stats.candidateType) {
@@ -740,9 +865,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
         }
       });
       linksRef.current.set(peerId, link);
+      if (!videoStateRef.current.has(peerId)) {
+        videoStateRef.current.set(peerId, {
+          tier: initialTierState(options.group ? 'GROUP' : 'DIRECT'),
+          previous: null,
+          lastSampleAt: Date.now(),
+          paramsKey: null,
+        });
+      }
       return link;
     },
-    [clearReconnect, emit, markPeer, setPhase, setVideoMode, startQualityMonitor],
+    [applyLinkTier, clearReconnect, emit, markPeer, setPhase, setVideoMode, startQualityMonitor],
   );
 
   /** Ferme un lien tombé et le rouvre : l'autre côté n'a rien à faire. */
@@ -824,7 +957,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      let wantVideo = options?.video === true;
+      let wantVideo = options?.video === true && !getAppPreferences().callDataSaver;
       let cameraTrack: MediaStreamTrack | null = null;
       if (wantVideo && CAMERA_UNAVAILABLE_EMULATOR) {
         media.showCameraEmulator();
@@ -879,7 +1012,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
                 ? 'Contact occupé'
                 : ack?.error === 'unavailable'
                   ? 'Appel indisponible'
-                  : 'Appel impossible',
+                  : ack?.error === 'forbidden'
+                    ? 'Cette personne n’accepte pas les appels'
+                    : 'Appel impossible',
             );
             return;
           }
@@ -1125,6 +1260,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setMode('GROUP');
       setMedia(ack.media);
       setMaxParticipants(ack.maxParticipants);
+      maxVideoRef.current = ack.maxVideoParticipants;
+      setMaxVideoParticipants(ack.maxVideoParticipants);
       setGroup(ack.group);
       setOffer(null);
       setMinimized(false);
@@ -1145,7 +1282,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
         await publishMicro();
         const track = getMedia().cameraTrack;
         if (track) {
-          await attachVideoTrack(track);
+          // Même en entrant avec la caméra déjà ouverte, le serveur arbitre la
+          // place : un refus rend l'appel audio sans le casser.
+          const verdict = await requestVideoToggle(true);
+          if (!verdict.allowed) {
+            await disableCamera(false);
+            if (verdict.capped) showGroupCameraFull();
+          } else {
+            await attachVideoTrack(track);
+          }
         }
       } catch {
         emit('gcall:leave', { callId: ack.callId });
@@ -1158,7 +1303,20 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setPhase('active');
       }
     },
-    [applySpeaker, attachVideoTrack, emit, finish, getMedia, openLink, publishMicro, setPhase, startSpeakingMonitor],
+    [
+      applySpeaker,
+      attachVideoTrack,
+      disableCamera,
+      emit,
+      finish,
+      getMedia,
+      openLink,
+      publishMicro,
+      requestVideoToggle,
+      setPhase,
+      showGroupCameraFull,
+      startSpeakingMonitor,
+    ],
   );
 
   const startGroupCall = useCallback(
@@ -1174,12 +1332,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
       }
       setEndReason(null);
       setPhase('connecting');
-      if (options?.video === true) {
+      const wantsVideo = options?.video === true && !getAppPreferences().callDataSaver;
+      if (wantsVideo) {
         await enableCamera({ notify: false });
       }
       connectSocket(token).emit(
         'gcall:start',
-        { conversationId, media: options?.video === true ? 'VIDEO' : 'AUDIO' },
+        { conversationId, media: wantsVideo ? 'VIDEO' : 'AUDIO' },
         (ack: GroupCallAck) => {
           if (!ack?.ok) {
             finish(
@@ -1395,9 +1554,21 @@ export function CallProvider({ children }: { children: ReactNode }) {
       finish('Retiré de l’appel');
     };
 
-    const onGroupMedia = (payload: { callId: string; media: GroupCallMedia }) => {
+    const onGroupMedia = (payload: {
+      callId: string;
+      media: GroupCallMedia;
+      maxParticipants?: number;
+      maxVideoParticipants?: number;
+    }) => {
       if (callIdRef.current !== payload?.callId) return;
       setMedia(payload.media);
+      if (typeof payload.maxParticipants === 'number') {
+        setMaxParticipants(payload.maxParticipants);
+      }
+      if (typeof payload.maxVideoParticipants === 'number') {
+        maxVideoRef.current = payload.maxVideoParticipants;
+        setMaxVideoParticipants(payload.maxVideoParticipants);
+      }
     };
 
     const onGroupVideo = (payload: { callId: string; userId: string; video: boolean }) => {
@@ -1585,6 +1756,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     offer,
     media,
     maxParticipants,
+    maxVideoParticipants,
     mention,
     muted,
     startedAt,

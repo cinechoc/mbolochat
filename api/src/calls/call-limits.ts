@@ -28,4 +28,12 @@ export class CallLimits {
     const parsed = raw ? Number.parseInt(raw, 10) : NaN;
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   }
+
+  /**
+   * Caméras simultanées autorisées, y compris dans un appel audio mixte.
+   * Même constante d'environnement que le plafond vidéo : CALL_MAX_VIDEO.
+   */
+  maxVideoParticipants(): number {
+    return this.maxParticipants('VIDEO');
+  }
 }
