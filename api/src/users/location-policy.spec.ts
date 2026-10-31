@@ -4,6 +4,8 @@ import {
   CITY_REFRESH_MS,
   distanceKm,
   evaluateCityUpdate,
+  roundCoordinate,
+  roundedCoordinates,
   type CityUpdateInput,
 } from './location-policy.js';
 
@@ -26,6 +28,24 @@ function input(patch: Partial<CityUpdateInput> = {}): CityUpdateInput {
     ...patch,
   };
 }
+
+describe('arrondi des coordonnées', () => {
+  it('garde deux décimales (~1 km) avant le géocodage', () => {
+    expect(roundCoordinate(0.3949)).toBe(0.39);
+    expect(roundCoordinate(9.4567)).toBe(9.46);
+    expect(roundCoordinate(-0.1234)).toBe(-0.12);
+    expect(roundedCoordinates({ latitude: 0.1234, longitude: 9.8765 })).toEqual({
+      latitude: 0.12,
+      longitude: 9.88,
+    });
+  });
+
+  it('ne produit jamais plus de deux décimales', () => {
+    const rounded = roundedCoordinates({ latitude: 1.239, longitude: -2.999 });
+    expect(String(rounded.latitude).split('.')[1]?.length ?? 0).toBeLessThanOrEqual(2);
+    expect(String(Math.abs(rounded.longitude)).split('.')[1]?.length ?? 0).toBeLessThanOrEqual(2);
+  });
+});
 
 describe('distanceKm', () => {
   it('mesure une distance plausible', () => {

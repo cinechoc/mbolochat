@@ -4,7 +4,7 @@ import { and, eq, ilike } from 'drizzle-orm';
 
 import { DRIZZLE, type Database } from '../db/db.module.js';
 import { geoCityCache } from '../db/schema.js';
-import type { Coordinate } from './location-policy.js';
+import { roundedCoordinates, type Coordinate } from './location-policy.js';
 
 export type GeocodedCity = Coordinate & {
   city: string;
@@ -43,7 +43,9 @@ export class GeocodingService {
   }
 
   async reverse(latitude: number, longitude: number): Promise<GeocodedCity | null> {
-    const cell = GeocodingService.cellOf(latitude, longitude);
+    // Nominatim n'a besoin que de la ville : ~1 km suffit, jamais la position fine.
+    const point = roundedCoordinates({ latitude, longitude });
+    const cell = GeocodingService.cellOf(point.latitude, point.longitude);
     const [cached] = await this.db
       .select()
       .from(geoCityCache)
@@ -58,7 +60,7 @@ export class GeocodingService {
       };
     }
 
-    const result = await this.request(latitude, longitude);
+    const result = await this.request(point.latitude, point.longitude);
     if (!result) {
       return cached
         ? {
@@ -76,8 +78,8 @@ export class GeocodingService {
         cell,
         city: result.city,
         country: result.country,
-        latitude,
-        longitude,
+        latitude: point.latitude,
+        longitude: point.longitude,
         fetchedAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -85,8 +87,8 @@ export class GeocodingService {
         set: {
           city: result.city,
           country: result.country,
-          latitude,
-          longitude,
+          latitude: point.latitude,
+          longitude: point.longitude,
           fetchedAt: new Date(),
         },
       });

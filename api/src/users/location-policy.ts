@@ -35,6 +35,18 @@ function normalize(value: string | null | undefined): string {
     .toLowerCase();
 }
 
+/** ~1 km : suffisant pour une ville, inutile pour situer précisément quelqu'un. */
+export function roundCoordinate(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+export function roundedCoordinates(coord: Coordinate): Coordinate {
+  return {
+    latitude: roundCoordinate(coord.latitude),
+    longitude: roundCoordinate(coord.longitude),
+  };
+}
+
 /** Distance orthodromique en kilomètres. */
 export function distanceKm(a: Coordinate, b: Coordinate): number {
   const radius = 6371;
