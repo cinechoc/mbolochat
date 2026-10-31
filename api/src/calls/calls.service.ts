@@ -5,6 +5,7 @@ import { ConversationsService } from '../conversations/conversations.service.js'
 import { PresenceService } from '../presence/presence.service.js';
 import { PushService } from '../push/push.service.js';
 import { UsersService } from '../users/users.service.js';
+import { canSee } from '../users/visibility.js';
 import { SocketRateLimiter } from '../chat/socket-rate-limit.js';
 import { userRoomOf } from '../chat/socket-auth.js';
 import type { CallEndedPayload, CallInviteAck, CallOutcome, CallPeer } from './calls.types.js';
@@ -120,6 +121,10 @@ export class CallsService implements OnModuleDestroy {
     }
     if (await this.users.isBlockedBetween(callerId, callee.id)) {
       return { ok: false, error: 'unavailable' };
+    }
+    const calleeUser = await this.users.getByIdOrThrow(callee.id);
+    if (!canSee(calleeUser.callPermission, await this.users.relationWith(callerId, callee.id))) {
+      return { ok: false, error: 'forbidden' };
     }
 
     const caller = summary.members.find((member) => member.id === callerId);

@@ -33,7 +33,11 @@ describe('CallsService', () => {
     listMemberIds: ReturnType<typeof vi.fn>;
     createCallMessage: ReturnType<typeof vi.fn>;
   };
-  let users: { isBlockedBetween: ReturnType<typeof vi.fn> };
+  let users: {
+    isBlockedBetween: ReturnType<typeof vi.fn>;
+    getByIdOrThrow: ReturnType<typeof vi.fn>;
+    relationWith: ReturnType<typeof vi.fn>;
+  };
   let push: {
     notifyIncomingCall: ReturnType<typeof vi.fn>;
     notifyCallUpdate: ReturnType<typeof vi.fn>;
@@ -69,7 +73,11 @@ describe('CallsService', () => {
         }),
       ),
     };
-    users = { isBlockedBetween: vi.fn().mockResolvedValue(false) };
+    users = {
+      isBlockedBetween: vi.fn().mockResolvedValue(false),
+      getByIdOrThrow: vi.fn().mockResolvedValue({ id: 'callee', callPermission: 'everyone' }),
+      relationWith: vi.fn().mockResolvedValue({ isContact: false, blocked: false }),
+    };
     push = {
       notifyIncomingCall: vi.fn().mockResolvedValue(undefined),
       notifyCallUpdate: vi.fn().mockResolvedValue(undefined),
@@ -155,6 +163,11 @@ describe('CallsService', () => {
 
     conversations.listForUser.mockResolvedValueOnce([]);
     expect(await service.invite(CALLER, 'conv-1')).toEqual({ ok: false, error: 'invalid' });
+  });
+
+  it('respecte le réglage « qui peut m’appeler »', async () => {
+    users.getByIdOrThrow.mockResolvedValueOnce({ id: CALLEE, callPermission: 'nobody' });
+    expect(await service.invite(CALLER, 'conv-1')).toEqual({ ok: false, error: 'forbidden' });
   });
 
   it('expire la sonnerie après le délai et libère les deux utilisateurs', async () => {

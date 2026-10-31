@@ -25,6 +25,7 @@ import {
 import { PushService } from '../push/push.service.js';
 import { MediaService } from '../media/media.service.js';
 import { PresenceService, type PresenceChange } from '../presence/presence.service.js';
+import { UsersService } from '../users/users.service.js';
 import { SocketRateLimiter } from './socket-rate-limit.js';
 import { InvalidGifAttachmentError, normalizeGifAttachment } from './gif-attachment.js';
 import {
@@ -61,6 +62,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     private readonly media: MediaService,
     private readonly presence: PresenceService,
     private readonly rateLimiter: SocketRateLimiter,
+    private readonly users: UsersService,
   ) {
     this.presenceChanges = this.presence.changes$.subscribe((change) => {
       void this.broadcastPresenceChange(change);
@@ -373,6 +375,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     const conversationId = body?.conversationId;
     if (!userId || !conversationId) return;
     if (!(await this.conversationsService.isMember(conversationId, userId))) return;
+    const author = await this.users.findById(userId);
+    if (author && !author.typingIndicator) return;
     const text = typeof body?.text === 'string' ? body.text.slice(0, 300) : '';
     client.to(roomOf(conversationId)).emit('typing', { conversationId, userId, text });
   }
@@ -387,6 +391,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     if (!userId || !conversationId) return;
     if (!(await this.conversationsService.isMember(conversationId, userId))) return;
     const changes = await this.conversationsService.markRead(conversationId, userId);
+    const reader = await this.users.findById(userId);
+    // Accusés désactivés : la lecture locale reste vraie, les autres ne la voient pas.
+    if (reader && !reader.readReceipts) {
+      return;
+    }
     this.server.to(roomOf(conversationId)).emit('read', { conversationId, userId, at: new Date().toISOString() });
     this.emitReceipts(changes);
   }

@@ -10,6 +10,7 @@ import type { SocketRateLimiter } from '../chat/socket-rate-limit.js';
 import type { MediaService } from '../media/media.service.js';
 import type { CallLimits } from './call-limits.js';
 import type { CallsService } from './calls.service.js';
+import type { UsersService } from '../users/users.service.js';
 import { GroupCallsService } from './group-calls.service.js';
 
 const GROUP = 'group-1';
@@ -43,7 +44,14 @@ describe('GroupCallsService', () => {
   let media: { signOrNull: ReturnType<typeof vi.fn> };
   let limiter: { allowCall: ReturnType<typeof vi.fn> };
   let direct: { isBusy: ReturnType<typeof vi.fn> };
-  let limits: { maxParticipants: ReturnType<typeof vi.fn> };
+  let limits: {
+    maxParticipants: ReturnType<typeof vi.fn>;
+    maxVideoParticipants: ReturnType<typeof vi.fn>;
+  };
+  let users: {
+    relationsFor: ReturnType<typeof vi.fn>;
+    findManyByIds: ReturnType<typeof vi.fn>;
+  };
   let bus: Subject<ConversationChange>;
   let service: GroupCallsService;
 
@@ -88,6 +96,11 @@ describe('GroupCallsService', () => {
     direct = { isBusy: vi.fn().mockReturnValue(false) };
     limits = {
       maxParticipants: vi.fn().mockImplementation((m: string) => (m === 'VIDEO' ? 4 : 8)),
+      maxVideoParticipants: vi.fn().mockReturnValue(4),
+    };
+    users = {
+      relationsFor: vi.fn().mockResolvedValue(new Map()),
+      findManyByIds: vi.fn().mockResolvedValue([]),
     };
     bus = new Subject<ConversationChange>();
     service = new GroupCallsService(
@@ -97,6 +110,7 @@ describe('GroupCallsService', () => {
       direct as unknown as CallsService,
       limits as unknown as CallLimits,
       { changes$: bus } as unknown as ConversationEventsService,
+      users as unknown as UsersService,
     );
     service.attach({
       to: (room: string) => operator([room]),
@@ -117,6 +131,19 @@ describe('GroupCallsService', () => {
     expect(ack.maxParticipants).toBe(8);
     expect(events('gcall:incoming')).toHaveLength(IDS.length - 1);
     expect(notices).toEqual(['Appel de groupe en cours']);
+  });
+
+  it('ne sonne pas chez une personne qui refuse les appels', async () => {
+    users.findManyByIds.mockImplementation(async (ids: string[]) =>
+      ids.map((id) => ({
+        id,
+        callPermission: id === 'u2' ? 'nobody' : 'everyone',
+      })),
+    );
+    await service.start('u1', GROUP);
+    const rung = events('gcall:incoming').map((entry) => entry.room);
+    expect(rung).not.toContain('user:u2');
+    expect(rung).toContain('user:u3');
   });
 
   it('refuse une discussion directe et un utilisateur déjà occupé', async () => {
@@ -234,6 +261,44 @@ describe('GroupCallsService', () => {
       callId: started.callId,
       userId: 'u1',
       video: true,
+    });
+  });
+
+  it('plafonne les caméras à quatre, même en appel audio', async () => {
+    const started = await service.start('u1', GROUP);
+    if (!started.ok) throw new Error('appel non ouvert');
+    for (const id of ['u2', 'u3', 'u4', 'u5']) {
+      await service.start(id, GROUP);
+    }
+    emitted = [];
+    for (const id of ['u1', 'u2', 'u3', 'u4']) {
+      expect(service.setVideo(id, started.callId, true)).toEqual({ ok: true });
+    }
+    // Idempotent : rallumer une caméra déjà allumée ne consomme pas de place.
+    expect(service.setVideo('u1', started.callId, true)).toEqual({ ok: true });
+    // Cinquième caméra refusée, sans diffusion aux autres.
+    expect(service.setVideo('u5', started.callId, true)).toEqual({ ok: false, error: 'full' });
+    const announced = new Set(events('gcall:video').map((entry) => entry.payload.userId));
+    expect([...announced].sort()).toEqual(['u1', 'u2', 'u3', 'u4']);
+
+    // Couper une caméra libère la place.
+    expect(service.setVideo('u2', started.callId, false)).toEqual({ ok: true });
+    expect(service.setVideo('u5', started.callId, true)).toEqual({ ok: true });
+  });
+
+  it('diffuse les plafonds avec le changement de média', async () => {
+    const started = await service.start('u1', GROUP);
+    if (!started.ok) throw new Error('appel non ouvert');
+    expect(started.maxVideoParticipants).toBe(4);
+    expect(events('gcall:incoming')[0]?.payload.maxVideoParticipants).toBe(4);
+    await service.start('u2', GROUP);
+    emitted = [];
+    expect(service.setMedia('u1', started.callId, 'VIDEO')).toEqual({ ok: true });
+    expect(events('gcall:media')[0]?.payload).toMatchObject({
+      callId: started.callId,
+      media: 'VIDEO',
+      maxParticipants: 4,
+      maxVideoParticipants: 4,
     });
   });
 

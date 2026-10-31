@@ -176,6 +176,13 @@
       "when": 1793409436314,
       "tag": "0024_profile_privacy_and_city",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793409752556,
+      "tag": "0025_group_add_default",
+      "breakpoints": true
     }
   ]
 }

@@ -67,7 +67,7 @@ export const users = pgTable('users', {
   /** Qui peut m'écrire (nouvelle conversation directe). */
   writePermission: privacyVisibilityEnum('write_permission').notNull().default('everyone'),
   /** Qui peut m'ajouter à un groupe. */
-  groupAddPermission: privacyVisibilityEnum('group_add_permission').notNull().default('contacts'),
+  groupAddPermission: privacyVisibilityEnum('group_add_permission').notNull().default('everyone'),
   /** Qui peut m'appeler. */
   callPermission: privacyVisibilityEnum('call_permission').notNull().default('everyone'),
   /** Qui peut me trouver par nom d'utilisateur. */

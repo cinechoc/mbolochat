@@ -34,7 +34,7 @@ export interface CallEndedPayload {
   outcome: CallOutcome;
 }
 
-export type CallInviteError = 'invalid' | 'busy' | 'unavailable' | 'rate';
+export type CallInviteError = 'invalid' | 'busy' | 'unavailable' | 'rate' | 'forbidden';
 
 export type CallInviteAck =
   | { ok: true; callId: string; peer: CallPeer }
@@ -83,6 +83,8 @@ export type GroupCallAck =
       members: GroupCallMember[];
       media: GroupCallMedia;
       maxParticipants: number;
+      /** Caméras simultanées autorisées (CALL_MAX_VIDEO). */
+      maxVideoParticipants: number;
     }
   | { ok: false; error: GroupCallError };
 
@@ -93,6 +95,7 @@ export interface GroupCallInvitePayload extends GroupCallIdentity {
   members: GroupCallMember[];
   media: GroupCallMedia;
   maxParticipants: number;
+  maxVideoParticipants: number;
 }
 
 /** Signalisation maillée : `to` cible un participant, `from` désigne l'émetteur. */

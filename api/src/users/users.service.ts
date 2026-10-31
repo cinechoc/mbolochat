@@ -138,6 +138,13 @@ export class UsersService {
     return user;
   }
 
+  async findManyByIds(ids: string[]): Promise<User[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    return this.db.select().from(users).where(inArray(users.id, ids));
+  }
+
   async getByIdOrThrow(id: string): Promise<User> {
     const user = await this.findById(id);
     if (!user) {

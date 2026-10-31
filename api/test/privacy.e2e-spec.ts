@@ -1,10 +1,13 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import type { AddressInfo } from 'node:net';
+import { io, type Socket } from 'socket.io-client';
 import request from 'supertest';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { DRIZZLE, type Database } from '../src/db/db.module.js';
+import { ConversationsService } from '../src/conversations/conversations.service.js';
 
 describe('Confidentialité du profil (e2e)', () => {
   let app: INestApplication;
@@ -124,5 +127,125 @@ describe('Confidentialité du profil (e2e)', () => {
       .expect(200);
     expect(visible.body.bio).toBe('Bio de Bruno');
     expect(visible.body.age).toBeGreaterThanOrEqual(30);
+  });
+
+  it('applique qui peut écrire et qui peut ajouter en groupe', async () => {
+    const alice = await register('Carla');
+    const bob = await register('Dany');
+    const carol = await register('Eva');
+
+    await request(app.getHttpServer())
+      .patch('/users/me/settings')
+      .set('Authorization', `Bearer ${bob.token}`)
+      .send({ privacy: { write: 'nobody', groupAdd: 'nobody' } })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/conversations')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ memberIds: [bob.id] })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post('/conversations')
+      .set('Authorization', `Bearer ${carol.token}`)
+      .send({ type: 'GROUP', name: 'Test', memberIds: [bob.id] })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch('/users/me/settings')
+      .set('Authorization', `Bearer ${bob.token}`)
+      .send({ privacy: { write: 'everyone', groupAdd: 'contacts' } })
+      .expect(200);
+
+    // Écriture rouverte : le message direct passe.
+    await request(app.getHttpServer())
+      .post('/conversations')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ memberIds: [bob.id] })
+      .expect(201);
+
+    // Alice est désormais un contact : elle peut ajouter Bob à un groupe.
+    await request(app.getHttpServer())
+      .post('/conversations')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ type: 'GROUP', name: 'Amis', memberIds: [bob.id] })
+      .expect(201);
+
+    // Carol n'a aucune conversation partagée avec Bob : refusée.
+    await request(app.getHttpServer())
+      .post('/conversations')
+      .set('Authorization', `Bearer ${carol.token}`)
+      .send({ type: 'GROUP', name: 'Spam', memberIds: [bob.id] })
+      .expect(403);
+  });
+
+  it('coupe typing et accusés de lecture côté serveur', async () => {
+    const alice = await register('Fanny');
+    const bob = await register('Gaston');
+    const conversation = await request(app.getHttpServer())
+      .post('/conversations')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ memberIds: [bob.id] })
+      .expect(201);
+
+    if (!app.getHttpServer().listening) {
+      await app.listen(0);
+    }
+    const { port } = app.getHttpServer().address() as AddressInfo;
+    const base = `http://127.0.0.1:${port}`;
+    const connect = (token: string) =>
+      new Promise<Socket>((resolve, reject) => {
+        const socket = io(base, { auth: { token }, transports: ['websocket'], forceNew: true });
+        socket.on('connect', () => resolve(socket));
+        socket.on('connect_error', reject);
+      });
+    const aliceSocket = await connect(alice.token);
+    const bobSocket = await connect(bob.token);
+    const join = (socket: Socket) =>
+      new Promise<void>((resolve) =>
+        socket.emit('conversation:join', { conversationId: conversation.body.id }, () => resolve()),
+      );
+    await join(aliceSocket);
+    await join(bobSocket);
+
+    const wait = (socket: Socket, event: string, ms = 400) =>
+      new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), ms);
+        socket.once(event, () => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+      });
+
+    await request(app.getHttpServer())
+      .patch('/users/me/settings')
+      .set('Authorization', `Bearer ${bob.token}`)
+      .send({ typingIndicator: false, readReceipts: false })
+      .expect(200);
+
+    bobSocket.emit('typing', { conversationId: conversation.body.id, text: 'coucou' });
+    expect(await wait(aliceSocket, 'typing')).toBe(false);
+
+    const conversations = app.get(ConversationsService);
+    await conversations.createMessage(conversation.body.id, alice.id, 'Message à lire');
+    bobSocket.emit('message:read', { conversationId: conversation.body.id });
+    expect(await wait(aliceSocket, 'read')).toBe(false);
+    expect(await wait(aliceSocket, 'receipt')).toBe(false);
+
+    await request(app.getHttpServer())
+      .patch('/users/me/settings')
+      .set('Authorization', `Bearer ${bob.token}`)
+      .send({ typingIndicator: true, readReceipts: true })
+      .expect(200);
+
+    bobSocket.emit('typing', { conversationId: conversation.body.id, text: 'me revoilà' });
+    expect(await wait(aliceSocket, 'typing')).toBe(true);
+
+    bobSocket.emit('message:read', { conversationId: conversation.body.id });
+    expect(await wait(aliceSocket, 'read')).toBe(true);
+
+    aliceSocket.close();
+    bobSocket.close();
   });
 });

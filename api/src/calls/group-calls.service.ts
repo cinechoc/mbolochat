@@ -11,6 +11,8 @@ import { ConversationsService } from '../conversations/conversations.service.js'
 import type { ConversationSummary } from '../conversations/conversations.service.js';
 import { MediaService } from '../media/media.service.js';
 import { CallsService } from './calls.service.js';
+import { UsersService } from '../users/users.service.js';
+import { canSee } from '../users/visibility.js';
 import {
   CallLimits,
   GROUP_CALL_DISCONNECT_GRACE_MS,
@@ -56,6 +58,11 @@ interface GroupCallSession {
  * Appels vocaux et vidéo de groupe en maillage : la signalisation relaie
  * offer/answer/ICE d'un participant à l'autre, le média reste direct entre les
  * appareils. L'appel vit tant qu'il reste au moins un participant.
+ *
+ * Maillage = coût montant linéaire (une piste vidéo par lien) ; le plafond de
+ * caméras (CALL_MAX_VIDEO) est la limite assumée du produit. Dépasser cette
+ * limite demandera un serveur de relais média (SFU) : étape suivante, pas
+ * maintenant.
  */
 @Injectable()
 export class GroupCallsService implements OnModuleDestroy {
@@ -73,6 +80,7 @@ export class GroupCallsService implements OnModuleDestroy {
     private readonly directCalls: CallsService,
     private readonly limits: CallLimits,
     private readonly events: ConversationEventsService,
+    private readonly users: UsersService,
   ) {
     // Retiré du groupe, retiré de l'appel : sinon il continuerait à entendre.
     this.membershipSubscription = this.events.changes$.subscribe((change: ConversationChange) => {
@@ -194,10 +202,9 @@ export class GroupCallsService implements OnModuleDestroy {
     for (const id of invite) {
       call.declined.delete(id);
     }
-    this.ring(call, userId, invite);
+    await this.ring(call, userId, invite);
     return { ok: true };
   }
-
   /** Un administrateur peut sortir quelqu'un de l'appel sans le couper. */
   async kick(
     adminId: string,
@@ -230,16 +237,36 @@ export class GroupCallsService implements OnModuleDestroy {
       return { ok: false, error: 'full' };
     }
     call.media = media;
-    this.broadcast(call, 'gcall:media', { callId: call.id, media });
+    this.broadcast(call, 'gcall:media', {
+      callId: call.id,
+      media,
+      maxParticipants: this.limits.maxParticipants(media),
+      maxVideoParticipants: this.limits.maxVideoParticipants(),
+    });
     return { ok: true };
   }
 
-  /** Caméra personnelle allumée/coupée : les tuiles des autres s'en informent. */
-  setVideo(userId: string, callId: string | undefined, video: boolean): { ok: boolean } {
+  /**
+   * Caméra personnelle allumée/coupée : les tuiles des autres s'en informent.
+   * Le plafond de caméras est arbitré ici, pas seulement dans l'interface :
+   * au-delà de CALL_MAX_VIDEO, l'appel continue en audio et le client revient
+   * à son état précédent.
+   */
+  setVideo(
+    userId: string,
+    callId: string | undefined,
+    video: boolean,
+  ): { ok: boolean; error?: 'invalid' | 'full' } {
     const call = callId ? this.calls.get(callId) : this.callOfUser(userId);
     const participant = call?.participants.get(userId);
     if (!call || !participant) {
-      return { ok: false };
+      return { ok: false, error: 'invalid' };
+    }
+    if (video && !participant.video) {
+      const cameras = [...call.participants.values()].filter((entry) => entry.video).length;
+      if (cameras >= this.limits.maxVideoParticipants()) {
+        return { ok: false, error: 'full' };
+      }
     }
     participant.video = video;
     this.broadcast(call, 'gcall:video', { callId: call.id, userId, video });
@@ -358,16 +385,32 @@ export class GroupCallsService implements OnModuleDestroy {
     this.byConversation.set(call.group.conversationId, call.id);
     this.byUser.set(userId, call.id);
     this.armExpiry(call);
-    this.ring(call, userId, call.audienceIds.filter((id) => id !== userId));
+    await this.ring(call, userId, call.audienceIds.filter((id) => id !== userId));
     await this.notice(call, userId, 'Appel de groupe en cours');
     return this.ack(call);
   }
 
   /** Sonner chez les membres ciblés ; les occupés reçoivent une simple notification. */
-  private ring(call: GroupCallSession, fromUserId: string, targets: string[]): void {
+  private async ring(
+    call: GroupCallSession,
+    fromUserId: string,
+    targets: string[],
+  ): Promise<void> {
     const payload = this.invitePayload(call);
+    // Qui peut m'appeler : le réglage de chaque personne ciblée s'applique.
+    const relations = await this.users.relationsFor(fromUserId, targets);
+    const people = new Map(
+      (await this.users.findManyByIds(targets)).map((person) => [person.id, person]),
+    );
     for (const target of targets) {
       if (target === fromUserId || call.declined.has(target)) {
+        continue;
+      }
+      const person = people.get(target);
+      if (
+        person &&
+        !canSee(person.callPermission, relations.get(target) ?? { isContact: false, blocked: false })
+      ) {
         continue;
       }
       if (this.isBusySomewhere(target)) {
@@ -394,6 +437,7 @@ export class GroupCallsService implements OnModuleDestroy {
       members: this.membersOf(call),
       media: call.media,
       maxParticipants: this.limits.maxParticipants(call.media),
+      maxVideoParticipants: this.limits.maxVideoParticipants(),
     };
   }
 
@@ -497,6 +541,7 @@ export class GroupCallsService implements OnModuleDestroy {
       members: this.membersOf(call),
       media: call.media,
       maxParticipants: this.limits.maxParticipants(call.media),
+      maxVideoParticipants: this.limits.maxVideoParticipants(),
     };
   }
 

@@ -17,6 +17,7 @@ import {
 } from '../db/schema.js';
 import { UploadsService } from '../uploads/uploads.service.js';
 import { UsersService } from '../users/users.service.js';
+import { canSee } from '../users/visibility.js';
 import type { StickerAttachmentMeta } from '../chat/sticker-attachment.js';
 import { isValidStickerRef, isMessageType, type MessageType } from '../chat/sticker-ref.js';
 import {
@@ -402,11 +403,30 @@ export class ConversationsService {
     }
 
     const found = await this.db
-      .select({ id: users.id })
+      .select()
       .from(users)
       .where(inArray(users.id, otherMemberIds));
     if (found.length !== otherMemberIds.length) {
       throw new BadRequestException('One or more member ids are invalid');
+    }
+
+    // Réglages de la personne concernée : elle seule décide qui peut lui
+    // écrire ou l'ajouter à un groupe. Les contacts sont ceux avec qui une
+    // conversation est déjà partagée ; un blocage refuse toujours.
+    const relations = await this.usersService.relationsFor(currentUserId, otherMemberIds);
+    for (const target of found) {
+      const relation = relations.get(target.id) ?? { isContact: false, blocked: false };
+      const allowed =
+        resolvedType === 'DIRECT'
+          ? canSee(target.writePermission, relation)
+          : canSee(target.groupAddPermission, relation);
+      if (!allowed) {
+        throw new ForbiddenException(
+          resolvedType === 'DIRECT'
+            ? `Impossible d’écrire à ${target.displayName} : ses réglages ne l’autorisent pas.`
+            : `Impossible d’ajouter ${target.displayName} : ses réglages de groupe ne l’autorisent pas.`,
+        );
+      }
     }
 
     const [conversation] = await this.db
@@ -887,9 +907,27 @@ export class ConversationsService {
     if (ids.length === 0) {
       return this.getSummaryForUser(conversationId, userId);
     }
-    const found = await this.db.select({ id: users.id }).from(users).where(inArray(users.id, ids));
+    const found = await this.db.select().from(users).where(inArray(users.id, ids));
     if (found.length !== ids.length) {
       throw new BadRequestException('One or more member ids are invalid');
+    }
+    const current = await this.db
+      .select({ userId: conversationMembers.userId })
+      .from(conversationMembers)
+      .where(eq(conversationMembers.conversationId, conversationId));
+    const present = new Set(current.map((row) => row.userId));
+    const arriving = found.filter((target) => !present.has(target.id));
+    const relations = await this.usersService.relationsFor(
+      userId,
+      arriving.map((target) => target.id),
+    );
+    for (const target of arriving) {
+      const relation = relations.get(target.id) ?? { isContact: false, blocked: false };
+      if (!canSee(target.groupAddPermission, relation)) {
+        throw new ForbiddenException(
+          `Impossible d’ajouter ${target.displayName} : ses réglages de groupe ne l’autorisent pas.`,
+        );
+      }
     }
 
     const added = await this.db.transaction(async (tx) => {
