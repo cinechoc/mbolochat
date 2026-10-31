@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, count, eq, ilike, inArray, max, ne, notInArray, or } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../db/db.module.js';
 import {
@@ -9,7 +9,9 @@ import {
   users,
   type User,
 } from '../db/schema.js';
-import { calculateAge } from './age.js';
+import { calculateAge, isMinor, isPlausibleBirthday } from './age.js';
+import { GeocodingService } from './geocoding.service.js';
+import { evaluateCityUpdate } from './location-policy.js';
 import { canSee, type ViewerRelation, type Visibility } from './visibility.js';
 
 export interface PublicUser {
@@ -131,7 +133,10 @@ export type SettingsPatch = {
 
 @Injectable()
 export class UsersService {
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly geocoding: GeocodingService,
+  ) {}
 
   async findById(id: string): Promise<User | undefined> {
     const [user] = await this.db.select().from(users).where(eq(users.id, id)).limit(1);
@@ -330,6 +335,112 @@ export class UsersService {
       await this.db.update(users).set(values).where(eq(users.id, userId));
     }
     return this.getSettings(userId);
+  }
+
+  /**
+   * Met à jour la ville depuis une position approximative. Le serveur géocode,
+   * applique le délai de 24 h et l'anti-téléport, puis jette les coordonnées.
+   */
+  async updateLocation(
+    userId: string,
+    latitude: number,
+    longitude: number,
+    mocked: boolean,
+  ): Promise<{
+    updated: boolean;
+    city: string | null;
+    country: string | null;
+    cityUpdatedAt: Date | null;
+    reason?: 'same-city' | 'too-soon' | 'teleport' | 'no-city' | 'geocode';
+  }> {
+    if (mocked) {
+      throw new BadRequestException('Position simulée refusée.');
+    }
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      throw new BadRequestException('Position invalide.');
+    }
+    const user = await this.getByIdOrThrow(userId);
+    const place = await this.geocoding.reverse(latitude, longitude);
+    if (!place) {
+      return {
+        updated: false,
+        city: user.city,
+        country: user.country,
+        cityUpdatedAt: user.cityUpdatedAt,
+        reason: 'geocode',
+      };
+    }
+    const oldCoords = user.city
+      ? await this.geocoding.coordsForCity(user.city, user.country)
+      : null;
+    const decision = evaluateCityUpdate({
+      hasCity: Boolean(user.city),
+      oldCity: user.city,
+      oldCountry: user.country,
+      oldUpdatedAt: user.cityUpdatedAt,
+      newCity: place.city,
+      newCountry: place.country,
+      newCoords: { latitude: place.latitude, longitude: place.longitude },
+      oldCoords,
+      now: new Date(),
+    });
+    if (!decision.accept) {
+      return {
+        updated: false,
+        city: user.city,
+        country: user.country,
+        cityUpdatedAt: user.cityUpdatedAt,
+        reason: decision.reason,
+      };
+    }
+    const cityUpdatedAt = new Date();
+    await this.db
+      .update(users)
+      .set({ city: place.city, country: place.country, cityUpdatedAt })
+      .where(eq(users.id, userId));
+    return {
+      updated: true,
+      city: place.city,
+      country: place.country,
+      cityUpdatedAt,
+    };
+  }
+
+  /** Date de naissance : renseignée une seule fois, jamais modifiable. */
+  async setBirthdate(userId: string, birthday: string | undefined): Promise<UserSettings> {
+    if (!birthday || !isPlausibleBirthday(birthday)) {
+      throw new BadRequestException(
+        'La date de naissance est invalide ou l’âge minimum n’est pas atteint.',
+      );
+    }
+    const user = await this.getByIdOrThrow(userId);
+    if (user.birthday) {
+      throw new BadRequestException('La date de naissance ne peut plus être modifiée.');
+    }
+    await this.db.update(users).set({ birthday }).where(eq(users.id, userId));
+    if (isMinor(birthday)) {
+      await this.applyMinorDefaults(userId);
+    }
+    return this.getSettings(userId);
+  }
+
+  /** Mineurs : ville masquée, introuvables par les inconnus, ajout aux contacts. */
+  async applyMinorDefaults(userId: string): Promise<void> {
+    await this.db
+      .update(users)
+      .set({
+        cityVisible: false,
+        discoverability: 'contacts',
+        groupAddPermission: 'contacts',
+      })
+      .where(eq(users.id, userId));
   }
 
   async create(data: {
@@ -542,8 +653,8 @@ export class UsersService {
       createdAt: view.createdAt,
       isMe,
       age: canSeeProfile ? calculateAge(user.birthday) : null,
-      city: canSeeProfile ? user.city : null,
-      country: canSeeProfile ? user.country : null,
+      city: isMe || (canSeeProfile && user.cityVisible) ? user.city : null,
+      country: isMe || (canSeeProfile && user.cityVisible) ? user.country : null,
       birthdateSet: Boolean(user.birthday),
       stats: {
         messages: messagesRow?.value ?? 0,

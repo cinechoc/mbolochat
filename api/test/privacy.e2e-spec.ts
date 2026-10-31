@@ -1,5 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { AddressInfo } from 'node:net';
 import { io, type Socket } from 'socket.io-client';
@@ -7,6 +8,7 @@ import request from 'supertest';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { DRIZZLE, type Database } from '../src/db/db.module.js';
+import { users } from '../src/db/schema.js';
 import { ConversationsService } from '../src/conversations/conversations.service.js';
 
 describe('Confidentialité du profil (e2e)', () => {
@@ -178,6 +180,37 @@ describe('Confidentialité du profil (e2e)', () => {
       .set('Authorization', `Bearer ${carol.token}`)
       .send({ type: 'GROUP', name: 'Spam', memberIds: [bob.id] })
       .expect(403);
+  });
+
+  it('refuse une position simulée', async () => {
+    const user = await register('Ines');
+    await request(app.getHttpServer())
+      .post('/users/me/location')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ latitude: 0.39, longitude: 9.45, mocked: true })
+      .expect(400);
+  });
+
+  it('renseigne une naissance mineure une seule fois et applique les défauts', async () => {
+    const user = await register('Junior');
+    const database = app.get<Database>(DRIZZLE);
+    // Compte ancien sans date de naissance.
+    await database.update(users).set({ birthday: null }).where(eq(users.id, user.id));
+
+    const settings = await request(app.getHttpServer())
+      .post('/users/me/birthdate')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ birthday: '2012-01-01' })
+      .expect(201);
+    expect(settings.body.age).toBeGreaterThanOrEqual(13);
+    expect(settings.body.privacy.discoverability).toBe('contacts');
+    expect(settings.body.privacy.groupAdd).toBe('contacts');
+
+    await request(app.getHttpServer())
+      .post('/users/me/birthdate')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ birthday: '2012-01-01' })
+      .expect(400);
   });
 
   it('coupe typing et accusés de lecture côté serveur', async () => {

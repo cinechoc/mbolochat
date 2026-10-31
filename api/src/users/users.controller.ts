@@ -73,6 +73,32 @@ export class UsersController {
     return this.usersService.updateSettings(current.sub, body ?? {});
   }
 
+  /**
+   * Position approximative envoyée par l'appareil : le serveur géocode et
+   * décide seul de la ville. Les coordonnées ne sont jamais conservées.
+   */
+  @Post('me/location')
+  async updateLocation(
+    @CurrentUser() current: JwtPayload,
+    @Body() body: { latitude?: number; longitude?: number; mocked?: boolean },
+  ) {
+    return this.usersService.updateLocation(
+      current.sub,
+      Number(body?.latitude),
+      Number(body?.longitude),
+      body?.mocked === true,
+    );
+  }
+
+  /** Renseigne la date de naissance une seule fois (comptes existants). */
+  @Post('me/birthdate')
+  async setBirthdate(
+    @CurrentUser() current: JwtPayload,
+    @Body() body: { birthday?: string },
+  ) {
+    return this.usersService.setBirthdate(current.sub, body?.birthday);
+  }
+
   @Post('me/avatar')
   async uploadAvatar(@CurrentUser() current: JwtPayload, @Req() req: Request) {    // Expect raw body as binary image via multipart? We'll accept base64 JSON instead.
     const body = req.body as { data?: string; mimeType?: string } | undefined;

@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "city_visible" boolean DEFAULT true NOT NULL;

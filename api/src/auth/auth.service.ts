@@ -13,6 +13,7 @@ import { desc, eq } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../db/db.module.js';
 import { passwordResetTokens, refreshTokens } from '../db/schema.js';
 import { toPublicUser, UsersService, type PublicUser } from '../users/users.service.js';
+import { isMinor } from '../users/age.js';
 import type { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import type { LoginDto } from './dto/login.dto.js';
 import type { RegisterDto } from './dto/register.dto.js';
@@ -92,6 +93,9 @@ export class AuthService {
       birthday: dto.birthday,
       gender: dto.gender,
     });
+    if (isMinor(dto.birthday)) {
+      await this.usersService.applyMinorDefaults(user.id);
+    }
     return this.buildAuthResult(user.id, user.username, toPublicUser(user));
   }
 

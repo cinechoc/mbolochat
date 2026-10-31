@@ -62,6 +62,8 @@ export const users = pgTable('users', {
   city: text('city'),
   country: text('country'),
   cityUpdatedAt: timestamp('city_updated_at', { withTimezone: true }),
+  /** La ville est masquée aux autres par défaut pour les mineurs. */
+  cityVisible: boolean('city_visible').notNull().default(true),
   /** Photo, bio, ville et âge : même visibilité pour ces quatre champs. */
   profileVisibility: privacyVisibilityEnum('profile_visibility').notNull().default('everyone'),
   /** Qui peut m'écrire (nouvelle conversation directe). */

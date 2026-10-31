@@ -23,6 +23,7 @@ function user(overrides: Partial<User> = {}): User {
     city: null,
     country: null,
     cityUpdatedAt: null,
+    cityVisible: true,
     profileVisibility: 'everyone',
     writePermission: 'everyone',
     groupAddPermission: 'contacts',
