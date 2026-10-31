@@ -14,14 +14,20 @@ find_ndk() {
     echo "$ANDROID_NDK_ROOT"
     return
   fi
-  if [[ -n "${ANDROID_HOME:-}" ]]; then
-    local found
-    found="$(find "$ANDROID_HOME/ndk" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -1)"
-    if [[ -n "$found" ]]; then
-      echo "$found"
-      return
-    fi
+  if [[ -n "${ANDROID_NDK:-}" && -d "$ANDROID_NDK" ]]; then
+    echo "$ANDROID_NDK"
+    return
   fi
+  for sdk in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" /usr/local/lib/android/sdk; do
+    if [[ -n "$sdk" && -d "$sdk/ndk" ]]; then
+      local found
+      found="$(find "$sdk/ndk" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -1)"
+      if [[ -n "$found" ]]; then
+        echo "$found"
+        return
+      fi
+    fi
+  done
   for candidate in /opt/ndk/android-ndk-*; do
     if [[ -d "$candidate" ]]; then
       echo "$candidate"
@@ -44,6 +50,9 @@ export CC_x86_64_linux_android="$TOOLCHAIN/bin/x86_64-linux-android${API}-clang"
 export AR_x86_64_linux_android="$TOOLCHAIN/bin/llvm-ar"
 
 cd "$CRATE"
+if command -v rustup >/dev/null 2>&1; then
+  rustup target add aarch64-linux-android x86_64-linux-android >/dev/null
+fi
 cargo build --release --target aarch64-linux-android --features jni --lib
 cargo build --release --target x86_64-linux-android --features jni --lib
 cargo build --release --target aarch64-linux-android --bin spike
