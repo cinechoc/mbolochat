@@ -9,21 +9,34 @@ import { CallProvider } from '@/features/calls/CallProvider';
 import { CallBanner } from '@/features/calls/CallBanner';
 import { CallScreen } from '@/features/calls/CallScreen';
 import { PresenceProvider } from '@/features/presence/PresenceProvider';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
+import { loadAppPreferences } from '@/lib/app-preferences';
+import { TextScaleProvider } from '@/lib/text-scale';
+import { ThemePreferenceProvider, useThemePreference } from '@/lib/theme-preference';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { drain } from '@/lib/outbox';
 import { configureNotificationHandler, subscribeToNotificationOpens } from '@/lib/push';
 import { runSync, startReliability } from '@/lib/sync';
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  return (
+    <ThemePreferenceProvider>
+      <TextScaleProvider>
+        <RootLayoutBody />
+      </TextScaleProvider>
+    </ThemePreferenceProvider>
+  );
+}
+
+function RootLayoutBody() {
+  const { scheme } = useThemePreference();
 
   // Configuré après le montage : charger expo-notifications pendant
   // l'évaluation du bundle casse le démarrage (globalThis.expo pas encore
   // installé par le runtime natif → « runtime not ready »).
   useEffect(() => {
     configureNotificationHandler();
+    void loadAppPreferences();
   }, []);
 
   return (
@@ -32,8 +45,8 @@ export default function RootLayout() {
           le provider doit être à la racine pour qu'ils reçoivent les insets. */}
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <AuthProvider>
-          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-            <StatusBar style="auto" />
+          <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
+            <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
             <CallProvider>
               <RootNavigator />
               <CallScreen />
