@@ -1249,7 +1249,7 @@ export class ConversationsService {
     messageId: string,
     userId: string,
     reaction: string,
-  ): Promise<ReactionSummary[]> {
+  ): Promise<{ reactions: ReactionSummary[]; added: boolean; authorId: string }> {
     if (!isPantherReaction(reaction)) {
       throw new BadRequestException('Réaction invalide');
     }
@@ -1257,7 +1257,7 @@ export class ConversationsService {
       throw new ForbiddenException('You are not a member of this conversation');
     }
     const [message] = await this.db
-      .select({ id: messages.id, deletedAt: messages.deletedAt })
+      .select({ id: messages.id, deletedAt: messages.deletedAt, senderId: messages.senderId })
       .from(messages)
       .where(and(eq(messages.id, messageId), eq(messages.conversationId, conversationId)))
       .limit(1);
@@ -1286,7 +1286,11 @@ export class ConversationsService {
     }
 
     const summaries = await this.reactionsFor([messageId], userId);
-    return summaries.get(messageId) ?? [];
+    return {
+      reactions: summaries.get(messageId) ?? [],
+      added: inserted.length > 0,
+      authorId: message.senderId,
+    };
   }
 
   async listMessages(

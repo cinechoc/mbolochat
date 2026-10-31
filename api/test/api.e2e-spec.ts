@@ -566,9 +566,11 @@ describe('MboloChat API (e2e)', () => {
         bob.id,
         'mbolo-panther-2d/amour',
       );
-      expect(first).toEqual([
+      expect(first.reactions).toEqual([
         { reaction: 'mbolo-panther-2d/amour', count: 1, mine: true },
       ]);
+      expect(first.added).toBe(true);
+      expect(first.authorId).toBe(alice.id);
 
       const removed = await service.toggleReaction(
         conversation.body.id,
@@ -576,7 +578,8 @@ describe('MboloChat API (e2e)', () => {
         bob.id,
         'mbolo-panther-2d/amour',
       );
-      expect(removed).toEqual([]);
+      expect(removed.reactions).toEqual([]);
+      expect(removed.added).toBe(false);
 
       await expect(
         service.toggleReaction(conversation.body.id, message.id, bob.id, 'abc'),

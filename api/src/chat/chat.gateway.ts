@@ -293,18 +293,34 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     if (!userId || !conversationId || !messageId || typeof body?.reaction !== 'string') {
       throw new WsException('Réaction invalide');
     }
-    const reactions = await this.conversationsService.toggleReaction(
+    const result = await this.conversationsService.toggleReaction(
       conversationId,
       messageId,
       userId,
       body.reaction,
     );
-    const payload = { conversationId, messageId, reactions };
+    const payload = { conversationId, messageId, reactions: result.reactions };
     const memberIds = await this.conversationsService.listMemberIds(conversationId);
     this.server
       .to([roomOf(conversationId), ...memberIds.map((memberId) => userRoomOf(memberId))])
       .emit('message:reaction', payload);
-    return { reactions };
+    if (result.added && result.authorId !== userId) {
+      const reactor = await this.users.findById(userId);
+      if (reactor) {
+        void this.pushService.notifyReaction({
+          conversationId,
+          messageId,
+          reaction: body.reaction,
+          authorId: result.authorId,
+          reactor: {
+            id: reactor.id,
+            displayName: reactor.displayName,
+            avatarUrl: reactor.avatarUrl,
+          },
+        });
+      }
+    }
+    return { reactions: result.reactions };
   }
 
   @SubscribeMessage('message:delete')
