@@ -35,6 +35,7 @@ import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useCalls } from '@/features/calls/CallProvider';
 import { cache } from '@/lib/cache';
+import { groupUnreadCount } from '@/lib/conversationFilters';
 import {
   conversationSectionLabel,
   conversationTitle,
@@ -430,7 +431,7 @@ export default function ChatsScreen() {
       {
         key: 'groups' as const,
         label: 'Groupes',
-        count: conversations.filter((item) => item.type === 'GROUP').length,
+        count: groupUnreadCount(conversations),
       },
       { key: 'hidden' as const, label: 'Masqué' },
     ],
