@@ -12,6 +12,10 @@ import { MboloCrypto, type SelfTestReport } from '../../../modules/mbolo-crypto/
 
 const TEST_FILE_MB = 50;
 
+function fileSystemPath(uri: string): string {
+  return decodeURIComponent(uri.replace(/^file:\/\//, ''));
+}
+
 function formatMegabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
 }
@@ -32,7 +36,7 @@ export function E2eeSpikeScreen() {
     setError(null);
     setReport(null);
     try {
-      setReport(await MboloCrypto.selfTest(Paths.cache.uri, TEST_FILE_MB));
+      setReport(await MboloCrypto.selfTest(fileSystemPath(Paths.cache.uri), TEST_FILE_MB));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : fr.e2eeDev.error);
     } finally {

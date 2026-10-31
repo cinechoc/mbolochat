@@ -16,6 +16,12 @@ describe('e2ee dev tools', () => {
     expect(isE2eeDevToolsEnabled(true, '1')).toBe(true);
   });
 
+  it('autorise uniquement la build spike explicite hors développement', () => {
+    expect(isE2eeDevToolsEnabled(false, '1', '1')).toBe(true);
+    expect(isE2eeDevToolsEnabled(false, '1', '0')).toBe(false);
+    expect(isE2eeDevToolsEnabled(false, undefined, '1')).toBe(false);
+  });
+
   it('remplace l’écran par le stub hors développement', () => {
     expect(resolveE2eeDevModule('@/features/e2ee-dev/E2eeSpikeScreen', true, '/app')).toBeNull();
     expect(resolveE2eeDevModule('@/features/e2ee-dev/E2eeSpikeScreen', false, '/app')).toBe(

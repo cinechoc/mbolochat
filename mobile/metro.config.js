@@ -5,7 +5,8 @@ const { resolveE2eeDevModule } = require('./metro.e2ee-dev.cjs');
 const config = getDefaultConfig(__dirname);
 const defaultResolveRequest = config.resolver.resolveRequest;
 const devToolsEnabled =
-  process.env.EXPO_PUBLIC_E2EE_DEV_TOOLS === '1' && process.env.NODE_ENV !== 'production';
+  process.env.EXPO_PUBLIC_E2EE_DEV_TOOLS === '1' &&
+  (process.env.NODE_ENV !== 'production' || process.env.EXPO_PUBLIC_E2EE_SPIKE_BUILD === '1');
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   const override = resolveE2eeDevModule(moduleName, devToolsEnabled, __dirname);

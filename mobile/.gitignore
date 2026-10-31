@@ -44,3 +44,6 @@ example
 
 # Les .so sont générés par crypto/scripts/build-android.sh ; les versions
 # ARM64/x86_64 sont commitées pour permettre un build local sans Rust.
+
+# Artefacts Gradle des modules locaux
+/modules/*/android/build/
