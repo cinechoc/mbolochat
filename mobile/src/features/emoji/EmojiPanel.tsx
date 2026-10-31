@@ -126,59 +126,62 @@ const EmojiGrid = memo(function EmojiGrid({
   onLongPress,
   theme,
 }: EmojiGridProps) {
-  const rows = useMemo(() => {
-    const out: EmojiItem[][] = [];
-    for (let i = 0; i < items.length; i += cols) out.push(items.slice(i, i + cols));
-    return out;
-  }, [items, cols]);
+  const renderItem = useCallback(
+    ({ item }: { item: EmojiItem }) => (
+      <Pressable
+        onPress={() => onPick(item.char)}
+        onLongPress={onLongPress ? () => onLongPress(item) : undefined}
+        delayLongPress={350}
+        accessibilityLabel={item.name}
+        style={({ pressed }) => [
+          styles.cell,
+          { width: `${100 / cols}%`, height: CELL_H },
+          pressed && { backgroundColor: theme.pressed, borderRadius: Radii.sm },
+        ]}
+      >
+        {EMOJI_SOURCES[item.key] ? (
+          <EmojiImage emojiKey={item.key} size={emojiSize} />
+        ) : (
+          <Text
+            numberOfLines={1}
+            allowFontScaling={false}
+            style={[
+              styles.nativeEmoji,
+              { fontSize: Math.round(emojiSize * 0.9), lineHeight: CELL_H },
+            ]}
+          >
+            {item.char}
+          </Text>
+        )}
+        {favorites.has(item.key) ? (
+          <MaterialCommunityIcons
+            name="star"
+            size={10}
+            color={theme.accent}
+            style={styles.favoriteStar}
+          />
+        ) : null}
+      </Pressable>
+    ),
+    [cols, emojiSize, favorites, onLongPress, onPick, theme],
+  );
 
   return (
-    <ScrollView
+    <FlatList
+      data={items}
+      key={`grid-${cols}`}
+      numColumns={cols}
+      keyExtractor={(item) => item.key}
+      renderItem={renderItem}
       style={{ height, flexGrow: 0 }}
+      initialNumToRender={cols * 6}
+      maxToRenderPerBatch={cols * 4}
+      windowSize={5}
+      removeClippedSubviews
+      showsVerticalScrollIndicator={false}
       nestedScrollEnabled
-      showsVerticalScrollIndicator={false}>
-      {rows.map((rowItems, rowIndex) => (
-        <View key={rowIndex} style={{ flexDirection: 'row', height: CELL_H }}>
-          {rowItems.map((emoji) => (
-            <Pressable
-              key={emoji.key}
-              onPress={() => onPick(emoji.char)}
-              onLongPress={onLongPress ? () => onLongPress(emoji) : undefined}
-              delayLongPress={350}
-              accessibilityLabel={emoji.name}
-              style={({ pressed }) => [
-                styles.cell,
-                { width: `${100 / cols}%`, height: CELL_H },
-                pressed && { backgroundColor: theme.pressed, borderRadius: Radii.sm },
-              ]}
-            >
-              {EMOJI_SOURCES[emoji.key] ? (
-                <EmojiImage emojiKey={emoji.key} size={emojiSize} />
-              ) : (
-                <Text
-                  numberOfLines={1}
-                  allowFontScaling={false}
-                  style={[
-                    styles.nativeEmoji,
-                    { fontSize: Math.round(emojiSize * 0.9), lineHeight: CELL_H },
-                  ]}
-                >
-                  {emoji.char}
-                </Text>
-              )}
-              {favorites.has(emoji.key) ? (
-                <MaterialCommunityIcons
-                  name="star"
-                  size={10}
-                  color={theme.accent}
-                  style={styles.favoriteStar}
-                />
-              ) : null}
-            </Pressable>
-          ))}
-        </View>
-      ))}
-    </ScrollView>
+      keyboardShouldPersistTaps="handled"
+    />
   );
 });
 
@@ -235,6 +238,12 @@ export function EmojiPanel({
     recents.length ? 'recent' : favorites.length ? 'favorite' : EMOJI_GROUPS[0]?.id ?? 'recent',
   );
   const tab = tabs.find((entry) => entry.id === tabId) ?? tabs[0];
+  // Page affichée au montage : `initialScrollIndex` rend la bonne page dès le
+  // premier rendu, contrairement à un scrollToIndex différé qui laissait le
+  // pager sur une zone non rendue (panneau vide pendant plusieurs secondes).
+  const [initialTabIndex] = useState(() =>
+    Math.max(0, tabs.findIndex((entry) => entry.id === tabId)),
+  );
 
   // Pendant la recherche, les onglets sont masqués pour laisser de la place aux résultats.
   const showBar = !searchFocused;
@@ -291,13 +300,6 @@ export function EmojiPanel({
     },
     [tabs, width],
   );
-
-  // Si l'onglet initial n'est pas la première page, placer le pager dessus au montage.
-  useEffect(() => {
-    const index = tabs.findIndex((entry) => entry.id === tabId);
-    if (index > 0) pagerRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   let content: React.ReactElement;
   if (searching) {
@@ -361,6 +363,7 @@ export function EmojiPanel({
           );
         }}
         getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
+        initialScrollIndex={initialTabIndex}
         showsHorizontalScrollIndicator={false}
         initialNumToRender={1}
         windowSize={3}
