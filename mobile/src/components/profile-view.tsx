@@ -41,7 +41,7 @@ export function ProfileHeader({
           <Avatar
             name={profile.displayName}
             uri={profile.avatarUrl}
-            size={96}
+            size={86}
             gender={profile.gender}
           />
           {avatarBusy ? (
@@ -64,15 +64,13 @@ export function ProfileHeader({
             {meta}
           </ThemedText>
         ) : null}
+        {profile.bio ? (
+          <ThemedText themeColor="textSecondary" style={styles.bio} numberOfLines={3}>
+            {profile.bio}
+          </ThemedText>
+        ) : null}
+        {actions ? <View style={styles.actions}>{actions}</View> : null}
       </View>
-
-      {profile.bio ? (
-        <ThemedText themeColor="textSecondary" style={styles.bio} numberOfLines={4}>
-          {profile.bio}
-        </ThemedText>
-      ) : null}
-
-      {actions ? <View style={styles.actions}>{actions}</View> : null}
     </View>
   );
 }
@@ -148,29 +146,27 @@ const accentColor = '#3c87f7';
 
 const styles = StyleSheet.create({
   header: {
-    alignItems: 'center',
-    gap: Spacing.two,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.four,
     paddingTop: Spacing.two,
   },
-  identity: { alignItems: 'center', gap: 2 },
+  identity: { flex: 1, alignItems: 'flex-start', gap: 2, minWidth: 0 },
   name: {
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 22,
+    lineHeight: 28,
     fontWeight: '700',
-    textAlign: 'center',
   },
   bio: {
     fontSize: 14,
     lineHeight: 20,
-    textAlign: 'center',
-    paddingHorizontal: Spacing.four,
+    marginTop: Spacing.one,
   },
   actions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'center',
     gap: Spacing.two,
-    marginTop: Spacing.one,
+    marginTop: Spacing.two,
   },
   action: {
     minHeight: 40,
