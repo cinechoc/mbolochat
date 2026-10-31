@@ -38,6 +38,8 @@ export function E2eeSpikeScreen() {
   const [storageRunning, setStorageRunning] = useState(false);
   const [bootstrap, setBootstrap] = useState<BootstrapResult | null>(null);
   const [bootstrapRunning, setBootstrapRunning] = useState(false);
+  const [keyLoss, setKeyLoss] = useState<{ simulated: boolean; recovered: boolean } | null>(null);
+  const [keyLossRunning, setKeyLossRunning] = useState(false);
 
   const run = async () => {
     if (running) {
@@ -92,6 +94,19 @@ export function E2eeSpikeScreen() {
       setBootstrap(await bootstrapE2ee(token));
     } finally {
       setBootstrapRunning(false);
+    }
+  };
+
+  const runKeyLoss = async () => {
+    if (keyLossRunning) return;
+    setKeyLossRunning(true);
+    setKeyLoss(null);
+    try {
+      const simulated = await MboloCrypto.simulateKeyLoss();
+      const ensured = await MboloCrypto.ensureKeys();
+      setKeyLoss({ simulated: simulated.simulated, recovered: ensured.recovered });
+    } finally {
+      setKeyLossRunning(false);
     }
   };
 
@@ -178,6 +193,27 @@ export function E2eeSpikeScreen() {
               bootstrap.recovered,
               bootstrap.error ?? '',
             )}
+          </ThemedText>
+        ) : null}
+
+        <Pressable
+          onPress={() => void runKeyLoss()}
+          disabled={keyLossRunning}
+          accessibilityRole="button"
+          style={({ pressed }) => [
+            styles.button,
+            {
+              backgroundColor: theme.backgroundElement,
+              opacity: keyLossRunning ? 0.6 : pressed ? 0.85 : 1,
+            },
+          ]}>
+          <ThemedText style={styles.storageLabel}>
+            {keyLossRunning ? fr.e2eeDev.keyLossRunning : fr.e2eeDev.keyLossRun}
+          </ThemedText>
+        </Pressable>
+        {keyLoss ? (
+          <ThemedText type="small" themeColor="textSecondary">
+            {fr.e2eeDev.keyLossResult(keyLoss.simulated, keyLoss.recovered)}
           </ThemedText>
         ) : null}
 

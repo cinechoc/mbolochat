@@ -96,6 +96,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useTextScale } from '@/lib/text-scale';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { isE2eeEnabled } from '@/features/e2ee/policy';
 import { cache } from '@/lib/cache';
 import { conversationTitle, formatClock, formatDateLabel, tickState, type TickState } from '@/lib/format';
 import {
@@ -702,9 +703,14 @@ export default function ChatScreen() {
   const emitTyping = useCallback(() => {
     if (!token || !id) return;
     lastTypingEmitRef.current = Date.now();
-    // Aucun brouillon ne traverse le serveur : uniquement l'état de saisie.
-    connectSocket(token).emit('typing', { conversationId: id, typing: true });
-  }, [token, id]);
+    // Avec E2EE, aucun brouillon ne traverse le serveur ; drapeau coupé,
+    // on conserve le texte de saisie historique.
+    connectSocket(token).emit('typing', {
+      conversationId: id,
+      typing: true,
+      ...(isE2eeEnabled() ? {} : { text: input.slice(0, 300) }),
+    });
+  }, [token, id, input]);
 
   const onInputChange = useCallback(
     (value: string) => {

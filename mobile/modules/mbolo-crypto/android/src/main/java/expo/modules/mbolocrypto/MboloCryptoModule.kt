@@ -93,5 +93,50 @@ class MboloCryptoModule : Module() {
     AsyncFunction("secureGenerateOneTimeKeys") { accountPickle: String, count: Int ->
       keyStore.generateOneTimeKeysJson(native, accountPickle, count)
     }
+
+    AsyncFunction("secureGenerateOneTimeKeysSigned") { accountPickle: String, count: Int ->
+      keyStore.generateOneTimeKeysSignedJson(native, accountPickle, count)
+    }
+
+    AsyncFunction("secureGenerateFallbackKey") { accountPickle: String ->
+      keyStore.generateFallbackKeyJson(native, accountPickle)
+    }
+
+    AsyncFunction("verifyPrekey") { signingKey: String, prekey: String, signature: String ->
+      native.nativeVerifyPrekey(signingKey, prekey, signature)
+    }
+
+    AsyncFunction("secureCreateOutbound") {
+      accountPickle: String,
+      identityKey: String,
+      oneTimeKey: String,
+      plaintextB64: String,
+      ->
+      keyStore.createOutboundJson(native, accountPickle, identityKey, oneTimeKey, plaintextB64)
+    }
+
+    AsyncFunction("secureEncrypt") { sessionPickle: String, plaintextB64: String ->
+      keyStore.encryptJson(native, sessionPickle, plaintextB64)
+    }
+
+    AsyncFunction("secureCreateInbound") {
+      accountPickle: String,
+      identityKey: String,
+      prekeyMessage: String,
+      ->
+      keyStore.createInboundJson(native, accountPickle, identityKey, prekeyMessage)
+    }
+
+    AsyncFunction("secureDecrypt") {
+      sessionPickle: String,
+      messageType: String,
+      messageB64: String,
+      ->
+      keyStore.decryptJson(native, sessionPickle, messageType, messageB64)
+    }
+
+    AsyncFunction("simulateKeyLoss") {
+      keyStore.simulateKeyLossJson()
+    }
   }
 }

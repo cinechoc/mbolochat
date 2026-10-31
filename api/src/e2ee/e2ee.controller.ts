@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { JwtPayload } from '../auth/jwt-payload.js';
@@ -33,7 +33,11 @@ export class E2eeController {
   }
 
   @Get('users/:id/keys')
-  keys(@CurrentUser() current: JwtPayload, @Param('id') userId: string) {
-    return this.e2eeService.getKeyBundle(current, userId);
+  keys(
+    @CurrentUser() current: JwtPayload,
+    @Param('id') userId: string,
+    @Query('consume') consume?: string,
+  ) {
+    return this.e2eeService.getKeyBundle(current, userId, consume !== 'false');
   }
 }

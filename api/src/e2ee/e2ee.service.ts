@@ -13,6 +13,7 @@ import {
   conversations,
   e2eeDevices,
   e2eeOneTimePrekeys,
+  pushTokens,
   refreshTokens,
 } from '../db/schema.js';
 import type { JwtPayload } from '../auth/jwt-payload.js';
@@ -20,6 +21,8 @@ import type { JwtPayload } from '../auth/jwt-payload.js';
 export interface PublicPrekey {
   keyId: string;
   key: string;
+  /** Signature Ed25519 de la clé publique par l'identité de l'appareil. */
+  signature?: string;
 }
 
 export interface RegisterDeviceBody {
@@ -27,9 +30,18 @@ export interface RegisterDeviceBody {
   signingKey: string;
   signedPrekey?: string;
   signedPrekeySignature?: string;
+  fallbackPrekey?: string;
+  fallbackPrekeySignature?: string;
+  fallbackPrekeyKeyId?: string;
   oneTimeKeys: PublicPrekey[];
   deviceName?: string;
   platform?: string;
+}
+
+export interface KeyBundleFallback {
+  keyId: string;
+  key: string;
+  signature: string | null;
 }
 
 export interface KeyBundle {
@@ -39,6 +51,7 @@ export interface KeyBundle {
   signedPrekey: string | null;
   signedPrekeySignature: string | null;
   oneTimeKey: PublicPrekey | null;
+  fallback: KeyBundleFallback | null;
 }
 
 const MAX_PREKEYS = 100;
@@ -66,7 +79,7 @@ export class E2eeService {
       return { deviceId: null, registered: false };
     }
     const [device] = await this.db
-      .select({ id: e2eeDevices.id })
+      .select({ id: e2eeDevices.id, fallback: e2eeDevices.fallbackPrekey })
       .from(e2eeDevices)
       .where(
         and(
@@ -76,7 +89,29 @@ export class E2eeService {
         ),
       )
       .limit(1);
-    return { deviceId: current.deviceId, registered: Boolean(device) };
+    if (!device) {
+      return {
+        deviceId: current.deviceId,
+        registered: false,
+        prekeysRemaining: 0,
+        fallbackAvailable: false,
+      };
+    }
+    const [count] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(e2eeOneTimePrekeys)
+      .where(
+        and(
+          eq(e2eeOneTimePrekeys.deviceRowId, device.id),
+          isNull(e2eeOneTimePrekeys.usedAt),
+        ),
+      );
+    return {
+      deviceId: current.deviceId,
+      registered: true,
+      prekeysRemaining: count?.count ?? 0,
+      fallbackAvailable: Boolean(device.fallback),
+    };
   }
 
   async registerDevice(current: JwtPayload, body: RegisterDeviceBody) {
@@ -89,7 +124,9 @@ export class E2eeService {
     }
     if (
       (body.signedPrekey !== undefined && !isKey(body.signedPrekey)) ||
-      (body.signedPrekeySignature !== undefined && !isKey(body.signedPrekeySignature, 64))
+      (body.signedPrekeySignature !== undefined && !isKey(body.signedPrekeySignature, 64)) ||
+      (body.fallbackPrekey !== undefined && !isKey(body.fallbackPrekey)) ||
+      (body.fallbackPrekeySignature !== undefined && !isKey(body.fallbackPrekeySignature, 64))
     ) {
       throw new BadRequestException('Clé signée invalide');
     }
@@ -97,7 +134,12 @@ export class E2eeService {
       throw new BadRequestException('Clés à usage unique invalides');
     }
     for (const prekey of body.oneTimeKeys) {
-      if (!isKey(prekey?.key) || typeof prekey.keyId !== 'string' || prekey.keyId.length > 64) {
+      if (
+        !isKey(prekey?.key) ||
+        typeof prekey.keyId !== 'string' ||
+        prekey.keyId.length > 64 ||
+        (prekey.signature !== undefined && !isKey(prekey.signature, 64))
+      ) {
         throw new BadRequestException('Clé à usage unique invalide');
       }
     }
@@ -116,6 +158,16 @@ export class E2eeService {
           ),
         )
         .returning({ id: e2eeDevices.id });
+
+      // Les notifications de l'ancien appareil ne doivent plus lui parvenir.
+      await tx
+        .delete(pushTokens)
+        .where(
+          and(
+            eq(pushTokens.userId, current.sub),
+            or(isNull(pushTokens.deviceId), ne(pushTokens.deviceId, deviceId)),
+          ),
+        );
 
       // Un seul appareil actif : les autres sessions ne peuvent plus se rafraîchir.
       await tx
@@ -147,6 +199,9 @@ export class E2eeService {
             signingKey: body.signingKey,
             signedPrekey: body.signedPrekey ?? null,
             signedPrekeySignature: body.signedPrekeySignature ?? null,
+            fallbackPrekey: body.fallbackPrekey ?? null,
+            fallbackPrekeySignature: body.fallbackPrekeySignature ?? null,
+            fallbackPrekeyKeyId: body.fallbackPrekeyKeyId ?? null,
             deviceName: body.deviceName?.slice(0, 80) ?? null,
             platform: body.platform?.slice(0, 40) ?? null,
             lastUsedAt: now,
@@ -171,6 +226,9 @@ export class E2eeService {
             signingKey: body.signingKey,
             signedPrekey: body.signedPrekey ?? null,
             signedPrekeySignature: body.signedPrekeySignature ?? null,
+            fallbackPrekey: body.fallbackPrekey ?? null,
+            fallbackPrekeySignature: body.fallbackPrekeySignature ?? null,
+            fallbackPrekeyKeyId: body.fallbackPrekeyKeyId ?? null,
             deviceName: body.deviceName?.slice(0, 80) ?? null,
             platform: body.platform?.slice(0, 40) ?? null,
           })
@@ -186,6 +244,7 @@ export class E2eeService {
               deviceRowId,
               keyId: prekey.keyId,
               publicKey: prekey.key,
+              signature: prekey.signature ?? null,
             })),
           )
           .onConflictDoNothing();
@@ -206,7 +265,12 @@ export class E2eeService {
       throw new BadRequestException('Clés à usage unique invalides');
     }
     for (const prekey of prekeys) {
-      if (!isKey(prekey?.key) || typeof prekey.keyId !== 'string' || prekey.keyId.length > 64) {
+      if (
+        !isKey(prekey?.key) ||
+        typeof prekey.keyId !== 'string' ||
+        prekey.keyId.length > 64 ||
+        (prekey.signature !== undefined && !isKey(prekey.signature, 64))
+      ) {
         throw new BadRequestException('Clé à usage unique invalide');
       }
     }
@@ -230,6 +294,7 @@ export class E2eeService {
           deviceRowId: device.id,
           keyId: prekey.keyId,
           publicKey: prekey.key,
+          signature: prekey.signature ?? null,
         })),
       )
       .onConflictDoNothing();
@@ -237,7 +302,11 @@ export class E2eeService {
   }
 
   /** Récupère le bundle d'un contact avec qui l'on partage une conversation. */
-  async getKeyBundle(current: JwtPayload, targetUserId: string): Promise<KeyBundle> {
+  async getKeyBundle(
+    current: JwtPayload,
+    targetUserId: string,
+    consume = true,
+  ): Promise<KeyBundle> {
     this.assertEnabled();
     const sharedConversation = await this.db.execute<{ one: number }>(sql`
       select 1 as one
@@ -259,7 +328,12 @@ export class E2eeService {
 
     const oneTimeKey = await this.db.transaction(async (tx) => {
       const [prekey] = await tx
-        .select({ id: e2eeOneTimePrekeys.id, keyId: e2eeOneTimePrekeys.keyId, key: e2eeOneTimePrekeys.publicKey })
+        .select({
+          id: e2eeOneTimePrekeys.id,
+          keyId: e2eeOneTimePrekeys.keyId,
+          key: e2eeOneTimePrekeys.publicKey,
+          signature: e2eeOneTimePrekeys.signature,
+        })
         .from(e2eeOneTimePrekeys)
         .where(
           and(
@@ -271,11 +345,13 @@ export class E2eeService {
         .limit(1)
         .for('update', { skipLocked: true });
       if (!prekey) return null;
-      await tx
-        .update(e2eeOneTimePrekeys)
-        .set({ usedAt: new Date() })
-        .where(eq(e2eeOneTimePrekeys.id, prekey.id));
-      return { keyId: prekey.keyId, key: prekey.key };
+      if (consume) {
+        await tx
+          .update(e2eeOneTimePrekeys)
+          .set({ usedAt: new Date() })
+          .where(eq(e2eeOneTimePrekeys.id, prekey.id));
+      }
+      return { keyId: prekey.keyId, key: prekey.key, signature: prekey.signature ?? undefined };
     });
 
     return {
@@ -285,6 +361,13 @@ export class E2eeService {
       signedPrekey: device.signedPrekey,
       signedPrekeySignature: device.signedPrekeySignature,
       oneTimeKey,
+      fallback: device.fallbackPrekey
+        ? {
+            keyId: device.fallbackPrekeyKeyId ?? 'fallback',
+            key: device.fallbackPrekey,
+            signature: device.fallbackPrekeySignature ?? null,
+          }
+        : null,
     };
   }
 

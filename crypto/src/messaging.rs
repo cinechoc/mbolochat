@@ -2,13 +2,13 @@ use vodozemac::olm::{
     Account, AccountPickle, Message, OlmMessage, PreKeyMessage, Session, SessionConfig,
     SessionPickle,
 };
-use vodozemac::Curve25519PublicKey;
+use vodozemac::{Curve25519PublicKey, Ed25519PublicKey, Ed25519Signature};
 
 use crate::b64;
 use crate::error::CryptoError;
 use crate::models::{
-    AccountCreated, InboundCreated, OlmEnvelope, OneTimeKey, OneTimeKeysGenerated, OutboundCreated,
-    PlaintextDecrypted,
+    AccountCreated, FallbackKeySigned, InboundCreated, OlmEnvelope, OneTimeKey,
+    OneTimeKeysGenerated, OneTimeKeysSigned, OutboundCreated, PlaintextDecrypted, SignedOneTimeKey,
 };
 
 const DEFAULT_MAX_ONE_TIME_KEYS: usize = 50;
@@ -167,4 +167,78 @@ pub fn decrypt(
         session_pickle: session.pickle().encrypt(&key),
         plaintext_b64: b64::encode(&plaintext),
     })
+}
+
+/// Signe une clé publique Curve25519 avec la clé d'identité Ed25519 du compte.
+fn sign_public(account: &Account, public: &Curve25519PublicKey) -> String {
+    account.sign(public.as_bytes()).to_base64()
+}
+
+/// Génère des clés à usage unique signées et renvoie l'état mis à jour.
+pub fn generate_one_time_keys_signed(
+    account_pickle: &str,
+    pickle_key_b64: &str,
+    count: usize,
+) -> Result<OneTimeKeysSigned, CryptoError> {
+    if count == 0 || count > DEFAULT_MAX_ONE_TIME_KEYS {
+        return Err(CryptoError::InvalidInput);
+    }
+    let key = crate::b64::decode_pickle_key(pickle_key_b64)?;
+    let mut account = load_account(account_pickle, &key)?;
+    account.generate_one_time_keys(count);
+    let keys = account
+        .one_time_keys()
+        .iter()
+        .map(|(id, public)| SignedOneTimeKey {
+            key_id: id.to_base64(),
+            key: public.to_base64(),
+            signature: sign_public(&account, public),
+        })
+        .collect();
+    account.mark_keys_as_published();
+    Ok(OneTimeKeysSigned {
+        account_pickle: account.pickle().encrypt(&key),
+        keys,
+    })
+}
+
+/// Génère une clé de secours signée (utilisée si la réserve est épuisée).
+pub fn generate_fallback_key_signed(
+    account_pickle: &str,
+    pickle_key_b64: &str,
+) -> Result<FallbackKeySigned, CryptoError> {
+    let key = crate::b64::decode_pickle_key(pickle_key_b64)?;
+    let mut account = load_account(account_pickle, &key)?;
+    account.generate_fallback_key();
+    let fallback = account
+        .fallback_key()
+        .into_iter()
+        .next()
+        .ok_or(CryptoError::Internal)?;
+    let result = FallbackKeySigned {
+        account_pickle: String::new(),
+        key_id: fallback.0.to_base64(),
+        key: fallback.1.to_base64(),
+        signature: sign_public(&account, &fallback.1),
+    };
+    account.mark_keys_as_published();
+    Ok(FallbackKeySigned {
+        account_pickle: account.pickle().encrypt(&key),
+        ..result
+    })
+}
+
+/// Vérifie la signature d'une clé à usage unique ou de secours.
+pub fn verify_prekey(
+    signing_key_b64: &str,
+    prekey_key_b64: &str,
+    signature_b64: &str,
+) -> Result<bool, CryptoError> {
+    let signing =
+        Ed25519PublicKey::from_base64(signing_key_b64).map_err(|_| CryptoError::InvalidInput)?;
+    let prekey =
+        Curve25519PublicKey::from_base64(prekey_key_b64).map_err(|_| CryptoError::InvalidInput)?;
+    let signature =
+        Ed25519Signature::from_base64(signature_b64).map_err(|_| CryptoError::InvalidInput)?;
+    Ok(signing.verify(prekey.as_bytes(), &signature).is_ok())
 }

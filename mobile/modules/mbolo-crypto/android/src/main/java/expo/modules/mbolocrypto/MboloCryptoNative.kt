@@ -40,4 +40,7 @@ class MboloCryptoNative {
     expectedSha256: String,
   ): String
   external fun nativeSelfTest(workDir: String, fileMb: Int): String
+  external fun nativeGenerateOneTimeKeysSigned(accountPickle: String, pickleKey: String, count: Int): String
+  external fun nativeGenerateFallbackKeySigned(accountPickle: String, pickleKey: String): String
+  external fun nativeVerifyPrekey(signingKey: String, prekey: String, signature: String): String
 }

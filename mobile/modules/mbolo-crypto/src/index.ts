@@ -8,6 +8,14 @@ export type AccountCreated = {
 
 export type OneTimeKey = { key_id: string; key: string };
 export type OneTimeKeysGenerated = { account_pickle: string; keys: OneTimeKey[] };
+export type SignedOneTimeKey = { key_id: string; key: string; signature: string };
+export type OneTimeKeysSigned = { account_pickle: string; keys: SignedOneTimeKey[] };
+export type FallbackKeySigned = {
+  account_pickle: string;
+  key_id: string;
+  key: string;
+  signature: string;
+};
 export type OutboundCreated = {
   session_pickle: string;
   session_id: string;
@@ -73,6 +81,23 @@ declare class MboloCryptoModule extends NativeModule {
   sqlCipherKey(): Promise<string>;
   secureCreateAccount(): Promise<string>;
   secureGenerateOneTimeKeys(accountPickle: string, count: number): Promise<string>;
+  secureGenerateOneTimeKeysSigned(accountPickle: string, count: number): Promise<string>;
+  secureGenerateFallbackKey(accountPickle: string): Promise<string>;
+  verifyPrekey(signingKey: string, prekey: string, signature: string): Promise<string>;
+  secureCreateOutbound(
+    accountPickle: string,
+    identityKey: string,
+    oneTimeKey: string,
+    plaintextB64: string,
+  ): Promise<string>;
+  secureEncrypt(sessionPickle: string, plaintextB64: string): Promise<string>;
+  secureCreateInbound(
+    accountPickle: string,
+    identityKey: string,
+    prekeyMessage: string,
+  ): Promise<string>;
+  secureDecrypt(sessionPickle: string, messageType: string, messageB64: string): Promise<string>;
+  simulateKeyLoss(): Promise<string>;
 }
 
 type NativeResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -134,6 +159,28 @@ export const MboloCrypto = {
   secureCreateAccount: () => invoke<AccountCreated>(native.secureCreateAccount()),
   secureGenerateOneTimeKeys: (accountPickle: string, count: number) =>
     invoke<OneTimeKeysGenerated>(native.secureGenerateOneTimeKeys(accountPickle, count)),
+  secureGenerateOneTimeKeysSigned: (accountPickle: string, count: number) =>
+    invoke<OneTimeKeysSigned>(native.secureGenerateOneTimeKeysSigned(accountPickle, count)),
+  secureGenerateFallbackKey: (accountPickle: string) =>
+    invoke<FallbackKeySigned>(native.secureGenerateFallbackKey(accountPickle)),
+  verifyPrekey: (signingKey: string, prekey: string, signature: string) =>
+    invoke<{ valid: boolean }>(native.verifyPrekey(signingKey, prekey, signature)),
+  secureCreateOutbound: (
+    accountPickle: string,
+    identityKey: string,
+    oneTimeKey: string,
+    plaintextB64: string,
+  ) =>
+    invoke<OutboundCreated>(
+      native.secureCreateOutbound(accountPickle, identityKey, oneTimeKey, plaintextB64),
+    ),
+  secureEncrypt: (sessionPickle: string, plaintextB64: string) =>
+    invoke<OlmEnvelope>(native.secureEncrypt(sessionPickle, plaintextB64)),
+  secureCreateInbound: (accountPickle: string, identityKey: string, prekeyMessage: string) =>
+    invoke<InboundCreated>(native.secureCreateInbound(accountPickle, identityKey, prekeyMessage)),
+  secureDecrypt: (sessionPickle: string, messageType: string, messageB64: string) =>
+    invoke<PlaintextDecrypted>(native.secureDecrypt(sessionPickle, messageType, messageB64)),
+  simulateKeyLoss: () => invoke<{ simulated: boolean }>(native.simulateKeyLoss()),
 };
 
 export default MboloCrypto;

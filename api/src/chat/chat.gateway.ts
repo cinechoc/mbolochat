@@ -141,6 +141,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       encryption?: 'none' | 'v1';
       /** Enveloppe chiffrée base64. */
       payload?: string;
+      payloadType?: 'prekey' | 'normal';
     },
   ) {
     const userId = client.data.userId as string | undefined;
@@ -148,6 +149,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     const conversationId = body?.conversationId;
     const encryption: 'none' | 'v1' = body?.encryption === 'v1' ? 'v1' : 'none';
     const envelopePayload = typeof body?.payload === 'string' ? body.payload : undefined;
+    const payloadType = body?.payloadType === 'prekey' || body?.payloadType === 'normal'
+      ? body.payloadType
+      : undefined;
     const content = encryption === 'v1' ? '' : (body?.content?.trim() ?? '');
     if (body?.type !== undefined && !isMessageType(body.type)) {
       throw new WsException('Type de message invalide');
@@ -246,6 +250,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         encryption,
         envelopePayload,
         deviceId,
+        payloadType,
       )
       .catch((error: unknown) => {
         // L'acquittement porte l'erreur : le client peut l'afficher
@@ -403,7 +408,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   @SubscribeMessage('typing')
   async typing(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { conversationId?: string; typing?: boolean },
+    @MessageBody() body: { conversationId?: string; typing?: boolean; text?: string },
   ) {
     const userId = client.data.userId as string | undefined;
     const conversationId = body?.conversationId;
@@ -411,11 +416,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     if (!(await this.conversationsService.isMember(conversationId, userId))) return;
     const author = await this.users.findById(userId);
     if (author && !author.typingIndicator) return;
-    // Aucun brouillon ne traverse le serveur : uniquement l'état de saisie.
+    // Avec E2EE, aucun brouillon ne traverse le serveur ; drapeau coupé, le
+    // comportement historique (texte de saisie) est conservé.
+    const e2eeEnabled = ['1', 'true'].includes((process.env.E2EE_ENABLED ?? '').toLowerCase());
+    const text = typeof body?.text === 'string' ? body.text.slice(0, 300) : '';
     client.to(roomOf(conversationId)).emit('typing', {
       conversationId,
       userId,
       typing: body?.typing !== false,
+      ...(e2eeEnabled ? {} : { text }),
     });
   }
 

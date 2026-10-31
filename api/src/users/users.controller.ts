@@ -154,6 +154,7 @@ export class UsersController {
       token,
       body?.platform ?? 'android',
       body?.apiBaseUrl,
+      current.deviceId,
     );
     return { registered: true };
   }

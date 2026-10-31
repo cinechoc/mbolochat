@@ -557,15 +557,23 @@ export class UsersService {
     token: string,
     platform: string,
     baseUrl?: string,
+    deviceId?: string,
   ): Promise<void> {
     const normalizedBaseUrl = this.normalizeBaseUrl(baseUrl);
     await this.db
       .insert(pushTokens)
-      .values({ userId, token, platform, baseUrl: normalizedBaseUrl })
+      .values({ userId, token, platform, baseUrl: normalizedBaseUrl, deviceId: deviceId ?? null })
       .onConflictDoUpdate({
         target: [pushTokens.userId, pushTokens.token],
-        set: { platform, baseUrl: normalizedBaseUrl },
+        set: { platform, baseUrl: normalizedBaseUrl, deviceId: deviceId ?? null },
       });
+  }
+
+  /** Déconnexion : supprime le jeton de cet appareil pour ce compte. */
+  async deletePushTokensForDevice(userId: string, deviceId: string): Promise<void> {
+    await this.db
+      .delete(pushTokens)
+      .where(and(eq(pushTokens.userId, userId), eq(pushTokens.deviceId, deviceId)));
   }
 
   /** Retire le jeton de CE compte uniquement. */

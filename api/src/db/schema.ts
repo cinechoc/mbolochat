@@ -246,6 +246,8 @@ export const pushTokens = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     token: text('token').notNull(),
     platform: text('platform').notNull().default('android'),
+    /** Appareil propriétaire du jeton (JWT), pour le nettoyage ciblé. */
+    deviceId: text('device_id'),
     /** Adresse de l'API telle que l'appareil la joint (pour les images). */
     baseUrl: text('base_url'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -331,6 +333,8 @@ export const messages = pgTable(
     encryption: text('encryption').notNull().default('none'),
     /** Enveloppe chiffrée base64 ; le serveur ne la déchiffre jamais. */
     payload: text('payload'),
+    /** `prekey` pour le premier message d'une session, `normal` ensuite. */
+    payloadType: text('payload_type'),
     /** Appareil émetteur (JWT) pour rattacher l'enveloppe à ses clés. */
     senderDeviceId: text('sender_device_id'),
     /** Texte Unicode normal, ou sticker référencé par son catalogue local. */
@@ -499,6 +503,10 @@ export const e2eeDevices = pgTable(
     signingKey: text('signing_key').notNull(),
     signedPrekey: text('signed_prekey'),
     signedPrekeySignature: text('signed_prekey_signature'),
+    /** Clé de secours signée, utilisée quand la réserve est épuisée. */
+    fallbackPrekey: text('fallback_prekey'),
+    fallbackPrekeySignature: text('fallback_prekey_signature'),
+    fallbackPrekeyKeyId: text('fallback_prekey_key_id'),
     deviceName: text('device_name'),
     platform: text('platform'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -525,6 +533,8 @@ export const e2eeOneTimePrekeys = pgTable(
       .references(() => e2eeDevices.id, { onDelete: 'cascade' }),
     keyId: text('key_id').notNull(),
     publicKey: text('public_key').notNull(),
+    /** Signature Ed25519 de la clé publique par l'identité de l'appareil. */
+    signature: text('signature'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     usedAt: timestamp('used_at', { withTimezone: true }),
   },

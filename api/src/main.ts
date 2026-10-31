@@ -50,7 +50,9 @@ async function bootstrap() {
   const logger = new Logger('HTTP');
   app.use((req: Request, res: Response, next: NextFunction) => {
     res.on('finish', () => {
-      logger.log(`${req.method} ${req.originalUrl.split('?')[0]} -> ${res.statusCode}`);
+      const e2eeEnabled = ['1', 'true'].includes((process.env.E2EE_ENABLED ?? '').toLowerCase());
+      const path = e2eeEnabled ? req.originalUrl.split('?')[0] : req.originalUrl;
+      logger.log(`${req.method} ${path} -> ${res.statusCode}`);
     });
     next();
   });

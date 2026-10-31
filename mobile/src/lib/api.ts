@@ -649,7 +649,23 @@ export const api = {
   },
 
   getE2eeStatus(token: string) {
-    return request<{ deviceId: string | null; registered: boolean }>('/e2ee/status', { token });
+    return request<{
+      deviceId: string | null;
+      registered: boolean;
+      prekeysRemaining?: number;
+      fallbackAvailable?: boolean;
+    }>('/e2ee/status', { token });
+  },
+
+  addE2eePrekeys(
+    token: string,
+    oneTimeKeys: { keyId: string; key: string; signature: string }[],
+  ) {
+    return request<{ added: number }>('/e2ee/devices/prekeys', {
+      method: 'POST',
+      token,
+      body: { oneTimeKeys },
+    });
   },
 
   registerE2eeDevice(
@@ -657,7 +673,10 @@ export const api = {
     body: {
       identityKey: string;
       signingKey: string;
-      oneTimeKeys: { keyId: string; key: string }[];
+      fallbackPrekey?: string;
+      fallbackPrekeySignature?: string;
+      fallbackPrekeyKeyId?: string;
+      oneTimeKeys: { keyId: string; key: string; signature: string }[];
     },
   ) {
     return request<{ deviceId: string; replaced: boolean }>('/e2ee/devices', {
@@ -667,15 +686,18 @@ export const api = {
     });
   },
 
-  getE2eeKeyBundle(token: string, userId: string) {
+  getE2eeKeyBundle(token: string, userId: string, consume = true) {
     return request<{
       deviceId: string;
       identityKey: string;
       signingKey: string;
       signedPrekey: string | null;
       signedPrekeySignature: string | null;
-      oneTimeKey: { keyId: string; key: string } | null;
-    }>(`/e2ee/users/${encodeURIComponent(userId)}/keys`, { token });
+      oneTimeKey: { keyId: string; key: string; signature: string | null } | null;
+      fallback: { keyId: string; key: string; signature: string | null } | null;
+    }>(`/e2ee/users/${encodeURIComponent(userId)}/keys?consume=${consume ? 'true' : 'false'}`, {
+      token,
+    });
   },
 
   removePushToken(token: string, pushToken: string) {

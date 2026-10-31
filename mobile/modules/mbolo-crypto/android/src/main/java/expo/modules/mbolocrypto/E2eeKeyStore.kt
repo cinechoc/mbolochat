@@ -1,6 +1,7 @@
 package expo.modules.mbolocrypto
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -16,7 +17,7 @@ import org.json.JSONObject
  * Clé AES non exportable du Keystore Android qui protège les clés de pickle et
  * SQLCipher. Les clés en clair ne quittent jamais Kotlin vers JavaScript.
  */
-class E2eeKeyStore(context: Context) {
+class E2eeKeyStore(private val context: Context) {
   private val prefs = context.getSharedPreferences("mbolo_e2ee_keys_v1", Context.MODE_PRIVATE)
   private val alias = "mbolo_e2ee_master_v1"
 
@@ -142,10 +143,72 @@ class E2eeKeyStore(context: Context) {
     }
 
   fun generateOneTimeKeysJson(native: MboloCryptoNative, accountPickle: String, count: Int): String =
+    withKey { key ->
+      native.nativeGenerateOneTimeKeys(accountPickle, key, count)
+    }
+
+  fun generateOneTimeKeysSignedJson(
+    native: MboloCryptoNative,
+    accountPickle: String,
+    count: Int,
+  ): String = withKey { key ->
+    native.nativeGenerateOneTimeKeysSigned(accountPickle, key, count)
+  }
+
+  fun generateFallbackKeyJson(native: MboloCryptoNative, accountPickle: String): String =
+    withKey { key -> native.nativeGenerateFallbackKeySigned(accountPickle, key) }
+
+  fun createOutboundJson(
+    native: MboloCryptoNative,
+    accountPickle: String,
+    identityKey: String,
+    oneTimeKey: String,
+    plaintextB64: String,
+  ): String = withKey { key ->
+    native.nativeCreateOutbound(accountPickle, key, identityKey, oneTimeKey, plaintextB64)
+  }
+
+  fun encryptJson(native: MboloCryptoNative, sessionPickle: String, plaintextB64: String): String =
+    withKey { key -> native.nativeEncrypt(sessionPickle, key, plaintextB64) }
+
+  fun createInboundJson(
+    native: MboloCryptoNative,
+    accountPickle: String,
+    identityKey: String,
+    prekeyMessage: String,
+  ): String = withKey { key ->
+    native.nativeCreateInbound(accountPickle, key, identityKey, prekeyMessage)
+  }
+
+  fun decryptJson(
+    native: MboloCryptoNative,
+    sessionPickle: String,
+    messageType: String,
+    messageB64: String,
+  ): String = withKey { key ->
+    native.nativeDecrypt(sessionPickle, key, messageType, messageB64)
+  }
+
+  /** Outil de développement : rend le blob illisible sans toucher au Keystore. */
+  fun simulateKeyLossJson(): String {
+    return try {
+      val debuggable = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+      if (!debuggable) {
+        error("forbidden")
+      } else {
+        prefs.edit().putString("material", "AAAA").putBoolean("initialized", true).apply()
+        ok(JSONObject().put("simulated", true))
+      }
+    } catch (_: Throwable) {
+      error("keystore")
+    }
+  }
+
+  private fun withKey(block: (String) -> String): String =
     try {
       val material = ensureMaterial()
       val key = Base64.encodeToString(material.pickleKey, Base64.NO_WRAP)
-      val result = native.nativeGenerateOneTimeKeys(accountPickle, key, count)
+      val result = block(key)
       zero(material)
       result
     } catch (_: Throwable) {

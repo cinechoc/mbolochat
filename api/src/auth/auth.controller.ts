@@ -59,8 +59,8 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(JwtAuthGuard)
-  async logout(@Body() body: { refreshToken?: string }) {
-    await this.authService.logout(body?.refreshToken);
+  async logout(@CurrentUser() current: JwtPayload, @Body() body: { refreshToken?: string }) {
+    await this.authService.logout(body?.refreshToken, current.deviceId);
   }
 
   /**

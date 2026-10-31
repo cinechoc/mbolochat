@@ -24,29 +24,82 @@ export async function bootstrapE2ee(token: string): Promise<BootstrapResult> {
     let account = await loadE2eeAccount(db);
     if (!account) {
       const identity = await MboloCrypto.secureCreateAccount();
-      const keys = await MboloCrypto.secureGenerateOneTimeKeys(identity.account_pickle, 5);
+      const signedKeys = await MboloCrypto.secureGenerateOneTimeKeysSigned(identity.account_pickle, 5);
+      const fallback = await MboloCrypto.secureGenerateFallbackKey(signedKeys.account_pickle);
       account = {
-        account_pickle: keys.account_pickle,
+        account_pickle: fallback.account_pickle,
         device_id: null,
         identity_key: identity.curve25519,
         signing_key: identity.ed25519,
+        fallback_key: fallback.key,
+        fallback_signature: fallback.signature,
+        fallback_key_id: fallback.key_id,
       };
       await saveE2eeAccount(db, account);
     }
 
     const status = await api.getE2eeStatus(token).catch(() => null);
-    if (!status?.registered) {
-      const keys = await MboloCrypto.secureGenerateOneTimeKeys(account.account_pickle, 5);
+    const needsRegistration = !status?.registered || !status?.fallbackAvailable;
+    if (needsRegistration) {
+      let fallback: {
+        key?: string;
+        signature?: string;
+        keyId?: string;
+        account_pickle: string;
+      } = {
+        key: account.fallback_key ?? undefined,
+        signature: account.fallback_signature ?? undefined,
+        keyId: account.fallback_key_id ?? undefined,
+        account_pickle: account.account_pickle,
+      };
+      if (!fallback.key || !fallback.signature || !fallback.keyId) {
+        const generated = await MboloCrypto.secureGenerateFallbackKey(account.account_pickle);
+        fallback = {
+          key: generated.key,
+          signature: generated.signature,
+          keyId: generated.key_id,
+          account_pickle: generated.account_pickle,
+        };
+      }
+      const signedKeys = await MboloCrypto.secureGenerateOneTimeKeysSigned(
+        fallback.account_pickle,
+        5,
+      );
       const registration = await api.registerE2eeDevice(token, {
         identityKey: account.identity_key,
         signingKey: account.signing_key,
-        oneTimeKeys: keys.keys.map((key) => ({ keyId: key.key_id, key: key.key })),
+        fallbackPrekey: fallback.key,
+        fallbackPrekeySignature: fallback.signature,
+        fallbackPrekeyKeyId: fallback.keyId,
+        oneTimeKeys: signedKeys.keys.map((key) => ({
+          keyId: key.key_id,
+          key: key.key,
+          signature: key.signature,
+        })),
       });
       account = {
         ...account,
-        account_pickle: keys.account_pickle,
+        account_pickle: signedKeys.account_pickle,
         device_id: registration.deviceId,
+        fallback_key: fallback.key,
+        fallback_signature: fallback.signature,
+        fallback_key_id: fallback.keyId,
       };
+      await saveE2eeAccount(db, account);
+    } else if ((status?.prekeysRemaining ?? 0) < 5) {
+      const signedKeys = await MboloCrypto.secureGenerateOneTimeKeysSigned(
+        account.account_pickle,
+        5,
+      );
+      await api.addE2eePrekeys(
+        token,
+        signedKeys.keys.map((key) => ({
+          keyId: key.key_id,
+          key: key.key,
+          signature: key.signature,
+        })),
+      );
+      account = { ...account, account_pickle: signedKeys.account_pickle };
       await saveE2eeAccount(db, account);
     }
 

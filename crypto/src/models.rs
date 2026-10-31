@@ -57,3 +57,24 @@ pub struct FileEncrypted {
     pub plaintext_size: u64,
     pub ciphertext_size: u64,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SignedOneTimeKey {
+    pub key_id: String,
+    pub key: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OneTimeKeysSigned {
+    pub account_pickle: String,
+    pub keys: Vec<SignedOneTimeKey>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FallbackKeySigned {
+    pub account_pickle: String,
+    pub key_id: String,
+    pub key: String,
+    pub signature: String,
+}

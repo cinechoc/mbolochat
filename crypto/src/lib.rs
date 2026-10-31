@@ -19,10 +19,11 @@ pub use error::CryptoError;
 pub use filecrypto::{decrypt_file, encrypt_file};
 pub use messaging::{
     create_account, create_inbound_and_decrypt, create_outbound_and_encrypt, decrypt, encrypt,
-    generate_one_time_keys,
+    generate_fallback_key_signed, generate_one_time_keys, generate_one_time_keys_signed,
+    verify_prekey,
 };
 pub use models::{
-    AccountCreated, FileEncrypted, InboundCreated, OlmEnvelope, OneTimeKey, OneTimeKeysGenerated,
-    OutboundCreated, PlaintextDecrypted,
+    AccountCreated, FallbackKeySigned, FileEncrypted, InboundCreated, OlmEnvelope, OneTimeKey,
+    OneTimeKeysGenerated, OneTimeKeysSigned, OutboundCreated, PlaintextDecrypted, SignedOneTimeKey,
 };
 pub use selftest::{self_test, SelfTestReport, SelfTestStep};

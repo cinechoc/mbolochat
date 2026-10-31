@@ -194,6 +194,14 @@ export interface Message {
   conversationId: string;
   type: MessageType;
   content: string;
+  /** `none` ou enveloppe Olm `v1`. */
+  encryption?: 'none' | 'v1';
+  /** Enveloppe chiffrée base64 (null pour un message en clair). */
+  payload?: string | null;
+  /** Type d'enveloppe Olm (premier message ou normal). */
+  payloadType?: 'prekey' | 'normal' | null;
+  /** Appareil émetteur, métadonnée de l'enveloppe. */
+  senderDeviceId?: string | null;
   /** Référence de catalogue d'un sticker (« mbolo/merci »), sinon null. */
   stickerRef: string | null;
   attachment: MessageAttachment | null;
@@ -241,6 +249,8 @@ export interface ConversationSummary {
   whoCanAdd: 'all' | 'admins';
   createdAt: string;
   updatedAt: string;
+  /** Date de bascule E2EE (null pour une conversation en clair). */
+  e2eeSince: string | null;
   members: MemberInfo[];
   lastMessage: Message | null;
   unreadCount: number;

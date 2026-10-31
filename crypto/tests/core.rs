@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use base64::Engine;
 use mbolo_crypto::{
     create_account, create_inbound_and_decrypt, create_outbound_and_encrypt, decrypt, decrypt_file,
-    encrypt, encrypt_file, generate_one_time_keys, self_test, CryptoError,
+    encrypt, encrypt_file, generate_fallback_key_signed, generate_one_time_keys,
+    generate_one_time_keys_signed, self_test, verify_prekey, CryptoError,
 };
 
 const PICKLE_KEY: [u8; 32] = [7u8; 32];
@@ -266,4 +267,40 @@ fn native_self_test_reports_steps_without_secrets() {
     assert!(!serialized.contains("curve25519"));
     assert!(!serialized.contains("pickle"));
     assert!(!serialized.contains("selftest message"));
+}
+
+#[test]
+fn signed_prekeys_and_fallback_verify_and_open_sessions() {
+    let alice = create_account(&key_b64()).unwrap();
+    let signed = generate_one_time_keys_signed(&alice.account_pickle, &key_b64(), 2).unwrap();
+    let first = &signed.keys[0];
+    assert!(verify_prekey(&alice.ed25519, &first.key, &first.signature).unwrap());
+    let tampered = if first.key.starts_with('A') {
+        format!("B{}", &first.key[1..])
+    } else {
+        format!("A{}", &first.key[1..])
+    };
+    assert!(!verify_prekey(&alice.ed25519, &tampered, &first.signature).unwrap());
+
+    let fallback = generate_fallback_key_signed(&signed.account_pickle, &key_b64()).unwrap();
+    assert!(verify_prekey(&alice.ed25519, &fallback.key, &fallback.signature).unwrap());
+
+    let bob = create_account(&key_b64()).unwrap();
+    // Le fallback sert de prekey quand la réserve est épuisée.
+    let outbound = create_outbound_and_encrypt(
+        &bob.account_pickle,
+        &key_b64(),
+        &alice.curve25519,
+        &fallback.key,
+        &b64(b"fallback hello"),
+    )
+    .unwrap();
+    let inbound = create_inbound_and_decrypt(
+        &fallback.account_pickle,
+        &key_b64(),
+        &bob.curve25519,
+        &outbound.message,
+    )
+    .unwrap();
+    assert_eq!(unb64(&inbound.plaintext_b64), b"fallback hello");
 }

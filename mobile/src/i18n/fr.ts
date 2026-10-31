@@ -16,6 +16,19 @@ export const fr = {
     on: 'Oui',
     off: 'Non',
   },
+  e2eeChat: {
+    title: 'Discussion',
+    placeholder: 'Message',
+    send: 'Envoyer',
+    search: 'Rechercher',
+    searchPlaceholder: 'Rechercher dans cette discussion',
+    empty: 'Aucun message',
+    error: 'Discussion indisponible',
+    keyChangedTitle: 'Ce contact a changé d’appareil',
+    keyChangedBody: 'Vérifiez le code de sécurité ou envoyez quand même à vos risques.',
+    verifyCode: 'Vérifier le code',
+    sendAnyway: 'Envoyer quand même',
+  },
   e2ee: {
     keysLostTitle: 'Clés de chiffrement perdues',
     keysLostBody:
@@ -37,6 +50,10 @@ export const fr = {
     bootstrapNeedLogin: 'Connecte-toi pour publier les clés de l’appareil.',
     bootstrapResult: (registered: boolean, recovered: boolean, error: string) =>
       `Appareil ${registered ? 'enregistré' : 'non enregistré'}${recovered ? ' · clés régénérées' : ''}${error ? ` · ${error}` : ''}`,
+    keyLossRun: 'Simuler une perte de clés (dev)',
+    keyLossRunning: 'Simulation…',
+    keyLossResult: (simulated: boolean, recovered: boolean) =>
+      `Perte simulée ${simulated ? 'OUI' : 'NON'} · récupération ${recovered ? 'OK' : 'ÉCHEC'}`,
     running: 'Test en cours…',
     error: 'Échec de l’auto-test',
     total: 'Total',

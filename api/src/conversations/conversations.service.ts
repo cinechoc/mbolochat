@@ -64,6 +64,10 @@ export interface MessageDto {
   encryption: 'none' | 'v1';
   /** Enveloppe chiffrée base64, null pour l'historique en clair. */
   payload: string | null;
+  /** `prekey` ou `normal` pour une enveloppe Olm. */
+  payloadType: 'prekey' | 'normal' | null;
+  /** Appareil émetteur de l'enveloppe (métadonnée). */
+  senderDeviceId: string | null;
   /** Référence de catalogue d'un sticker, null pour les autres messages. */
   stickerRef: string | null;
   /** Pièce jointe (photo…), null pour un message texte. */
@@ -177,6 +181,8 @@ export interface ConversationSummary {
   muted: boolean;
   /** Masquée par l'utilisateur courant (absente de la liste principale). */
   hidden: boolean;
+  /** Date de bascule E2EE (null pour les conversations en clair). */
+  e2eeSince: Date | null;
   /** Rôle de l'utilisateur courant dans cette conversation. */
   myRole: 'admin' | 'member';
   /** J'ai bloqué l'autre membre (discussion directe uniquement). */
@@ -255,6 +261,10 @@ const messageColumns = {
   type: messages.type,
   stickerRef: messages.stickerRef,
   content: messages.content,
+  encryption: messages.encryption,
+  payload: messages.payload,
+  payloadType: messages.payloadType,
+  senderDeviceId: messages.senderDeviceId,
   attachment: messages.attachment,
   clientId: messages.clientId,
   deletedAt: messages.deletedAt,
@@ -280,8 +290,10 @@ interface MessageRow {
   type: string;
   stickerRef: string | null;
   content: string;
-  encryption?: string;
-  payload?: string | null;
+  encryption: string;
+  payload: string | null;
+  payloadType: string | null;
+  senderDeviceId: string | null;
   attachment: MessageAttachment | null;
   clientId: string | null;
   deletedAt: Date | null;
@@ -328,6 +340,8 @@ function toMessageDto(row: MessageRow, reactions: ReactionSummary[] = []): Messa
     content: deleted ? '' : row.content,
     encryption: row.encryption === 'v1' ? 'v1' : 'none',
     payload: deleted ? null : (row.payload ?? null),
+    payloadType: row.payloadType === 'prekey' || row.payloadType === 'normal' ? row.payloadType : null,
+    senderDeviceId: deleted ? null : (row.senderDeviceId ?? null),
     stickerRef: deleted || row.type !== 'sticker' ? null : (row.stickerRef ?? null),
     attachment: deleted ? null : (row.attachment ?? null),
     clientId: row.clientId ?? null,
@@ -602,6 +616,7 @@ export class ConversationsService {
         whoCanAdd: conversation.addPermission === 'admins' ? 'admins' : 'all',
         createdAt: conversation.createdAt,
         updatedAt: conversation.updatedAt,
+        e2eeSince: conversation.e2eeSince ?? null,
         members: memberRows
           .filter((member) => member.conversationId === conversation.id)
           .map(({ id, username, displayName, avatarUrl, gender, lastReadAt, role }) => ({
@@ -1156,6 +1171,8 @@ export class ConversationsService {
       content,
       encryption: 'none',
       payload: null,
+      payloadType: null,
+      senderDeviceId: null,
       stickerRef: null,
       attachment: null,
       clientId: null,
@@ -1670,6 +1687,7 @@ export class ConversationsService {
     encryption: 'none' | 'v1' = 'none',
     payload?: string,
     senderDeviceId?: string,
+    payloadType?: 'prekey' | 'normal',
   ): Promise<MessageDto> {
     if (!isMessageType(messageType)) {
       throw new BadRequestException('Type de message invalide');
@@ -1709,7 +1727,12 @@ export class ConversationsService {
       if (!permissions.e2eeSince) {
         throw new BadRequestException('Conversation pas encore chiffrée');
       }
-      if (!payload || payload.length > 64 * 1024 || content.trim().length > 0) {
+      if (
+        !payload ||
+        payload.length > 64 * 1024 ||
+        content.trim().length > 0 ||
+        (payloadType !== 'prekey' && payloadType !== 'normal')
+      ) {
         throw new BadRequestException('Enveloppe chiffrée invalide');
       }
       if (attachmentId || gifAttachment || sticker) {
@@ -1816,6 +1839,7 @@ export class ConversationsService {
         content: encryption === 'v1' ? '' : content,
         encryption,
         payload: encryption === 'v1' ? (payload ?? null) : null,
+        payloadType: encryption === 'v1' ? (payloadType ?? null) : null,
         senderDeviceId: encryption === 'v1' ? (senderDeviceId ?? null) : null,
         attachment,
         clientId: clientId ?? null,
@@ -1848,6 +1872,11 @@ export class ConversationsService {
       content: stored.content,
       encryption: stored.encryption === 'v1' ? 'v1' : 'none',
       payload: stored.payload,
+      payloadType:
+        stored.payloadType === 'prekey' || stored.payloadType === 'normal'
+          ? stored.payloadType
+          : null,
+      senderDeviceId: stored.senderDeviceId ?? null,
       stickerRef: stored.type === 'sticker' ? (stored.stickerRef ?? null) : null,
       attachment: stored.attachment ?? null,
       clientId: stored.clientId ?? null,
@@ -2018,6 +2047,8 @@ export class ConversationsService {
       content: string;
       encryption: string;
       payload: string | null;
+      payloadType: string | null;
+      senderDeviceId: string | null;
       attachment: MessageAttachment | null;
       clientId: string | null;
       deletedAt: Date | string | null;
@@ -2036,6 +2067,8 @@ export class ConversationsService {
         m.content,
         m.encryption,
         m.payload,
+        m.payload_type as "payloadType",
+        m.sender_device_id as "senderDeviceId",
         m.attachment,
         m.client_id as "clientId",
         m.deleted_at as "deletedAt",
@@ -2065,6 +2098,9 @@ export class ConversationsService {
         content: deleted ? '' : row.content,
         encryption: row.encryption === 'v1' ? 'v1' : 'none',
         payload: deleted ? null : (row.payload ?? null),
+        payloadType:
+          row.payloadType === 'prekey' || row.payloadType === 'normal' ? row.payloadType : null,
+        senderDeviceId: deleted ? null : (row.senderDeviceId ?? null),
         stickerRef: deleted || row.type !== 'sticker' ? null : (row.stickerRef ?? null),
         attachment: deleted ? null : (row.attachment ?? null),
         clientId: row.clientId ?? null,

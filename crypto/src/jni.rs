@@ -8,7 +8,8 @@ use serde::Serialize;
 use crate::error::CryptoError;
 use crate::{
     create_account, create_inbound_and_decrypt, create_outbound_and_encrypt, decrypt, decrypt_file,
-    encrypt, encrypt_file, generate_one_time_keys, self_test,
+    encrypt, encrypt_file, generate_fallback_key_signed, generate_one_time_keys,
+    generate_one_time_keys_signed, self_test, verify_prekey,
 };
 
 fn read_string(env: &mut JNIEnv, value: &JString) -> Result<String, CryptoError> {
@@ -269,5 +270,76 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeSel
     finish(
         &mut env,
         guarded(|| self_test(std::path::Path::new(&directory), file_mb as usize)),
+    )
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeGenerateOneTimeKeysSigned(
+    mut env: JNIEnv,
+    _this: JObject,
+    account_pickle: JString,
+    pickle_key: JString,
+    count: jni::sys::jint,
+) -> jstring {
+    let (account, key) = match (
+        read_string(&mut env, &account_pickle),
+        read_string(&mut env, &pickle_key),
+    ) {
+        (Ok(account), Ok(key)) => (account, key),
+        (Err(error), _) | (_, Err(error)) => return finish::<()>(&mut env, Err(error)),
+    };
+    if count <= 0 {
+        return finish::<()>(&mut env, Err(CryptoError::InvalidInput));
+    }
+    finish(
+        &mut env,
+        guarded(|| generate_one_time_keys_signed(&account, &key, count as usize)),
+    )
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeGenerateFallbackKeySigned(
+    mut env: JNIEnv,
+    _this: JObject,
+    account_pickle: JString,
+    pickle_key: JString,
+) -> jstring {
+    let (account, key) = match (
+        read_string(&mut env, &account_pickle),
+        read_string(&mut env, &pickle_key),
+    ) {
+        (Ok(account), Ok(key)) => (account, key),
+        (Err(error), _) | (_, Err(error)) => return finish::<()>(&mut env, Err(error)),
+    };
+    finish(
+        &mut env,
+        guarded(|| generate_fallback_key_signed(&account, &key)),
+    )
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeVerifyPrekey(
+    mut env: JNIEnv,
+    _this: JObject,
+    signing_key: JString,
+    prekey: JString,
+    signature: JString,
+) -> jstring {
+    let values = (
+        read_string(&mut env, &signing_key),
+        read_string(&mut env, &prekey),
+        read_string(&mut env, &signature),
+    );
+    let (signing, key, sig) = match values {
+        (Ok(s), Ok(k), Ok(v)) => (s, k, v),
+        (Err(error), ..) | (_, Err(error), _) | (_, _, Err(error)) => {
+            return finish::<()>(&mut env, Err(error))
+        }
+    };
+    finish(
+        &mut env,
+        guarded(|| {
+            verify_prekey(&signing, &key, &sig).map(|valid| serde_json::json!({ "valid": valid }))
+        }),
     )
 }

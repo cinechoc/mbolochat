@@ -11,6 +11,7 @@ import {
   conversations,
   e2eeDevices,
   messages,
+  pushTokens,
   refreshTokens,
 } from '../src/db/schema.js';
 import { ConversationsService } from '../src/conversations/conversations.service.js';
@@ -129,6 +130,7 @@ describe('Fondations E2EE (e2e)', () => {
       'v1',
       envelope,
       aliceDevice.deviceId,
+      'prekey',
     );
     expect(created.encryption).toBe('v1');
     expect(created.content).toBe('');
@@ -175,6 +177,7 @@ describe('Fondations E2EE (e2e)', () => {
         'v1',
         envelope,
         bobDevice.deviceId,
+        'prekey',
       ),
     ).rejects.toThrow(/indisponible/i);
     process.env.E2EE_ENABLED = 'true';
@@ -197,6 +200,7 @@ describe('Fondations E2EE (e2e)', () => {
         'v1',
         envelope,
         aliceDevice.deviceId,
+        'prekey',
       ),
     ).rejects.toThrow(/appareil/i);
     expect(otherDevice.replaced).toBe(true);
@@ -265,6 +269,127 @@ describe('Fondations E2EE (e2e)', () => {
     const activeSessions = sessions.filter((session) => session.revokedAt === null);
     expect(activeSessions).toHaveLength(1);
     expect(activeSessions[0].deviceId).not.toBeNull();
+  });
+
+  it('publie les signatures/fallback et nettoie les push tokens', async () => {
+    const alice = await register('AliceSig');
+    const bob = await register('BobSig');
+    const conversationsService = app.get(ConversationsService);
+    const conversation = await conversationsService.create(alice.id, [bob.id]);
+    void conversation;
+    const signature = Buffer.alloc(64, 9).toString('base64');
+    await request(app.getHttpServer())
+      .post('/e2ee/devices')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({
+        identityKey: key(90),
+        signingKey: key(91),
+        fallbackPrekey: key(92),
+        fallbackPrekeySignature: signature,
+        fallbackPrekeyKeyId: 'fallback-1',
+        oneTimeKeys: [{ ...otk(93, 'signed-1'), signature }],
+      })
+      .expect(201);
+    await registerDevice(bob.token, 94, 'bobsig');
+
+    const status = await request(app.getHttpServer())
+      .get('/e2ee/status')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .expect(200);
+    expect(status.body.prekeysRemaining).toBe(1);
+    expect(status.body.fallbackAvailable).toBe(true);
+
+    const first = await request(app.getHttpServer())
+      .get(`/e2ee/users/${alice.id}/keys`)
+      .set('Authorization', `Bearer ${bob.token}`)
+      .expect(200);
+    expect(first.body.oneTimeKey.signature).toBe(signature);
+
+    const second = await request(app.getHttpServer())
+      .get(`/e2ee/users/${alice.id}/keys`)
+      .set('Authorization', `Bearer ${bob.token}`)
+      .expect(200);
+    expect(second.body.oneTimeKey).toBeNull();
+    expect(second.body.fallback.key).toBe(key(92));
+    expect(second.body.fallback.signature).toBe(signature);
+
+    await request(app.getHttpServer())
+      .post('/e2ee/devices/prekeys')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({
+        oneTimeKeys: [{ ...otk(96, 'replenished-1'), signature }],
+      })
+      .expect(201);
+    const replenished = await request(app.getHttpServer())
+      .get(`/e2ee/users/${alice.id}/keys`)
+      .set('Authorization', `Bearer ${bob.token}`)
+      .expect(200);
+    expect(replenished.body.oneTimeKey.keyId).toBe('replenished-1');
+
+    await request(app.getHttpServer())
+      .post('/users/me/push-token')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ token: 'ExponentPushToken[old-device]', platform: 'android' })
+      .expect(201);
+    const newLogin = await login(alice.email);
+    await registerDevice(newLogin.token, 95, 'alicesig2');
+    const remaining = await db
+      .select({ token: pushTokens.token })
+      .from(pushTokens)
+      .where(eq(pushTokens.userId, alice.id));
+    expect(remaining.map((row) => row.token)).not.toContain('ExponentPushToken[old-device]');
+
+    await request(app.getHttpServer())
+      .post('/users/me/push-token')
+      .set('Authorization', `Bearer ${newLogin.token}`)
+      .send({ token: 'ExponentPushToken[new-device]', platform: 'android' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/auth/logout')
+      .set('Authorization', `Bearer ${newLogin.token}`)
+      .send({ refreshToken: newLogin.refreshToken })
+      .expect(204);
+    const afterLogout = await db
+      .select({ token: pushTokens.token })
+      .from(pushTokens)
+      .where(eq(pushTokens.userId, alice.id));
+    expect(afterLogout.map((row) => row.token)).not.toContain('ExponentPushToken[new-device]');
+  });
+
+  it('conserve le comportement historique quand le drapeau est coupé', async () => {
+    process.env.E2EE_ENABLED = 'false';
+    const alice = await register('AliceOff');
+    const second = await login(alice.email);
+    await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({ refreshToken: alice.refreshToken })
+      .expect(200);
+
+    await db
+      .update(refreshTokens)
+      .set({ deviceId: null })
+      .where(eq(refreshTokens.userId, alice.id));
+    await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .send({ refreshToken: second.refreshToken })
+      .expect(200);
+
+    const conversationsService = app.get(ConversationsService);
+    const bob = await register('BobOff');
+    const conversation = await conversationsService.create(alice.id, [bob.id]);
+    const created = await conversationsService.createMessage(
+      conversation.id,
+      alice.id,
+      'message clair historique',
+    );
+    expect(created.content).toBe('message clair historique');
+    expect(created.encryption).toBe('none');
+
+    await request(app.getHttpServer())
+      .get('/e2ee/status')
+      .set('Authorization', `Bearer ${alice.token}`)
+      .expect(404);
+    process.env.E2EE_ENABLED = 'true';
   });
 
   it('refuse les endpoints quand le drapeau est désactivé', async () => {

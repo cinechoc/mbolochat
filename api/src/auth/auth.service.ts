@@ -274,13 +274,21 @@ export class AuthService {
     );
   }
 
-  async logout(rawRefreshToken?: string): Promise<void> {
+  async logout(rawRefreshToken?: string, deviceId?: string): Promise<void> {
     if (!rawRefreshToken) return;
     const tokenHash = this.hashRefreshToken(rawRefreshToken);
+    const [stored] = await this.db
+      .select({ userId: refreshTokens.userId })
+      .from(refreshTokens)
+      .where(eq(refreshTokens.tokenHash, tokenHash))
+      .limit(1);
     await this.db
       .update(refreshTokens)
       .set({ revokedAt: new Date() })
       .where(eq(refreshTokens.tokenHash, tokenHash));
+    if (stored && deviceId) {
+      await this.usersService.deletePushTokensForDevice(stored.userId, deviceId);
+    }
   }
 
   /* ------------------------- sessions et compte ------------------------- */

@@ -204,6 +204,20 @@
       "when": 1793466137744,
       "tag": "0028_e2ee_signed_prekey_nullable",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793478893855,
+      "tag": "0029_e2ee_signatures_and_push",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793479498336,
+      "tag": "0030_e2ee_payload_type",
+      "breakpoints": true
     }
   ]
 }
