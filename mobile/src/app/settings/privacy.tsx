@@ -1,112 +1,188 @@
 import { Redirect, Stack, useRouter } from 'expo-router';
-import { Ban, ChevronRight, Clock, EyeOff, type LucideIcon } from 'lucide-react-native';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { Ban, CircleUserRound, Clock, EyeOff, Lock, MessageSquare, Phone } from 'lucide-react-native';
+import { useState } from 'react';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Icon } from '@/components/icon';
+import { ChoiceSheet, type ChoiceOption } from '@/components/choice-sheet';
+import { SettingRow } from '@/components/setting-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing, Radii } from '@/constants/theme';
+import { Radii, Spacing } from '@/constants/theme';
+import { useUserSettings } from '@/features/settings/useUserSettings';
 import { useTheme } from '@/hooks/use-theme';
+import { fr } from '@/i18n/fr';
+import { ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import type { UserSettings, Visibility } from '@/lib/types';
 
-interface PrivacyRow {
-  key: string;
-  label: string;
-  hint: string;
-  icon: LucideIcon;
-  onPress: () => void;
+type ChoiceState = {
+  title: string;
+  subtitle?: string;
+  value: string;
+  options: ChoiceOption<string>[];
+  onSelect: (value: string) => void;
+};
+
+const VISIBILITY_LABELS: Record<Visibility, string> = {
+  everyone: fr.common.everyone,
+  contacts: fr.common.contacts,
+  nobody: fr.common.nobody,
+};
+
+function visibilityOptions(): ChoiceOption<string>[] {
+  return (['everyone', 'contacts', 'nobody'] as Visibility[]).map((value) => ({
+    value,
+    label: VISIBILITY_LABELS[value],
+  }));
 }
 
-/** Confidentialité : comptes bloqués et conversations masquées. */
+/** Confidentialité : visibilité du profil, contacts et présence. */
 export default function PrivacySettingsScreen() {
   const { token } = useAuth();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { settings, error, update } = useUserSettings();
+  const [choice, setChoice] = useState<ChoiceState | null>(null);
 
   if (!token) {
     return <Redirect href="/login" />;
   }
 
-  const rows: PrivacyRow[] = [
-    {
-      key: 'presence',
-      label: 'Dernière connexion et en ligne',
-      hint: 'Qui peut voir ta dernière connexion et ton statut en ligne',
-      icon: Clock,
-      onPress: () => router.push('/settings/presence'),
-    },
-    {
-      key: 'blocked',
-      label: 'Comptes bloqués',
-      hint: 'Personnes qui ne peuvent plus t’envoyer de messages',
-      icon: Ban,
-      onPress: () => router.push('/settings/blocked'),
-    },
-    {
-      key: 'hidden',
-      label: 'Conversations masquées',
-      hint: 'Discussions retirées de ta liste principale',
-      icon: EyeOff,
-      onPress: () => router.push('/settings/hidden'),
-    },
-  ];
+  const apply = (patch: Parameters<typeof update>[0]) => {
+    void update(patch).catch((cause) => {
+      Alert.alert(
+        fr.settings.saveErrorTitle,
+        cause instanceof ApiError ? cause.message : fr.settings.serverError,
+      );
+    });
+  };
+
+  const privacyChoice = (
+    field: keyof UserSettings['privacy'],
+    title: string,
+    subtitle: string,
+  ) => {
+    setChoice({
+      title,
+      subtitle,
+      value: settings.privacy[field],
+      options: visibilityOptions(),
+      onSelect: (value) => apply({ privacy: { [field]: value as Visibility } }),
+    });
+  };
 
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen options={{ title: 'Confidentialité' }} />
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.four }}>
-        <ThemedView style={styles.group}>
-          {rows.map((row, index) => (
-            <Pressable
-              key={row.key}
-              onPress={row.onPress}
-              style={({ pressed }) => [
-                styles.row,
-                {
-                  borderBottomColor: theme.backgroundElement,
-                  borderBottomWidth: index === rows.length - 1 ? 0 : undefined,
-                },
-                pressed ? { backgroundColor: theme.backgroundSelected } : null,
-              ]}>
-              <Icon icon={row.icon} size={22} color={theme.text} />
-              <ThemedText style={styles.rowLabel}>{row.label}</ThemedText>
-              <ChevronRight size={22} color={theme.textSecondary} />
-            </Pressable>
-          ))}
-        </ThemedView>
-        <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
-          {rows.map((row) => row.hint).join(' · ')}
-        </ThemedText>
+      <Stack.Screen options={{ title: fr.settings.privacyTitle }} />
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Spacing.four }]}>
+        {error ? (
+          <ThemedText type="small" themeColor="textSecondary">
+            {error}
+          </ThemedText>
+        ) : null}
+
+        <View style={[styles.group, { backgroundColor: theme.backgroundElement }]}>
+          <SettingRow
+            icon={Clock}
+            label={fr.settings.presence}
+            onPress={() => router.push('/settings/presence')}
+          />
+          <SettingRow
+            icon={EyeOff}
+            label={fr.settings.hiddenChats}
+            onPress={() => router.push('/settings/hidden')}
+          />
+          <SettingRow
+            icon={Lock}
+            label={fr.settings.profileVisibility}
+            value={VISIBILITY_LABELS[settings.privacy.profile]}
+            onPress={() =>
+              privacyChoice('profile', fr.settings.profileVisibility, fr.privacy.profile)
+            }
+          />
+          <SettingRow
+            icon={MessageSquare}
+            label={fr.settings.whoCanWrite}
+            value={VISIBILITY_LABELS[settings.privacy.write]}
+            onPress={() => privacyChoice('write', fr.settings.whoCanWrite, fr.privacy.write)}
+          />
+          <SettingRow
+            icon={CircleUserRound}
+            label={fr.settings.whoCanAddToGroup}
+            value={VISIBILITY_LABELS[settings.privacy.groupAdd]}
+            onPress={() =>
+              privacyChoice('groupAdd', fr.settings.whoCanAddToGroup, fr.privacy.groupAdd)
+            }
+          />
+          <SettingRow
+            icon={Phone}
+            label={fr.settings.whoCanCall}
+            value={VISIBILITY_LABELS[settings.privacy.call]}
+            onPress={() => privacyChoice('call', fr.settings.whoCanCall, fr.privacy.call)}
+          />
+          <SettingRow
+            icon={CircleUserRound}
+            label={fr.settings.discoverability}
+            value={VISIBILITY_LABELS[settings.privacy.discoverability]}
+            onPress={() =>
+              privacyChoice(
+                'discoverability',
+                fr.settings.discoverability,
+                fr.privacy.discoverability,
+              )
+            }
+          />
+          <SettingRow
+            icon={MessageSquare}
+            label={fr.settings.readReceipts}
+            toggle={{
+              value: settings.readReceipts,
+              onChange: (value) => apply({ readReceipts: value }),
+            }}
+          />
+          <SettingRow
+            icon={MessageSquare}
+            label={fr.settings.typing}
+            toggle={{
+              value: settings.typingIndicator,
+              onChange: (value) => apply({ typingIndicator: value }),
+            }}
+          />
+          <SettingRow
+            icon={Ban}
+            label={fr.settings.blocked}
+            onPress={() => router.push('/settings/blocked')}
+            style={styles.lastRow}
+          />
+        </View>
       </ScrollView>
+
+      {choice ? (
+        <ChoiceSheet
+          visible
+          title={choice.title}
+          subtitle={choice.subtitle}
+          options={choice.options}
+          value={choice.value}
+          onSelect={(value) => {
+            choice.onSelect(value);
+            setChoice(null);
+          }}
+          onClose={() => setChoice(null)}
+        />
+      ) : null}
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  group: {
-    borderRadius: Radii.md,
-    overflow: 'hidden',
-    marginHorizontal: Spacing.three,
-    marginTop: Spacing.two,
+  content: {
+    padding: Spacing.three,
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingVertical: Spacing.three,
-    paddingHorizontal: Spacing.three,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  rowLabel: {
-    flex: 1,
-    fontSize: 16,
-  },
-  hint: {
-    paddingHorizontal: Spacing.three,
-    marginTop: Spacing.two,
-    lineHeight: 19,
-  },
+  group: { borderRadius: Radii.md, overflow: 'hidden' },
+  lastRow: { borderBottomWidth: 0 },
 });

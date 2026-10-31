@@ -47,7 +47,7 @@ export function SettingRow({
         style,
       ]}>
       {icon ? <Icon icon={icon} size={22} color={color} /> : null}
-      <ThemedText style={[styles.label, { color }]} numberOfLines={2}>
+      <ThemedText style={[styles.label, { color }]} numberOfLines={3}>
         {label}
       </ThemedText>
       {value ? (

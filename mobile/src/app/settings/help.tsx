@@ -26,7 +26,7 @@ const FAQ: { question: string; answer: string }[] = [
   {
     question: 'Comment changer mon nom d’utilisateur ?',
     answer:
-      'Il est fixé à la création du compte car il sert d’identifiant de connexion. Ouvre Paramètres › Modifier le profil pour changer ta photo, ton nom affiché et ta bio.',
+      'Il est fixé à la création du compte car il sert d’identifiant de connexion. Ouvre Paramètres › Compte › Mon profil pour changer ta photo, ton nom affiché et ta bio.',
   },
   {
     question: 'Mes messages sont-ils chiffrés ?',

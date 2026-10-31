@@ -2,21 +2,36 @@ import { Redirect, Stack, useFocusEffect } from 'expo-router';
 import {
   BatteryCharging,
   Bell,
+  CircleUserRound,
   ExternalLink,
-  Eye,
   Maximize2,
+  MessageSquare,
+  Moon,
+  Phone,
   Smartphone,
-  Volume2,
 } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import {
+  Alert,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/avatar';
+import { ChoiceSheet, type ChoiceOption } from '@/components/choice-sheet';
+import { SettingRow } from '@/components/setting-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing, Radii } from '@/constants/theme';
+import { Radii, Spacing } from '@/constants/theme';
+import { useUserSettings } from '@/features/settings/useUserSettings';
 import { useTheme } from '@/hooks/use-theme';
+import { fr } from '@/i18n/fr';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { conversationTitle } from '@/lib/format';
@@ -28,41 +43,63 @@ import {
 } from '@/lib/push';
 import type { ConversationSummary } from '@/lib/types';
 
-/** Réglages des notifications : interrupteur global + silence par discussion. */
-export default function NotificationSettingsScreen() {
+type ChoiceState = {
+  title: string;
+  subtitle?: string;
+  value: string;
+  options: ChoiceOption<string>[];
+  onSelect: (value: string) => void;
+};
+
+function formatMinute(minute: number): string {
+  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:00`;
+}
+
+function hourOptions(): ChoiceOption<string>[] {
+  return Array.from({ length: 24 }, (_, hour) => ({
+    value: String(hour * 60),
+    label: `${String(hour).padStart(2, '0')}:00`,
+  }));
+}
+
+/** Notifications : préférences serveur, appareil et sourdine par discussion. */
+export default function NotificationsSettingsScreen() {
   const { token, user, setUser } = useAuth();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-
+  const { settings, error, update } = useUserSettings();
+  const [choice, setChoice] = useState<ChoiceState | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [pushStatus, setPushStatus] = useState<'granted' | 'denied' | 'undetermined'>(
     'undetermined',
   );
-  const [error, setError] = useState<string | null>(null);
+  const [deviceError, setDeviceError] = useState<string | null>(null);
 
-  // Extrait avant le useCallback : le compilateur React n'accepte pas un
-  // membre optionnel dans la liste de dépendances.
-  const notificationsEnabled = user?.notificationsEnabled ?? false;
+  const notificationsEnabled = settings.notifications.enabled;
 
   const load = useCallback(async () => {
     if (!token) {
       return;
     }
     try {
-      const list = await api.listConversations(token);
+      const [list, status] = await Promise.all([
+        api.listConversations(token),
+        getPushPermissionStatus(),
+      ]);
       setConversations(list);
-      const status = await getPushPermissionStatus();
       setPushStatus(status);
-      // Permission déjà accordée (par exemple depuis les réglages Android) :
-      // on enregistre le jeton sans redemander quoi que ce soit.
+      setDeviceError(null);
+      // Permission déjà accordée : on enregistre le jeton sans rien redemander.
       if (status === 'granted' && notificationsEnabled) {
         const pushToken = await requestPushToken();
         if (pushToken) {
           await api.registerPushToken(token, pushToken);
         }
       }
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Impossible de charger les discussions.');
+    } catch (cause) {
+      setDeviceError(
+        cause instanceof ApiError ? cause.message : fr.settings.conversationsLoadError,
+      );
     }
   }, [token, notificationsEnabled]);
 
@@ -76,31 +113,36 @@ export default function NotificationSettingsScreen() {
     return <Redirect href="/login" />;
   }
 
+  const apply = (patch: Parameters<typeof update>[0]) => {
+    const payload = { ...patch };
+    // Les heures calmes sont exprimées dans le fuseau de l'appareil.
+    if (payload.quietHours) {
+      payload.quietHours = {
+        ...payload.quietHours,
+        utcOffsetMinutes: -new Date().getTimezoneOffset(),
+      };
+    }
+    void update(payload).catch((cause) => {
+      Alert.alert(
+        fr.settings.saveErrorTitle,
+        cause instanceof ApiError ? cause.message : fr.settings.serverError,
+      );
+    });
+  };
+
   const toggleGlobal = async (value: boolean) => {
     try {
-      const updated = await api.setNotificationsEnabled(token, value);
-      setUser(updated);
+      await update({ notifications: { enabled: value } });
+      setUser({ ...user, notificationsEnabled: value });
       if (value) {
-        // Activer les notifications push : permission + enregistrement du jeton.
         const pushToken = await requestPushToken();
         if (pushToken) {
           await api.registerPushToken(token, pushToken);
         }
         setPushStatus(await getPushPermissionStatus());
       }
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Changement impossible.');
-    }
-  };
-
-  const updatePreferences = async (patch: {
-    notificationSound?: boolean;
-    notificationPreview?: boolean;
-  }) => {
-    try {
-      setUser(await api.setNotificationPreferences(token, patch));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Changement impossible.');
+    } catch (cause) {
+      setDeviceError(cause instanceof ApiError ? cause.message : fr.settings.changeFailed);
     }
   };
 
@@ -112,135 +154,202 @@ export default function NotificationSettingsScreen() {
       setConversations((previous) =>
         previous.map((item) => (item.id === updated.id ? updated : item)),
       );
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Changement impossible.');
+    } catch (cause) {
+      setDeviceError(cause instanceof ApiError ? cause.message : fr.settings.changeFailed);
     }
   };
 
+  const quietChoice = (field: 'startMinute' | 'endMinute', title: string) => {
+    setChoice({
+      title,
+      subtitle: fr.settings.quietHint,
+      value: String(settings.quietHours[field]),
+      options: hourOptions(),
+      onSelect: (value) => apply({ quietHours: { [field]: Number(value) } }),
+    });
+  };
+
+  const pushStatusLabel =
+    pushStatus === 'granted'
+      ? fr.settings.pushGranted
+      : pushStatus === 'denied'
+        ? fr.settings.pushDenied
+        : fr.settings.pushUndetermined;
+
+  const pushHint =
+    pushStatus === 'granted'
+      ? fr.settings.pushHintGranted
+      : pushStatus === 'denied'
+        ? fr.settings.pushHintDenied
+        : fr.settings.pushHintUndetermined;
+
+  const section = (title: string) => (
+    <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
+      {title}
+    </ThemedText>
+  );
+
   return (
     <ThemedView style={styles.container}>
-      <Stack.Screen options={{ title: 'Notifications' }} />
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.four }}>
-        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
-          DANS L&apos;APPLICATION
-        </ThemedText>
-        <ThemedView style={styles.group}>
-          <View style={[styles.row, { borderBottomColor: theme.backgroundElement }]}>
-            <Bell size={22} color={theme.text} />
-            <ThemedText style={styles.rowLabel}>Notifications</ThemedText>
-            <Switch
-              value={user.notificationsEnabled}
-              onValueChange={(value) => void toggleGlobal(value)}
-              trackColor={{ true: '#3c87f7', false: theme.backgroundElement }}
-            />
-          </View>
-        </ThemedView>
-        <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
-          Quand cette option est désactivée, MboloChat n&apos;affiche plus les pastilles de messages
-          non lus.
-        </ThemedText>
-
-        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
-          NOTIFICATIONS APPAREIL
-        </ThemedText>
-        <ThemedView style={styles.group}>
-          <View style={[styles.row, { borderBottomColor: theme.backgroundElement }]}>
-            <Smartphone size={22} color={theme.text} />
-            <ThemedText style={styles.rowLabel}>Notifications push</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              {pushStatus === 'granted'
-                ? 'Activées'
-                : pushStatus === 'denied'
-                  ? 'Refusées'
-                  : 'Non activées'}
-            </ThemedText>
-          </View>
-        </ThemedView>
-        <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
-          {pushStatus === 'granted'
-            ? 'MboloChat peut te prévenir même quand l’application est fermée.'
-            : pushStatus === 'denied'
-              ? 'Android bloque les notifications de MboloChat. Autorise-les dans les réglages du téléphone.'
-              : 'Active l’option « Notifications » ci-dessus pour autoriser MboloChat à t’avertir même quand l’application est fermée.'}
-        </ThemedText>
-        {pushStatus === 'denied' ? (
-          <Pressable
-            onPress={() => void Linking.openSettings()}
-            style={({ pressed }) => [
-              styles.linkButton,
-              pressed ? { backgroundColor: theme.backgroundSelected } : null,
-            ]}>
-            <ThemedText type="smallBold" style={styles.linkLabel}>
-              Ouvrir les réglages Android
-            </ThemedText>
-            <ExternalLink size={16} color="#3c87f7" />
-          </Pressable>
+      <Stack.Screen options={{ title: fr.settings.notificationsTitle }} />
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + Spacing.four }]}>
+        {error ? (
+          <ThemedText type="small" themeColor="textSecondary">
+            {error}
+          </ThemedText>
         ) : null}
 
-        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
-          PRÉFÉRENCES
+        <View style={[styles.group, { backgroundColor: theme.backgroundElement }]}>
+          <SettingRow
+            icon={Bell}
+            label={fr.settings.notificationsGlobal}
+            toggle={{
+              value: settings.notifications.enabled,
+              onChange: (value) => void toggleGlobal(value),
+            }}
+            style={styles.lastRow}
+          />
+        </View>
+        <ThemedText type="small" themeColor="textSecondary">
+          {fr.settings.notificationsGlobalHint}
         </ThemedText>
-        <ThemedView style={styles.group}>
-          <View style={[styles.row, { borderBottomColor: theme.backgroundElement }]}>
-            <Volume2 size={22} color={theme.text} />
-            <ThemedText style={styles.rowLabel}>Sons</ThemedText>
-            <Switch
-              value={user.notificationSound ?? true}
-              onValueChange={(value) => void updatePreferences({ notificationSound: value })}
-              trackColor={{ true: '#3c87f7', false: theme.backgroundElement }}
+
+        <View style={[styles.group, { backgroundColor: theme.backgroundElement }]}>
+          <SettingRow
+            icon={MessageSquare}
+            label={fr.settings.messages}
+            toggle={{
+              value: settings.notifications.messages,
+              onChange: (value) => apply({ notifications: { messages: value } }),
+            }}
+          />
+          <SettingRow
+            icon={CircleUserRound}
+            label={fr.settings.groups}
+            toggle={{
+              value: settings.notifications.groups,
+              onChange: (value) => apply({ notifications: { groups: value } }),
+            }}
+          />
+          <SettingRow
+            icon={Bell}
+            label={fr.settings.mentions}
+            toggle={{
+              value: settings.notifications.mentions,
+              onChange: (value) => apply({ notifications: { mentions: value } }),
+            }}
+          />
+          <SettingRow
+            icon={Phone}
+            label={fr.settings.callsCategory}
+            toggle={{
+              value: settings.notifications.calls,
+              onChange: (value) => apply({ notifications: { calls: value } }),
+            }}
+          />
+          <SettingRow
+            icon={MessageSquare}
+            label={fr.settings.reactions}
+            toggle={{
+              value: settings.notifications.reactions,
+              onChange: (value) => apply({ notifications: { reactions: value } }),
+            }}
+          />
+          <SettingRow
+            icon={Bell}
+            label={fr.settings.preview}
+            toggle={{
+              value: settings.notifications.preview,
+              onChange: (value) => apply({ notifications: { preview: value } }),
+            }}
+          />
+          <SettingRow
+            icon={Bell}
+            label={fr.settings.sound}
+            toggle={{
+              value: settings.notifications.sound,
+              onChange: (value) => apply({ notifications: { sound: value } }),
+            }}
+          />
+          <SettingRow
+            icon={Moon}
+            label={fr.settings.quietHours}
+            value={fr.settings.quietHoursValue(
+              formatMinute(settings.quietHours.startMinute),
+              formatMinute(settings.quietHours.endMinute),
+            )}
+            toggle={{
+              value: settings.quietHours.enabled,
+              onChange: (value) => apply({ quietHours: { enabled: value } }),
+            }}
+            style={styles.lastRow}
+          />
+        </View>
+        <View style={[styles.group, { backgroundColor: theme.backgroundElement }]}>
+          <SettingRow
+            label={fr.settings.quietStart}
+            value={formatMinute(settings.quietHours.startMinute)}
+            onPress={() => quietChoice('startMinute', fr.settings.quietStart)}
+          />
+          <SettingRow
+            label={fr.settings.quietEnd}
+            value={formatMinute(settings.quietHours.endMinute)}
+            onPress={() => quietChoice('endMinute', fr.settings.quietEnd)}
+            style={styles.lastRow}
+          />
+        </View>
+
+        {section(fr.settings.notificationsDevice)}
+        <View style={[styles.group, { backgroundColor: theme.backgroundElement }]}>
+          <SettingRow
+            icon={Smartphone}
+            label={fr.settings.pushStatus}
+            value={pushStatusLabel}
+            style={pushStatus === 'denied' ? undefined : styles.lastRow}
+          />
+          {pushStatus === 'denied' ? (
+            <SettingRow
+              icon={ExternalLink}
+              label={fr.settings.openAndroidSettings}
+              onPress={() => void Linking.openSettings()}
+              style={styles.lastRow}
             />
-          </View>
-          <View style={[styles.row, { borderBottomWidth: 0 }]}>
-            <Eye size={22} color={theme.text} />
-            <ThemedText style={styles.rowLabel}>Aperçus</ThemedText>
-            <Switch
-              value={user.notificationPreview ?? true}
-              onValueChange={(value) => void updatePreferences({ notificationPreview: value })}
-              trackColor={{ true: '#3c87f7', false: theme.backgroundElement }}
-            />
-          </View>
-        </ThemedView>
-        <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
-          Aperçus désactivés : les notifications affichent « Nouveau message » au lieu du texte.
+          ) : null}
+        </View>
+        <ThemedText type="small" themeColor="textSecondary">
+          {pushHint}
         </ThemedText>
 
         {Platform.OS === 'android' ? (
           <>
-            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
-              ARRIÈRE-PLAN
-            </ThemedText>
-            <ThemedView style={styles.group}>
-              <Pressable
+            {section(fr.settings.notificationsBackground)}
+            <View style={[styles.group, { backgroundColor: theme.backgroundElement }]}>
+              <SettingRow
+                icon={BatteryCharging}
+                label={fr.settings.batteryOptimization}
                 onPress={openBatteryOptimizationSettings}
-                style={[styles.row, { borderBottomColor: theme.backgroundElement }]}>
-                <BatteryCharging size={22} color={theme.text} />
-                <ThemedText style={styles.rowLabel}>Optimisation de batterie</ThemedText>
-                <ExternalLink size={16} color={theme.textSecondary} />
-              </Pressable>
-              <Pressable
+              />
+              <SettingRow
+                icon={Maximize2}
+                label={fr.settings.fullScreenCalls}
                 onPress={openFullScreenIntentSettings}
-                style={[styles.row, { borderBottomWidth: 0 }]}>
-                <Maximize2 size={22} color={theme.text} />
-                <ThemedText style={styles.rowLabel}>Appels plein écran</ThemedText>
-                <ExternalLink size={16} color={theme.textSecondary} />
-              </Pressable>
-            </ThemedView>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
-              Autorise MboloChat à rester actif en arrière-plan pour recevoir les appels et les
-              messages sans délai, et à afficher les appels sur l’écran verrouillé.
+                style={styles.lastRow}
+              />
+            </View>
+            <ThemedText type="small" themeColor="textSecondary">
+              {fr.settings.backgroundHint}
             </ThemedText>
           </>
         ) : null}
 
-        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionTitle}>
-          PAR DISCUSSION
-        </ThemedText>
+        {section(fr.settings.notificationsPerChat)}
         {conversations.length === 0 ? (
-          <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
-            Aucune discussion pour le moment.
+          <ThemedText type="small" themeColor="textSecondary">
+            {fr.settings.perChatEmpty}
           </ThemedText>
         ) : (
-          <ThemedView style={styles.group}>
+          <View style={[styles.group, { backgroundColor: theme.backgroundElement }]}>
             {conversations.map((conversation, index) => {
               const title = conversationTitle(conversation, user.id);
               const isGroup = conversation.type === 'GROUP';
@@ -252,11 +361,9 @@ export default function NotificationSettingsScreen() {
                   key={conversation.id}
                   onPress={() => void toggleMute(conversation, !conversation.muted)}
                   style={({ pressed }) => [
-                    styles.row,
-                    {
-                      borderBottomColor: theme.backgroundElement,
-                      borderBottomWidth: index === conversations.length - 1 ? 0 : undefined,
-                    },
+                    styles.chatRow,
+                    { borderBottomColor: theme.backgroundSelected },
+                    index === conversations.length - 1 ? styles.lastRow : null,
                     pressed ? { backgroundColor: theme.backgroundSelected } : null,
                   ]}>
                   <Avatar
@@ -268,76 +375,64 @@ export default function NotificationSettingsScreen() {
                     emoji={isGroup ? conversation.emoji : null}
                     color={isGroup ? conversation.color : null}
                   />
-                  <ThemedText style={styles.rowLabel} numberOfLines={1}>
+                  <ThemedText style={styles.chatLabel} numberOfLines={1}>
                     {title}
                   </ThemedText>
                   <Switch
                     value={!conversation.muted}
                     onValueChange={(value) => void toggleMute(conversation, value)}
                     trackColor={{ true: '#3c87f7', false: theme.backgroundElement }}
+                    thumbColor="#ffffff"
                   />
                 </Pressable>
               );
             })}
-          </ThemedView>
+          </View>
         )}
 
-        {error ? (
+        {deviceError ? (
           <ThemedText type="small" style={styles.error}>
-            {error}
+            {deviceError}
           </ThemedText>
         ) : null}
       </ScrollView>
+
+      {choice ? (
+        <ChoiceSheet
+          visible
+          title={choice.title}
+          subtitle={choice.subtitle}
+          options={choice.options}
+          value={choice.value}
+          onSelect={(value) => {
+            choice.onSelect(value);
+            setChoice(null);
+          }}
+          onClose={() => setChoice(null)}
+        />
+      ) : null}
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  sectionTitle: {
-    letterSpacing: 0.8,
-    marginTop: Spacing.three,
-    marginBottom: Spacing.one,
-    paddingHorizontal: Spacing.three,
+  content: {
+    padding: Spacing.three,
+    gap: Spacing.two,
   },
-  group: {
-    borderRadius: Radii.md,
-    overflow: 'hidden',
-    marginHorizontal: Spacing.three,
-  },
-  row: {
+  sectionTitle: { letterSpacing: 0.8, marginTop: Spacing.two },
+  group: { borderRadius: Radii.md, overflow: 'hidden' },
+  lastRow: { borderBottomWidth: 0 },
+  chatRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
-    paddingVertical: Spacing.two + Spacing.half,
+    minHeight: 56,
+    paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.three,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  rowLabel: {
-    flex: 1,
-    fontSize: 16,
-  },
-  hint: {
-    paddingHorizontal: Spacing.three,
-    marginTop: Spacing.one,
-  },
-  linkButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    alignSelf: 'flex-start',
-    marginTop: Spacing.two,
-    marginLeft: Spacing.three,
-    paddingVertical: Spacing.one,
-    paddingHorizontal: Spacing.two,
-    borderRadius: Radii.sm,
-  },
-  linkLabel: {
-    color: '#3c87f7',
-  },
-  error: {
-    color: '#e5484d',
-    paddingHorizontal: Spacing.three,
-    marginTop: Spacing.three,
-  },
+  chatLabel: { flex: 1, fontSize: 16 },
+  error: { color: '#e5484d' },
 });
