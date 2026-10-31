@@ -93,6 +93,7 @@ import { stopVoicePlayback } from '@/features/voice-notes/voicePlayback';
 import type { VoiceNote } from '@/features/voice-notes/useVoiceRecorder';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
+import { useTextScale } from '@/lib/text-scale';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { cache } from '@/lib/cache';
@@ -579,6 +580,7 @@ export default function ChatScreen() {
   const { token, user } = useAuth();
   const stickerLibrary = useStickerLibrary();
   const theme = useTheme();
+  const textScale = useTextScale();
   const chat = useChatColors();
   const { width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -2388,7 +2390,16 @@ export default function ChatScreen() {
           {message.content ? (
             <MessageText
               text={message.content}
-              style={[styles.messageText, chatStyles.messageText]}
+              style={[
+                styles.messageText,
+                chatStyles.messageText,
+                textScale.factor !== 1
+                  ? {
+                      fontSize: 16 * textScale.factor,
+                      lineHeight: 21 * textScale.factor,
+                    }
+                  : null,
+              ]}
             />
           ) : null}
           {mine && tick ? (
@@ -2418,6 +2429,7 @@ export default function ChatScreen() {
     [
       user,
       theme,
+      textScale.factor,
       isGroup,
       tickById,
       receipts,
