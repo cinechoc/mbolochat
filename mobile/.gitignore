@@ -42,5 +42,5 @@ example
 /ios
 /android
 
-# Bibliothèque native générée par crypto/scripts/build-android.sh
-/modules/mbolo-crypto/android/src/main/jniLibs/
+# Les .so sont générés par crypto/scripts/build-android.sh ; les versions
+# ARM64/x86_64 sont commitées pour permettre un build local sans Rust.
