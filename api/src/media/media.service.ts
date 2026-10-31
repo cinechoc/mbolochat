@@ -32,7 +32,7 @@ export class MediaService {
   private readonly secret: string;
 
   constructor(config: ConfigService) {
-    const secret = config.get<string>('MEDIA_SECRET') ?? config.get<string>('JWT_SECRET');
+    const secret = config.get<string>('MEDIA_SECRET') || config.get<string>('JWT_SECRET');
     if (!secret) {
       throw new Error('MEDIA_SECRET (ou JWT_SECRET) est requis pour signer les URLs de médias');
     }
