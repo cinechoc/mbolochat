@@ -99,7 +99,9 @@ describe('evaluateCityUpdate', () => {
       evaluateCityUpdate(
         input({
           oldCoords: null,
-          oldUpdatedAt: new Date(Date.now() - CITY_REFRESH_MS - 1000),
+          oldUpdatedAt: new Date(
+            new Date('2026-10-31T12:00:00Z').getTime() - CITY_REFRESH_MS - 1000,
+          ),
         }),
       ),
     ).toEqual({ accept: true, reason: 'daily' });

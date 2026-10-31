@@ -223,8 +223,10 @@ export class AuthService {
     username: string,
     user: PublicUser,
     device?: DeviceInfo,
+    existingDeviceId?: string,
   ): Promise<AuthResult> {
-    const payload: JwtPayload = { sub: userId, username, type: 'access' };
+    const deviceId = existingDeviceId ?? randomBytes(16).toString('hex');
+    const payload: JwtPayload = { sub: userId, username, deviceId, type: 'access' };
     const accessToken = await this.jwtService.signAsync(payload);
     const rawRefresh = randomBytes(32).toString('hex');
     const tokenHash = this.hashRefreshToken(rawRefresh);
@@ -233,6 +235,7 @@ export class AuthService {
       tokenHash,
       deviceName: device?.name?.slice(0, 80) || null,
       platform: device?.platform?.slice(0, 40) || null,
+      deviceId,
       lastUsedAt: new Date(),
       expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
     });
@@ -262,10 +265,13 @@ export class AuthService {
 
     const user = await this.usersService.getByIdOrThrow(stored.userId);
     const publicUser = toPublicUser(user);
-    return this.buildAuthResult(user.id, user.username, publicUser, {
-      name: stored.deviceName,
-      platform: stored.platform,
-    });
+    return this.buildAuthResult(
+      user.id,
+      user.username,
+      publicUser,
+      { name: stored.deviceName, platform: stored.platform },
+      stored.deviceId ?? undefined,
+    );
   }
 
   async logout(rawRefreshToken?: string): Promise<void> {

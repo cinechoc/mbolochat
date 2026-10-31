@@ -17,6 +17,7 @@ export async function authenticateSocket(client: Socket, jwtService: JwtService)
       throw new Error('invalid token type');
     }
     client.data.userId = payload.sub;
+    client.data.deviceId = payload.deviceId;
     await client.join(userRoomOf(payload.sub));
   } catch {
     client.disconnect(true);

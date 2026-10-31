@@ -16,12 +16,27 @@ export const fr = {
     on: 'Oui',
     off: 'Non',
   },
+  e2ee: {
+    keysLostTitle: 'Clés de chiffrement perdues',
+    keysLostBody:
+      'Les clés de cet appareil étaient illisibles. De nouvelles clés ont été générées ; l’historique chiffré de cet appareil ne peut pas être récupéré.',
+  },
   e2eeDev: {
     title: 'Auto-test E2EE',
     intro:
       'Écran de développement, exclu des builds de production. Données de test uniquement, aucune clé ni contenu réel n’est affiché ou journalisé.',
     fileInfo: (mb: number) => `Fichier de test : ${mb} Mo, chiffré en flux.`,
     run: 'Lancer l’auto-test',
+    storageRun: 'Tester Keystore + SQLCipher',
+    storageRunning: 'Vérification du stockage…',
+    storageResult: (recovered: boolean, version: string, encryptedHeader: boolean) =>
+      `SQLCipher ${version} · ${encryptedHeader ? 'en-tête chiffré' : 'EN-TÊTE EN CLAIR'} · clés ${recovered ? 'régénérées' : 'chargées'}`,
+    storageError: 'Stockage sécurisé indisponible',
+    bootstrapRun: 'Préparer l’appareil E2EE',
+    bootstrapRunning: 'Publication des clés…',
+    bootstrapNeedLogin: 'Connecte-toi pour publier les clés de l’appareil.',
+    bootstrapResult: (registered: boolean, recovered: boolean, error: string) =>
+      `Appareil ${registered ? 'enregistré' : 'non enregistré'}${recovered ? ' · clés régénérées' : ''}${error ? ` · ${error}` : ''}`,
     running: 'Test en cours…',
     error: 'Échec de l’auto-test',
     total: 'Total',

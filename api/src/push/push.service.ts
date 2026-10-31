@@ -7,6 +7,7 @@ import {
   conversations,
   pushTokens,
   users,
+  type MessageAttachment,
 } from '../db/schema.js';
 import type { MessageDto } from '../conversations/conversations.service.js';
 import { MediaService } from '../media/media.service.js';
@@ -114,9 +115,53 @@ function previewOf(content: string): string {
   return single.length > 160 ? `${single.slice(0, 157)}…` : single;
 }
 
+type PushMessage = {
+  encryption?: 'none' | 'v1';
+  type: string;
+  content: string;
+  attachment: MessageAttachment | null;
+  sender: { displayName: string };
+};
+
+type PushConversation = {
+  type: 'DIRECT' | 'GROUP';
+  name: string | null;
+  emoji: string | null;
+};
+
+/**
+ * Résumé de notification. Un message chiffré ne révèle ni expéditeur ni
+ * contenu : titre et texte restent génériques.
+ */
+export function notificationSummary(
+  message: PushMessage,
+  conversation: PushConversation,
+  preview: boolean,
+): { encrypted: boolean; title: string; text: string; body: string } {
+  const encrypted = message.encryption === 'v1';
+  if (encrypted) {
+    return {
+      encrypted: true,
+      title: 'MboloChat',
+      text: 'Nouveau message',
+      body: 'Nouveau message',
+    };
+  }
+  const groupLabel = conversation.name?.trim() || 'Groupe';
+  const title = conversation.type === 'GROUP'
+    ? conversation.emoji
+      ? `${conversation.emoji} ${groupLabel}`
+      : groupLabel
+    : message.sender.displayName;
+  const text = notificationText(message, preview);
+  const body =
+    conversation.type === 'GROUP' ? `${message.sender.displayName} : ${text}` : text;
+  return { encrypted: false, title, text, body };
+}
+
 /** Texte affiché dans la notification, selon le type et la pièce jointe. */
 export function notificationText(
-  message: Pick<MessageDto, 'type' | 'content' | 'attachment'>,
+  message: Pick<PushMessage, 'type' | 'content' | 'attachment'>,
   preview = true,
 ): string {
   if (!preview) {
@@ -287,12 +332,9 @@ export class PushService {
       const unreadByUser = new Map(unreadRows.rows.map((row) => [row.userId, Number(row.cnt)]));
       const prefsByUser = new Map(members.map((member) => [member.userId, member]));
 
-      const groupLabel = conversation.name?.trim() || 'Groupe';
-      const title = isGroup
-        ? conversation.emoji
-          ? `${conversation.emoji} ${groupLabel}`
-          : groupLabel
-        : message.sender.displayName;
+      const summary = notificationSummary(message, conversation, true);
+      const encrypted = summary.encrypted;
+      const title = summary.title;
 
       // L'avatar part en URL absolue dans la notification : il doit être signé
       // ici aussi, la notification ne passe pas par la réponse HTTP.
@@ -300,13 +342,15 @@ export class PushService {
       const groupAvatarPath = isGroup
         ? this.media.signOrNull(conversation.avatarUrl)
         : null;
-      const groupName = isGroup ? title : '';
+      const groupName = isGroup && !encrypted ? title : '';
 
       const payload: ExpoPushMessage[] = tokens.map(({ userId, token, baseUrl }) => {
         const prefs = prefsByUser.get(userId);
-        // Aperçus coupés : le texte du message ne quitte jamais le serveur.
-        const text = notificationText(message, prefs?.notificationPreview ?? true);
-        const body = conversation.type === 'GROUP' ? `${message.sender.displayName} : ${text}` : text;
+        const { text, body } = notificationSummary(
+          message,
+          conversation,
+          prefs?.notificationPreview ?? true,
+        );
         const avatar = avatarPath ? absoluteMediaUrl(avatarPath, baseUrl) : null;
         const groupAvatar = groupAvatarPath ? absoluteMediaUrl(groupAvatarPath, baseUrl) : null;
         return {
@@ -318,11 +362,11 @@ export class PushService {
             message: body,
             conversationId: message.conversationId,
             messageId: message.id,
-            senderName: message.sender.displayName,
-            avatarUrl: avatar ?? '',
-            groupName,
-            groupAvatarUrl: groupAvatar ?? '',
-            groupEmoji: isGroup ? (conversation.emoji ?? '') : '',
+            senderName: encrypted ? '' : message.sender.displayName,
+            avatarUrl: encrypted ? '' : (avatar ?? ''),
+            groupName: encrypted ? '' : groupName,
+            groupAvatarUrl: encrypted ? '' : (groupAvatar ?? ''),
+            groupEmoji: encrypted ? '' : isGroup ? (conversation.emoji ?? '') : '',
             unreadCount: String(Math.max(1, unreadByUser.get(userId) ?? 1)),
             silent: prefs?.notificationSound === false ? '1' : '0',
           },

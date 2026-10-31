@@ -137,11 +137,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       sticker?: unknown;
       clientId?: string;
       replyToId?: string;
+      /** `v1` : enveloppe chiffrée opaque (conversation E2EE). */
+      encryption?: 'none' | 'v1';
+      /** Enveloppe chiffrée base64. */
+      payload?: string;
     },
   ) {
     const userId = client.data.userId as string | undefined;
+    const deviceId = client.data.deviceId as string | undefined;
     const conversationId = body?.conversationId;
-    const content = body?.content?.trim() ?? '';
+    const encryption: 'none' | 'v1' = body?.encryption === 'v1' ? 'v1' : 'none';
+    const envelopePayload = typeof body?.payload === 'string' ? body.payload : undefined;
+    const content = encryption === 'v1' ? '' : (body?.content?.trim() ?? '');
     if (body?.type !== undefined && !isMessageType(body.type)) {
       throw new WsException('Type de message invalide');
     }
@@ -208,9 +215,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     }
     if (
       !conversationId ||
-      (!content && !attachmentId && !gifAttachment && messageType !== 'sticker')
+      (encryption === 'none' &&
+        !content &&
+        !attachmentId &&
+        !gifAttachment &&
+        messageType !== 'sticker') ||
+      (encryption === 'v1' && !envelopePayload)
     ) {
-      throw new WsException('conversationId and content or attachmentId are required');
+      throw new WsException('conversationId and content, attachmentId or payload are required');
+    }
+    if (envelopePayload && envelopePayload.length > 64 * 1024) {
+      throw new WsException('Enveloppe chiffrée trop volumineuse');
     }
     if (content.length > 4000) {
       throw new WsException('Message is too long (max 4000 characters)');
@@ -228,6 +243,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         stickerAttachment,
         messageType,
         stickerRef,
+        encryption,
+        envelopePayload,
+        deviceId,
       )
       .catch((error: unknown) => {
         // L'acquittement porte l'erreur : le client peut l'afficher
@@ -385,7 +403,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   @SubscribeMessage('typing')
   async typing(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { conversationId?: string; text?: string },
+    @MessageBody() body: { conversationId?: string; typing?: boolean },
   ) {
     const userId = client.data.userId as string | undefined;
     const conversationId = body?.conversationId;
@@ -393,8 +411,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     if (!(await this.conversationsService.isMember(conversationId, userId))) return;
     const author = await this.users.findById(userId);
     if (author && !author.typingIndicator) return;
-    const text = typeof body?.text === 'string' ? body.text.slice(0, 300) : '';
-    client.to(roomOf(conversationId)).emit('typing', { conversationId, userId, text });
+    // Aucun brouillon ne traverse le serveur : uniquement l'état de saisie.
+    client.to(roomOf(conversationId)).emit('typing', {
+      conversationId,
+      userId,
+      typing: body?.typing !== false,
+    });
   }
 
   @SubscribeMessage('message:read')

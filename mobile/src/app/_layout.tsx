@@ -14,6 +14,7 @@ import { loadAppPreferences } from '@/lib/app-preferences';
 import { TextScaleProvider } from '@/lib/text-scale';
 import { ThemePreferenceProvider, useThemePreference } from '@/lib/theme-preference';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
+import { E2eeBootstrapGate } from '@/features/e2ee/BootstrapGate';
 import { drain } from '@/lib/outbox';
 import { configureNotificationHandler, subscribeToNotificationOpens } from '@/lib/push';
 import { runSync, startReliability } from '@/lib/sync';
@@ -48,6 +49,7 @@ function RootLayoutBody() {
           <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
             <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
             <CallProvider>
+              <E2eeBootstrapGate />
               <RootNavigator />
               <CallScreen />
               <CallBanner />

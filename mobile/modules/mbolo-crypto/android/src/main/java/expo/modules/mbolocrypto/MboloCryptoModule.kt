@@ -9,6 +9,9 @@ import expo.modules.kotlin.modules.ModuleDefinition
  */
 class MboloCryptoModule : Module() {
   private val native = MboloCryptoNative()
+  private val keyStore by lazy {
+    E2eeKeyStore(requireNotNull(appContext.reactContext) { "Contexte Android indisponible" })
+  }
 
   override fun definition() = ModuleDefinition {
     Name("MboloCrypto")
@@ -73,6 +76,22 @@ class MboloCryptoModule : Module() {
 
     AsyncFunction("selfTest") { workDir: String, fileMb: Int ->
       native.nativeSelfTest(workDir, fileMb)
+    }
+
+    AsyncFunction("ensureKeys") {
+      keyStore.ensureKeysJson()
+    }
+
+    AsyncFunction("sqlCipherKey") {
+      keyStore.sqlCipherKeyJson()
+    }
+
+    AsyncFunction("secureCreateAccount") {
+      keyStore.createAccountJson(native)
+    }
+
+    AsyncFunction("secureGenerateOneTimeKeys") { accountPickle: String, count: Int ->
+      keyStore.generateOneTimeKeysJson(native, accountPickle, count)
     }
   }
 }

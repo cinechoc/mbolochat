@@ -648,6 +648,36 @@ export const api = {
     });
   },
 
+  getE2eeStatus(token: string) {
+    return request<{ deviceId: string | null; registered: boolean }>('/e2ee/status', { token });
+  },
+
+  registerE2eeDevice(
+    token: string,
+    body: {
+      identityKey: string;
+      signingKey: string;
+      oneTimeKeys: { keyId: string; key: string }[];
+    },
+  ) {
+    return request<{ deviceId: string; replaced: boolean }>('/e2ee/devices', {
+      method: 'POST',
+      token,
+      body,
+    });
+  },
+
+  getE2eeKeyBundle(token: string, userId: string) {
+    return request<{
+      deviceId: string;
+      identityKey: string;
+      signingKey: string;
+      signedPrekey: string | null;
+      signedPrekeySignature: string | null;
+      oneTimeKey: { keyId: string; key: string } | null;
+    }>(`/e2ee/users/${encodeURIComponent(userId)}/keys`, { token });
+  },
+
   removePushToken(token: string, pushToken: string) {
     return request<{ registered: boolean }>('/users/me/push-token', {
       method: 'DELETE',

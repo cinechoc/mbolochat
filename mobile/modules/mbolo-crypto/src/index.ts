@@ -69,6 +69,10 @@ declare class MboloCryptoModule extends NativeModule {
     expectedSha256: string,
   ): Promise<string>;
   selfTest(workDir: string, fileMb: number): Promise<string>;
+  ensureKeys(): Promise<string>;
+  sqlCipherKey(): Promise<string>;
+  secureCreateAccount(): Promise<string>;
+  secureGenerateOneTimeKeys(accountPickle: string, count: number): Promise<string>;
 }
 
 type NativeResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -125,6 +129,11 @@ export const MboloCrypto = {
     ),
   selfTest: (workDir: string, fileMb: number) =>
     invoke<SelfTestReport>(native.selfTest(workDir, fileMb)),
+  ensureKeys: () => invoke<{ recovered: boolean }>(native.ensureKeys()),
+  sqlCipherKey: () => invoke<{ key: string }>(native.sqlCipherKey()),
+  secureCreateAccount: () => invoke<AccountCreated>(native.secureCreateAccount()),
+  secureGenerateOneTimeKeys: (accountPickle: string, count: number) =>
+    invoke<OneTimeKeysGenerated>(native.secureGenerateOneTimeKeys(accountPickle, count)),
 };
 
 export default MboloCrypto;

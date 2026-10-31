@@ -674,7 +674,7 @@ export default function ChatScreen() {
     }
     setComposerKey((key) => key + 1);
     if (token && id) {
-      connectSocket(token).emit('typing', { conversationId: id, text: '' });
+      connectSocket(token).emit('typing', { conversationId: id, typing: false });
     }
   }, [token, id]);
 
@@ -699,14 +699,12 @@ export default function ChatScreen() {
     [chat, theme],
   );
 
-  const emitTyping = useCallback(
-    (value: string) => {
-      if (!token || !id) return;
-      lastTypingEmitRef.current = Date.now();
-      connectSocket(token).emit('typing', { conversationId: id, text: value.slice(0, 300) });
-    },
-    [token, id],
-  );
+  const emitTyping = useCallback(() => {
+    if (!token || !id) return;
+    lastTypingEmitRef.current = Date.now();
+    // Aucun brouillon ne traverse le serveur : uniquement l'état de saisie.
+    connectSocket(token).emit('typing', { conversationId: id, typing: true });
+  }, [token, id]);
 
   const onInputChange = useCallback(
     (value: string) => {
@@ -723,7 +721,7 @@ export default function ChatScreen() {
           typingFlushRef.current = null;
         }
         pendingTypingRef.current = null;
-        emitTyping(value);
+        emitTyping();
         return;
       }
       pendingTypingRef.current = value;
@@ -732,7 +730,7 @@ export default function ChatScreen() {
         typingFlushRef.current = null;
         const pending = pendingTypingRef.current;
         pendingTypingRef.current = null;
-        if (pending !== null) emitTyping(pending);
+        if (pending !== null) emitTyping();
       }, wait);
     },
     [emitTyping, token, id],
@@ -837,15 +835,18 @@ export default function ChatScreen() {
         setTyping((cur) => (cur && cur.userId === message.sender.id ? null : cur));
       }
     };
-    const onTyping = (payload: { conversationId: string; userId: string; text?: string }) => {
+    const onTyping = (payload: {
+      conversationId: string;
+      userId: string;
+      typing?: boolean;
+    }) => {
       if (payload.conversationId !== id || payload.userId === user.id) return;
-      const text = (payload.text ?? '').slice(0, 300);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      if (!text) {
+      if (payload.typing === false) {
         setTyping((cur) => (cur && cur.userId === payload.userId ? null : cur));
         return;
       }
-      setTyping({ userId: payload.userId, text });
+      setTyping({ userId: payload.userId, text: '' });
       typingTimeoutRef.current = setTimeout(() => setTyping(null), 2500);
     };
     /** Accusés de réception de MES messages : c'est ce qui colore les coches. */

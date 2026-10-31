@@ -8,6 +8,7 @@ import {
   blocks,
   conversationMembers,
   conversations,
+  e2eeDevices,
   messageHides,
   messageReactions,
   messageReceipts,
@@ -59,6 +60,10 @@ export interface MessageDto {
   conversationId: string;
   type: MessageType;
   content: string;
+  /** `none` (historique en clair) ou `v1` (enveloppe chiffrée opaque). */
+  encryption: 'none' | 'v1';
+  /** Enveloppe chiffrée base64, null pour l'historique en clair. */
+  payload: string | null;
   /** Référence de catalogue d'un sticker, null pour les autres messages. */
   stickerRef: string | null;
   /** Pièce jointe (photo…), null pour un message texte. */
@@ -275,6 +280,8 @@ interface MessageRow {
   type: string;
   stickerRef: string | null;
   content: string;
+  encryption?: string;
+  payload?: string | null;
   attachment: MessageAttachment | null;
   clientId: string | null;
   deletedAt: Date | null;
@@ -319,6 +326,8 @@ function toMessageDto(row: MessageRow, reactions: ReactionSummary[] = []): Messa
     type: messageTypeOf(row.type),
     // « Supprimé pour tous » vide la ligne : rien à renvoyer, juste le témoin.
     content: deleted ? '' : row.content,
+    encryption: row.encryption === 'v1' ? 'v1' : 'none',
+    payload: deleted ? null : (row.payload ?? null),
     stickerRef: deleted || row.type !== 'sticker' ? null : (row.stickerRef ?? null),
     attachment: deleted ? null : (row.attachment ?? null),
     clientId: row.clientId ?? null,
@@ -1145,6 +1154,8 @@ export class ConversationsService {
       conversationId,
       type: 'system',
       content,
+      encryption: 'none',
+      payload: null,
       stickerRef: null,
       attachment: null,
       clientId: null,
@@ -1266,6 +1277,14 @@ export class ConversationsService {
     }
     if (message.deletedAt) {
       throw new BadRequestException('Message supprimé');
+    }
+    const [conversationState] = await this.db
+      .select({ e2eeSince: conversations.e2eeSince })
+      .from(conversations)
+      .where(eq(conversations.id, conversationId))
+      .limit(1);
+    if (conversationState?.e2eeSince) {
+      throw new BadRequestException('Les réactions chiffrées ne sont pas encore disponibles');
     }
 
     const inserted = await this.db
@@ -1424,6 +1443,7 @@ export class ConversationsService {
           eq(messages.conversationId, conversationId),
           isNull(messages.deletedAt),
           eq(messages.type, 'text'),
+          eq(messages.encryption, 'none'),
           this.hiddenFrom(userId),
         ),
       )
@@ -1478,6 +1498,7 @@ export class ConversationsService {
         and(
           eq(messages.conversationId, conversationId),
           isNull(messages.deletedAt),
+          eq(messages.encryption, 'none'),
           this.hiddenFrom(userId),
           ilike(messages.content, `%${escaped}%`),
         ),
@@ -1646,6 +1667,9 @@ export class ConversationsService {
     sticker?: StickerAttachmentMeta | null,
     messageType: MessageType = 'text',
     stickerRef?: string,
+    encryption: 'none' | 'v1' = 'none',
+    payload?: string,
+    senderDeviceId?: string,
   ): Promise<MessageDto> {
     if (!isMessageType(messageType)) {
       throw new BadRequestException('Type de message invalide');
@@ -1665,12 +1689,52 @@ export class ConversationsService {
       throw new ForbiddenException('You are not a member of this conversation');
     }
     const [permissions] = await this.db
-      .select({ sendPermission: conversations.sendPermission })
+      .select({
+        sendPermission: conversations.sendPermission,
+        e2eeSince: conversations.e2eeSince,
+      })
       .from(conversations)
       .where(eq(conversations.id, conversationId))
       .limit(1);
     if (!permissions) {
       throw new NotFoundException('Conversation not found');
+    }
+    const e2eeEnabled = ['1', 'true'].includes(
+      (process.env.E2EE_ENABLED ?? '').toLowerCase(),
+    );
+    if (encryption === 'v1') {
+      if (!e2eeEnabled) {
+        throw new BadRequestException('Chiffrement indisponible');
+      }
+      if (!permissions.e2eeSince) {
+        throw new BadRequestException('Conversation pas encore chiffrée');
+      }
+      if (!payload || payload.length > 64 * 1024 || content.trim().length > 0) {
+        throw new BadRequestException('Enveloppe chiffrée invalide');
+      }
+      if (attachmentId || gifAttachment || sticker) {
+        throw new BadRequestException('Média chiffré pas encore disponible');
+      }
+      if (!senderDeviceId) {
+        throw new BadRequestException('Appareil émetteur manquant');
+      }
+      const [device] = await this.db
+        .select({ id: e2eeDevices.id })
+        .from(e2eeDevices)
+        .where(
+          and(
+            eq(e2eeDevices.userId, senderId),
+            eq(e2eeDevices.deviceId, senderDeviceId),
+            isNull(e2eeDevices.revokedAt),
+          ),
+        )
+        .limit(1);
+      if (!device) {
+        throw new ForbiddenException('Appareil E2EE inactif');
+      }
+    } else if (permissions.e2eeSince) {
+      // Anti-downgrade : une conversation chiffrée ne repasse jamais en clair.
+      throw new BadRequestException('Les messages en clair sont refusés dans cette conversation');
     }
     if (
       permissions.sendPermission === 'admins' &&
@@ -1749,7 +1813,10 @@ export class ConversationsService {
         senderId,
         type: messageType,
         stickerRef: messageType === 'sticker' ? stickerRef : null,
-        content,
+        content: encryption === 'v1' ? '' : content,
+        encryption,
+        payload: encryption === 'v1' ? (payload ?? null) : null,
+        senderDeviceId: encryption === 'v1' ? (senderDeviceId ?? null) : null,
         attachment,
         clientId: clientId ?? null,
         replyToId: replyToId ?? null,
@@ -1779,6 +1846,8 @@ export class ConversationsService {
       conversationId: stored.conversationId,
       type: messageTypeOf(stored.type),
       content: stored.content,
+      encryption: stored.encryption === 'v1' ? 'v1' : 'none',
+      payload: stored.payload,
       stickerRef: stored.type === 'sticker' ? (stored.stickerRef ?? null) : null,
       attachment: stored.attachment ?? null,
       clientId: stored.clientId ?? null,
@@ -1947,6 +2016,8 @@ export class ConversationsService {
       type: string;
       stickerRef: string | null;
       content: string;
+      encryption: string;
+      payload: string | null;
       attachment: MessageAttachment | null;
       clientId: string | null;
       deletedAt: Date | string | null;
@@ -1963,6 +2034,8 @@ export class ConversationsService {
         m.type,
         m.sticker_ref as "stickerRef",
         m.content,
+        m.encryption,
+        m.payload,
         m.attachment,
         m.client_id as "clientId",
         m.deleted_at as "deletedAt",
@@ -1990,6 +2063,8 @@ export class ConversationsService {
         conversationId: row.conversationId,
         type: messageTypeOf(row.type),
         content: deleted ? '' : row.content,
+        encryption: row.encryption === 'v1' ? 'v1' : 'none',
+        payload: deleted ? null : (row.payload ?? null),
         stickerRef: deleted || row.type !== 'sticker' ? null : (row.stickerRef ?? null),
         attachment: deleted ? null : (row.attachment ?? null),
         clientId: row.clientId ?? null,

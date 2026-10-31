@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   date,
@@ -111,6 +112,8 @@ export const conversations = pgTable('conversations', {
   sendPermission: text('send_permission').notNull().default('all'),
   /** Qui peut ajouter des membres : `all` (défaut) ou `admins`. */
   addPermission: text('add_permission').notNull().default('all'),
+  /** Bascule irréversible vers le chiffrement de bout en bout. */
+  e2eeSince: timestamp('e2ee_since', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -324,6 +327,12 @@ export const messages = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     content: text('content').notNull(),
+    /** `none` (historique en clair) ou `v1` (enveloppe chiffrée opaque). */
+    encryption: text('encryption').notNull().default('none'),
+    /** Enveloppe chiffrée base64 ; le serveur ne la déchiffre jamais. */
+    payload: text('payload'),
+    /** Appareil émetteur (JWT) pour rattacher l'enveloppe à ses clés. */
+    senderDeviceId: text('sender_device_id'),
     /** Texte Unicode normal, ou sticker référencé par son catalogue local. */
     type: text('type').notNull().default('text'),
     /** Référence de catalogue d'un sticker (« pack/sticker »), null sinon. */
@@ -449,6 +458,8 @@ export const refreshTokens = pgTable(
     /** Appareil lisible (« Samsung Galaxy A54 · Android 14 ») pour la liste des sessions. */
     deviceName: text('device_name'),
     platform: text('platform'),
+    /** Identifiant d'appareil porté par le JWT (appareil unique actif). */
+    deviceId: text('device_id'),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
@@ -471,6 +482,57 @@ export const geoCityCache = pgTable('geo_city_cache', {
   longitude: doublePrecision('longitude').notNull(),
   fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Appareil E2EE actif : seules les clés publiques sont stockées. */
+export const e2eeDevices = pgTable(
+  'e2ee_devices',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Identifiant d'appareil issu du JWT, stable entre les refresh tokens. */
+    deviceId: text('device_id').notNull(),
+    identityKey: text('identity_key').notNull(),
+    signingKey: text('signing_key').notNull(),
+    signedPrekey: text('signed_prekey'),
+    signedPrekeySignature: text('signed_prekey_signature'),
+    deviceName: text('device_name'),
+    platform: text('platform'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('e2ee_devices_user_device_idx').on(table.userId, table.deviceId),
+    uniqueIndex('e2ee_devices_active_user_idx')
+      .on(table.userId)
+      .where(sql`${table.revokedAt} is null`),
+  ],
+);
+
+/** Clés publiques à usage unique, consommées à la création d'une session Olm. */
+export const e2eeOneTimePrekeys = pgTable(
+  'e2ee_one_time_prekeys',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    deviceRowId: text('device_row_id')
+      .notNull()
+      .references(() => e2eeDevices.id, { onDelete: 'cascade' }),
+    keyId: text('key_id').notNull(),
+    publicKey: text('public_key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('e2ee_prekeys_device_key_idx').on(table.deviceRowId, table.keyId),
+    index('e2ee_prekeys_device_used_idx').on(table.deviceRowId, table.usedAt),
+  ],
+);
 
 export type User = typeof users.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;

@@ -50,7 +50,7 @@ async function bootstrap() {
   const logger = new Logger('HTTP');
   app.use((req: Request, res: Response, next: NextFunction) => {
     res.on('finish', () => {
-      logger.log(`${req.method} ${req.originalUrl} -> ${res.statusCode}`);
+      logger.log(`${req.method} ${req.originalUrl.split('?')[0]} -> ${res.statusCode}`);
     });
     next();
   });
