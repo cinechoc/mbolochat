@@ -1,0 +1,714 @@
+[
+  {
+    "name": "aead",
+    "version": "0.6.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "aead-stream",
+    "version": "0.6.0",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "direct",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "aes",
+    "version": "0.9.3",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "anyhow",
+    "version": "1.0.104",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "arrayvec",
+    "version": "0.7.8",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "base16ct",
+    "version": "1.0.0",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "base64",
+    "version": "0.23.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "direct",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "base64ct",
+    "version": "1.8.3",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "block-buffer",
+    "version": "0.12.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "block-padding",
+    "version": "0.4.2",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "bytes",
+    "version": "1.12.1",
+    "license": "MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "cbc",
+    "version": "0.2.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "cesu8",
+    "version": "1.1.0",
+    "license": "Apache-2.0/MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "cfg-if",
+    "version": "1.0.5",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "chacha20",
+    "version": "0.10.2",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "chacha20poly1305",
+    "version": "0.11.0",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "direct",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "cipher",
+    "version": "0.5.2",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "cmov",
+    "version": "0.5.4",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "combine",
+    "version": "4.6.9",
+    "license": "MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "const-oid",
+    "version": "0.10.2",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "cpubits",
+    "version": "0.1.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "cpufeatures",
+    "version": "0.3.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "crypto-common",
+    "version": "0.2.2",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "ctutils",
+    "version": "0.4.7",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "curve25519-dalek",
+    "version": "5.0.0",
+    "license": "BSD-3-Clause",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "curve25519-dalek-derive",
+    "version": "0.1.1",
+    "license": "MIT/Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "digest",
+    "version": "0.11.3",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "ed25519",
+    "version": "3.0.0",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "ed25519-dalek",
+    "version": "3.0.0",
+    "license": "BSD-3-Clause",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "either",
+    "version": "1.19.0",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "equivalent",
+    "version": "1.0.3",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "getrandom",
+    "version": "0.4.3",
+    "license": "MIT OR Apache-2.0",
+    "scope": "direct",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "hashbrown",
+    "version": "0.17.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "hkdf",
+    "version": "0.13.0",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "hmac",
+    "version": "0.13.0",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "hpke",
+    "version": "0.14.1",
+    "license": "MIT/Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "hybrid-array",
+    "version": "0.4.15",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "indexmap",
+    "version": "2.14.2",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "inout",
+    "version": "0.2.5",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "itertools",
+    "version": "0.14.0",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "itoa",
+    "version": "1.0.18",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "jni",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "scope": "direct",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "jni-sys",
+    "version": "0.3.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "jni-sys",
+    "version": "0.4.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "jni-sys-macros",
+    "version": "0.4.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "libc",
+    "version": "0.2.191",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "log",
+    "version": "0.4.35",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "matrix-pickle",
+    "version": "0.2.3",
+    "license": "Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "matrix-pickle-derive",
+    "version": "0.2.3",
+    "license": "Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "memchr",
+    "version": "2.8.3",
+    "license": "Unlicense OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "poly1305",
+    "version": "0.9.1",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "proc-macro-crate",
+    "version": "3.5.0",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "proc-macro2",
+    "version": "1.0.107",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "prost",
+    "version": "0.14.4",
+    "license": "Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "prost-derive",
+    "version": "0.14.4",
+    "license": "Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "quote",
+    "version": "1.0.47",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "rand",
+    "version": "0.10.3",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "rand_core",
+    "version": "0.10.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "rustc_version",
+    "version": "0.4.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "same-file",
+    "version": "1.0.6",
+    "license": "Unlicense/MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "semver",
+    "version": "1.0.28",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "serde",
+    "version": "1.0.229",
+    "license": "MIT OR Apache-2.0",
+    "scope": "direct",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "serde_bytes",
+    "version": "0.11.19",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "serde_core",
+    "version": "1.0.229",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "serde_derive",
+    "version": "1.0.229",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "serde_json",
+    "version": "1.0.154",
+    "license": "MIT OR Apache-2.0",
+    "scope": "direct",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "serdect",
+    "version": "0.4.3",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "sha2",
+    "version": "0.11.0",
+    "license": "MIT OR Apache-2.0",
+    "scope": "direct",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "signature",
+    "version": "3.0.0",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "subtle",
+    "version": "2.6.1",
+    "license": "BSD-3-Clause",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "syn",
+    "version": "2.0.119",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "syn",
+    "version": "3.0.9",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "thiserror",
+    "version": "1.0.69",
+    "license": "MIT OR Apache-2.0",
+    "scope": "direct",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "thiserror",
+    "version": "2.0.21",
+    "license": "MIT OR Apache-2.0",
+    "scope": "direct",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "thiserror-impl",
+    "version": "1.0.69",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "thiserror-impl",
+    "version": "2.0.21",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "toml_datetime",
+    "version": "1.1.2+spec-1.1.0",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "toml_edit",
+    "version": "0.25.17+spec-1.1.0",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "toml_parser",
+    "version": "1.1.5+spec-1.1.0",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "typenum",
+    "version": "1.20.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "unicode-ident",
+    "version": "1.0.27",
+    "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": "Unicode-3.0 (build-only, proc-macro2, permissive)"
+  },
+  {
+    "name": "universal-hash",
+    "version": "0.6.1",
+    "license": "MIT OR Apache-2.0",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "vodozemac",
+    "version": "0.11.1",
+    "license": "Apache-2.0",
+    "scope": "direct",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "walkdir",
+    "version": "2.5.0",
+    "license": "Unlicense/MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "winnow",
+    "version": "1.0.4",
+    "license": "MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "x25519-dalek",
+    "version": "3.0.0",
+    "license": "BSD-3-Clause",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "zeroize",
+    "version": "1.9.0",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "direct",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "zeroize_derive",
+    "version": "1.5.0",
+    "license": "Apache-2.0 OR MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  },
+  {
+    "name": "zmij",
+    "version": "1.0.23",
+    "license": "MIT",
+    "scope": "transitive",
+    "allowed": true,
+    "exception": null
+  }
+]

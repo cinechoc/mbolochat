@@ -41,3 +41,6 @@ example
 # generated native folders
 /ios
 /android
+
+# Bibliothèque native générée par crypto/scripts/build-android.sh
+/modules/mbolo-crypto/android/src/main/jniLibs/

@@ -75,7 +75,10 @@
     "gen:mbolo-emoji": "node scripts/build-mbolo-emoji-registry.mjs",
     "gen:mbolo-emoji-art": "python3 scripts/build-mbolo-emoji-art.py",
     "gen:mbolo-emoji-faces": "python3 scripts/build-mbolo-emoji-faces.py",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eas-build-post-install": "bash ../crypto/scripts/eas-build-post-install.sh",
+    "check:crypto-licenses": "node ../crypto/scripts/check-licenses.mjs",
+    "check:crypto": "bash ../crypto/scripts/check.sh"
   },
   "private": true
 }
