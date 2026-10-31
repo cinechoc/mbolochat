@@ -431,6 +431,28 @@ fn main() {
                 }
             }
         }
+        "native-selftest" => {
+            let dir = PathBuf::from(args.next().unwrap_or_else(|| "/data/local/tmp".to_owned()));
+            let file_mb = args
+                .next()
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(DEFAULT_FILE_MB);
+            match mbolo_crypto::self_test(&dir, file_mb) {
+                Ok(report) => {
+                    for step in &report.steps {
+                        println!("STEP {} {} ms", step.key, step.ms);
+                    }
+                    println!(
+                        "SELFTEST OK file={} Mo clair={} chiffre={}",
+                        report.file_mb, report.plaintext_size, report.ciphertext_size
+                    );
+                }
+                Err(error) => {
+                    eprintln!("SPIKE FAIL {}", error.code());
+                    std::process::exit(1);
+                }
+            }
+        }
         "pair-a" | "pair-b" => {
             let result = shared_dir(&mut args).and_then(|dir| {
                 let role = if command == "pair-a" { "alice" } else { "bob" };
