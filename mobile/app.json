@@ -87,7 +87,13 @@
       "react-native-blob-util",
       "expo-image",
       "expo-status-bar",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "MboloChat utilise votre position approximative pour afficher votre ville. Les coordonnées ne sont jamais enregistrées."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

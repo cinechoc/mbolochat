@@ -1,9 +1,10 @@
 import { Redirect, Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ProfileAction, ProfileHeader, PhotoGrid } from '@/components/profile-view';
+import { ProfileAction, ProfileHeader } from '@/components/profile-view';
+import { useCalls } from '@/features/calls/CallProvider';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -27,6 +28,7 @@ export default function UserProfileScreen() {
       ? genderParam
       : null;
   const { token, user } = useAuth();
+  const calls = useCalls();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
@@ -53,10 +55,15 @@ export default function UserProfileScreen() {
       notificationPreview: true,
       createdAt: '',
       isMe: false,
+      age: null,
+      city: null,
+      country: null,
+      birthdateSet: false,
       stats: { messages: 0, conversations: 0 },
     };
   });
   const [starting, setStarting] = useState(false);
+  const [calling, setCalling] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,6 +110,22 @@ export default function UserProfileScreen() {
     }
   };
 
+  const callUser = async () => {
+    if (!token || !profile || calling) {
+      return;
+    }
+    setCalling(true);
+    setError(null);
+    try {
+      const conversation = await api.createConversation(token, { memberIds: [profile.id] });
+      await calls.startCall(conversation.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Impossible de lancer l’appel.');
+    } finally {
+      setCalling(false);
+    }
+  };
+
   const toggleBlock = async () => {
     if (!token || !profile) {
       return;
@@ -130,7 +153,6 @@ export default function UserProfileScreen() {
         {profile ? (
           <ProfileHeader
             profile={profile}
-            showUsername={profile.isMe}
             actions={
               profile.isMe ? (
                 <ProfileAction
@@ -146,10 +168,15 @@ export default function UserProfileScreen() {
               ) : (
                 <>
                   <ProfileAction
-                    label="Envoyer un message"
+                    label="Écrire"
                     onPress={() => void startConversation()}
                     loading={starting}
                     primary
+                  />
+                  <ProfileAction
+                    label="Appeler"
+                    onPress={() => void callUser()}
+                    loading={calling}
                   />
                   <ProfileAction
                     label="Bloquer le compte"
@@ -168,10 +195,6 @@ export default function UserProfileScreen() {
           </ThemedText>
         ) : null}
 
-        <View style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>Photos</ThemedText>
-          <PhotoGrid photos={[]} />
-        </View>
       </ScrollView>
     </ThemedView>
   );

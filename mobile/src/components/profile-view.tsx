@@ -4,67 +4,75 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing, Radii } from '@/constants/theme';
+import { Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { fr } from '@/i18n/fr';
 import type { UserProfile } from '@/lib/types';
 
 interface ProfileHeaderProps {
   profile: UserProfile;
-  /** Bouton d'action à droite du pseudo (modifier le profil, envoyer un message…). */
+  /** Boutons d'action (modifier, écrire, appeler…). */
   actions?: ReactNode;
   onPressAvatar?: () => void;
   /** Affiche un voile pendant un changement de photo. */
   avatarBusy?: boolean;
-  /** Le pseudo n'est visible que par le propriétaire, sur son propre profil. */
-  showUsername?: boolean;
 }
 
-/** En-tête de profil façon Instagram : photo à gauche, informations à droite sur la même ligne. */
+/** En-tête sobre : avatar, nom, @pseudo, ville · âge, bio, actions. */
 export function ProfileHeader({
   profile,
   actions,
   onPressAvatar,
   avatarBusy = false,
-  showUsername = false,
 }: ProfileHeaderProps) {
+  const meta =
+    profile.city && profile.age !== null
+      ? fr.profile.cityAge(profile.city, profile.age)
+      : profile.city
+        ? profile.city
+        : profile.age !== null
+          ? fr.profile.ageOnly(profile.age)
+          : null;
+
   return (
     <View style={styles.header}>
-      <View style={styles.topRow}>
-        <Pressable onPress={onPressAvatar} disabled={!onPressAvatar}>
-          <View>
-            <Avatar
-              name={profile.displayName}
-              uri={profile.avatarUrl}
-              size={86}
-              gender={profile.gender}
-            />
-            {avatarBusy ? (
-              <View style={[styles.avatarOverlay, { borderRadius: Radii.full }]}>
-                <ActivityIndicator color="#ffffff" />
-              </View>
-            ) : null}
-          </View>
-        </Pressable>
-
-        <View style={styles.topRight}>
-          {showUsername ? (
-            <ThemedText style={styles.username} numberOfLines={1}>
-              {profile.username}
-            </ThemedText>
+      <Pressable onPress={onPressAvatar} disabled={!onPressAvatar} accessibilityRole="imagebutton">
+        <View>
+          <Avatar
+            name={profile.displayName}
+            uri={profile.avatarUrl}
+            size={96}
+            gender={profile.gender}
+          />
+          {avatarBusy ? (
+            <View style={[styles.avatarOverlay, { borderRadius: Radii.full }]}>
+              <ActivityIndicator color="#ffffff" />
+            </View>
           ) : null}
-          <ThemedText
-            style={showUsername ? styles.displayName : styles.primaryName}
-            numberOfLines={1}>
-            {profile.displayName}
-          </ThemedText>
-          {profile.bio ? (
-            <ThemedText themeColor="textSecondary" style={styles.bio} numberOfLines={3}>
-              {profile.bio}
-            </ThemedText>
-          ) : null}
-          {actions ? <View style={styles.actions}>{actions}</View> : null}
         </View>
+      </Pressable>
+
+      <View style={styles.identity}>
+        <ThemedText style={styles.name} numberOfLines={1}>
+          {profile.displayName}
+        </ThemedText>
+        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+          @{profile.username}
+        </ThemedText>
+        {meta ? (
+          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+            {meta}
+          </ThemedText>
+        ) : null}
       </View>
+
+      {profile.bio ? (
+        <ThemedText themeColor="textSecondary" style={styles.bio} numberOfLines={4}>
+          {profile.bio}
+        </ThemedText>
+      ) : null}
+
+      {actions ? <View style={styles.actions}>{actions}</View> : null}
     </View>
   );
 }
@@ -72,14 +80,14 @@ export function ProfileHeader({
 interface ProfileActionProps {
   label: string;
   onPress: () => void;
-  /** Style « plein » (comme le bouton Message d'Instagram). */
+  /** Style « plein » pour l'action principale. */
   primary?: boolean;
   /** Style « destructif » (bloquer un compte). */
   danger?: boolean;
   loading?: boolean;
 }
 
-/** Bouton compact façon Instagram (petit, gris clair, arrondi). */
+/** Bouton d'action compact, rayon md, hauteur tactile conservée. */
 export function ProfileAction({
   label,
   onPress,
@@ -118,26 +126,12 @@ interface PhotoGridProps {
   photos: { id: string; url: string }[];
 }
 
-/**
- * Grille de photos façon Instagram (3 colonnes).
- * La grille est prête à accueillir les médias ; elle reste vide pour l'instant.
- */
+/** Grille de photos ; rien du tout quand il n'y a rien à montrer. */
 export function PhotoGrid({ photos }: PhotoGridProps) {
   const theme = useTheme();
-
   if (photos.length === 0) {
-    return (
-      <ThemedView style={[styles.emptyPhotos, { borderColor: theme.backgroundElement }]}>
-        <ThemedText type="smallBold" themeColor="textSecondary">
-          Aucune photo pour le moment
-        </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary" style={styles.emptyPhotosHint}>
-          Les photos partagées dans les discussions apparaîtront ici.
-        </ThemedText>
-      </ThemedView>
-    );
+    return null;
   }
-
   return (
     <View style={styles.grid}>
       {photos.map((photo) => (
@@ -154,31 +148,34 @@ const accentColor = '#3c87f7';
 
 const styles = StyleSheet.create({
   header: {
-    gap: Spacing.three,
-  },
-  topRow: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.four,
-  },
-  topRight: {
-    flex: 1,
     gap: Spacing.two,
+    paddingTop: Spacing.two,
   },
-  username: {
-    fontSize: 20,
+  identity: { alignItems: 'center', gap: 2 },
+  name: {
+    fontSize: 24,
+    lineHeight: 30,
     fontWeight: '700',
-    lineHeight: 26,
+    textAlign: 'center',
+  },
+  bio: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    paddingHorizontal: Spacing.four,
   },
   actions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'center',
     gap: Spacing.two,
+    marginTop: Spacing.one,
   },
   action: {
-    minHeight: 34,
-    paddingHorizontal: Spacing.three,
-    borderRadius: Radii.sm,
+    minHeight: 40,
+    paddingHorizontal: Spacing.four,
+    borderRadius: Radii.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -197,23 +194,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
-  bioBlock: {
-    gap: 2,
-  },
-  primaryName: {
-    fontSize: 20,
-    fontWeight: '700',
-    lineHeight: 26,
-  },
-  displayName: {
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 19,
-  },
-  bio: {
-    fontSize: 14,
-    lineHeight: 19,
-  },  grid: {
+  grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 2,
@@ -221,17 +202,5 @@ const styles = StyleSheet.create({
   gridItem: {
     width: '33.33%',
     aspectRatio: 1,
-  },
-  emptyPhotos: {
-    borderWidth: 1,
-    borderRadius: Radii.md,
-    borderStyle: 'dashed',
-    paddingVertical: Spacing.four,
-    paddingHorizontal: Spacing.three,
-    alignItems: 'center',
-    gap: Spacing.one,
-  },
-  emptyPhotosHint: {
-    textAlign: 'center',
   },
 });
