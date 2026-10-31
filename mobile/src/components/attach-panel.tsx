@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { useChatColors } from '@/constants/chat-theme';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
@@ -122,7 +122,7 @@ const styles = StyleSheet.create({
   iconTile: {
     width: 58,
     height: 58,
-    borderRadius: 17,
+    borderRadius: Radii.md,
     alignItems: 'center',
     justifyContent: 'center',
   },

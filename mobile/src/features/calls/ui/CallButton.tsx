@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
-import { CallMetrics, CallSurface, Motion } from '@/constants/theme';
+import { CallMetrics, CallSurface, Motion, Radii } from '@/constants/theme';
 
 export type CallButtonTone = 'glass' | 'solid' | 'hangup' | 'accept';
 
@@ -48,7 +48,7 @@ export function CallButton({
           {
             width: size,
             height: size,
-            borderRadius: size / 2,
+            borderRadius: Radii.full,
             backgroundColor: filled ? CallSurface.onSurface : BACKGROUND[tone],
           },
           disabled && styles.disabled,

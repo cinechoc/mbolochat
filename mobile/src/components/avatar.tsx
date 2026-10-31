@@ -7,6 +7,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { API_URL } from '@/lib/config';
 import { initials } from '@/lib/format';
 import type { Gender } from '@/lib/types';
+import { Radii } from '@/constants/theme';
 
 const PALETTE = ['#3c87f7', '#2f6fdb', '#5f9dfb', '#4a84e8', '#6fa8fd', '#1e5fc7'];
 
@@ -72,7 +73,7 @@ export function Avatar({
   const [failedUri, setFailedUri] = useState<string | null>(null);
   const imageStyle = style as any;
   const fontSize = size * 0.38;
-  const radius = shape === 'rounded' ? size * 0.2 : size / 2;
+  const radius = shape === 'rounded' ? Radii.md : Radii.full;
   const clip = shape === 'rounded' ? 'hidden' : undefined;
   const fullUri = uri
     ? uri.startsWith('http') || uri.startsWith('data:')

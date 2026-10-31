@@ -84,11 +84,17 @@ export const Spacing = {
 /** Marges latérales d'écran. */
 export const Gutter = Spacing.three;
 
+/**
+ * Échelle unique de rayons : des coins nets et sobres, façon WhatsApp/Messenger.
+ * `full` est réservé aux cercles (avatars, pastilles, boutons d'appel).
+ */
 export const Radii = {
+  xs: 4,
   sm: 8,
   md: 12,
-  lg: 20,
-  pill: 999,
+  lg: 16,
+  sheet: 16,
+  full: 999,
 } as const;
 
 /** Échelle typographique unique (5 tailles, 2 graisses). */

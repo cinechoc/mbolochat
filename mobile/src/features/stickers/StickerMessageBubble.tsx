@@ -4,6 +4,7 @@ import { memo } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { useChatColors } from '@/constants/chat-theme';
+import { Radii } from '@/constants/theme';
 
 export interface StickerMessageBubbleProps {
   uri: string;
@@ -94,7 +95,7 @@ const styles = StyleSheet.create({
     left: 2,
     width: 26,
     height: 26,
-    borderRadius: 13,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(127,127,127,0.18)',
@@ -105,7 +106,7 @@ const styles = StyleSheet.create({
     left: 2,
     width: 24,
     height: 24,
-    borderRadius: 12,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
   },

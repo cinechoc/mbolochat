@@ -10,7 +10,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { ThemedText } from './themed-text';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export const accentColor = '#3c87f7';
@@ -87,7 +87,7 @@ export function Button({ title, onPress, loading, disabled, variant = 'primary' 
 
 const styles = StyleSheet.create({
   input: {
-    borderRadius: Spacing.three,
+    borderRadius: Radii.md,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     fontSize: 16,
@@ -95,7 +95,7 @@ const styles = StyleSheet.create({
   passwordWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: Spacing.three,
+    borderRadius: Radii.md,
     paddingHorizontal: Spacing.three,
     gap: Spacing.two,
   },
@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   button: {
-    borderRadius: Spacing.three,
+    borderRadius: Radii.md,
     paddingVertical: Spacing.three,
     alignItems: 'center',
     justifyContent: 'center',

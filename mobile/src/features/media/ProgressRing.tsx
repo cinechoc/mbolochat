@@ -11,6 +11,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import Svg, { Circle } from 'react-native-svg';
+import { Radii } from '@/constants/theme';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
@@ -216,7 +217,7 @@ const styles = StyleSheet.create({
   circle: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -237,7 +238,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 4,
+    borderRadius: Radii.xs,
     overflow: 'hidden',
     backgroundColor: 'rgba(0,0,0,0.55)',
   },

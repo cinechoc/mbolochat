@@ -10,6 +10,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { Radii } from '@/constants/theme';
+
 type Props = {
   levels: number[];
   elapsedMs: number;
@@ -106,7 +108,7 @@ const styles = StyleSheet.create({
     paddingLeft: 10,
     height: 40,
   },
-  dot: { width: 8, height: 8, borderRadius: 4 },
+  dot: { width: 8, height: 8, borderRadius: Radii.full},
   time: { fontSize: 13, fontVariant: ['tabular-nums'], minWidth: 42 },
   bars: {
     flex: 1,
@@ -116,5 +118,5 @@ const styles = StyleSheet.create({
     height: 32,
     overflow: 'hidden',
   },
-  bar: { width: 2.5, borderRadius: 1.25 },
+  bar: { width: 2.5, borderRadius: Radii.full},
 });

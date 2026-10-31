@@ -1,6 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
 import { usePresence } from './usePresence';
+import { Radii } from '@/constants/theme';
 
 /** Point vert de la liste des discussions ; aucun texte ni état hors ligne. */
 export function PresenceDot({ userId }: { userId: string }) {
@@ -16,7 +17,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: 10,
     height: 10,
-    borderRadius: 5,
+    borderRadius: Radii.full,
     borderWidth: 2,
     borderColor: '#ffffff',
     backgroundColor: '#07C160',

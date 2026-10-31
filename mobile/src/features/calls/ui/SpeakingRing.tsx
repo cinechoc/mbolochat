@@ -9,7 +9,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { CallSurface } from '@/constants/theme';
+import { CallSurface, Radii } from '@/constants/theme';
 
 const RING_DURATION = 2200;
 
@@ -69,7 +69,7 @@ export function SpeakingRing({
   return (
     <Animated.View
       pointerEvents="none"
-      style={[styles.ring, { width: size, height: size, borderRadius: size / 2 }, style]}
+      style={[styles.ring, { width: size, height: size, borderRadius: Radii.full }, style]}
     />
   );
 }

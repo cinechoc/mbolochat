@@ -3,6 +3,7 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import { EmojiImage } from '../emoji/EmojiText';
 import { toEmojiKey } from '../emoji/emojiUtils';
 import { findSticker, type Sticker } from './stickerPacks';
+import { Radii } from '@/constants/theme';
 
 type StickerViewProps = { sticker: Sticker; size?: number };
 
@@ -93,7 +94,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 8,
-    borderRadius: 8,
+    borderRadius: Radii.sm,
     backgroundColor: 'rgba(128,128,128,0.2)',
   },
   unknownText: { fontSize: 12, textAlign: 'center', color: '#888' },

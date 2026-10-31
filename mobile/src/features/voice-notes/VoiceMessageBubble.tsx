@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { lockSwipe, unlockSwipe } from '@/lib/swipe-lock';
 import { MAX_DURATION_MS, toWaveform } from './useVoiceRecorder';
 import { seekVoicePlayback, toggleVoicePlayback, useVoicePlayback } from './voicePlayback';
+import { Radii } from '@/constants/theme';
 
 type Props = {
   /** Identifiant UNIQUE du message (sert à savoir quelle note est en lecture). */
@@ -214,7 +215,7 @@ const styles = StyleSheet.create({
   rowOther: { alignSelf: 'flex-start' },
   bubble: {
     height: 44,
-    borderRadius: 6,
+    borderRadius: Radii.lg,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
@@ -224,7 +225,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 10,
     height: 10,
-    borderRadius: 1,
+    borderRadius: Radii.xs,
     top: 15,
     transform: [{ rotate: '45deg' }],
   },
@@ -234,7 +235,7 @@ const styles = StyleSheet.create({
   playButton: { alignItems: 'center', justifyContent: 'center' },
   icon: { width: 20 },
   waveform: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 28 },
-  bar: { width: 2.5, borderRadius: 2 },
+  bar: { width: 2.5, borderRadius: Radii.full},
   duration: { minWidth: 34, textAlign: 'right', fontSize: 13, fontVariant: ['tabular-nums'] },
-  unplayedDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FA5151', marginLeft: 6 },
+  unplayedDot: { width: 8, height: 8, borderRadius: Radii.full, backgroundColor: '#FA5151', marginLeft: 6 },
 });

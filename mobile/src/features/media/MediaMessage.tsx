@@ -9,7 +9,7 @@ import { memo, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useChatColors } from '@/constants/chat-theme';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 
 import {
   documentVisual,
@@ -287,7 +287,7 @@ export const DocumentMessageBubble = memo(function DocumentMessageBubble({
 
 const styles = StyleSheet.create({
   mediaFrame: {
-    borderRadius: 6,
+    borderRadius: Radii.lg,
     overflow: 'hidden',
     backgroundColor: 'rgba(0,0,0,0.08)',
   },
@@ -299,7 +299,7 @@ const styles = StyleSheet.create({
   playCircle: {
     width: 52,
     height: 52,
-    borderRadius: 26,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
@@ -308,7 +308,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 6,
     bottom: 6,
-    borderRadius: 4,
+    borderRadius: Radii.xs,
     paddingHorizontal: 5,
     paddingVertical: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -323,18 +323,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-    borderRadius: 6,
+    borderRadius: Radii.sm,
     padding: Spacing.two,
   },
   documentIcon: {
     width: 44,
     height: 44,
-    borderRadius: 8,
+    borderRadius: Radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   documentFailedIcon: {
-    borderRadius: 22,
+    borderRadius: Radii.full,
     backgroundColor: '#FA5151',
   },
   documentBody: {

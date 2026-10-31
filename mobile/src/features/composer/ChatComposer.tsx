@@ -24,6 +24,7 @@ import { useRecentEmoji } from '../emoji/useRecentEmoji';
 import { deleteBackward, insertAt } from '../emoji/emojiUtils';
 import { useVoiceRecorder, type VoiceNote } from '../voice-notes/useVoiceRecorder';
 import { RecordingTimeline } from './RecordingTimeline';
+import { Radii } from '@/constants/theme';
 
 export type ComposerTheme = PanelTheme & {
   barBg: string;
@@ -638,10 +639,10 @@ const styles = StyleSheet.create({
     right: 8,
     bottom: '100%',
     marginBottom: 4,
-    borderRadius: 12,
+    borderRadius: Radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
-    elevation: 8,
+    elevation: 4,
     zIndex: 20,
   },
   mentionRow: {
@@ -666,7 +667,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     minHeight: 40,
-    borderRadius: 6,
+    borderRadius: Radii.md,
     paddingRight: 2,
   },
   noticeOverlay: {
@@ -675,7 +676,7 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     bottom: 0,
-    borderRadius: 6,
+    borderRadius: Radii.md,
     justifyContent: 'center',
     paddingHorizontal: 10,
   },
@@ -695,7 +696,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     right: 34,
-    borderRadius: 6,
+    borderRadius: Radii.md,
     justifyContent: 'center',
     overflow: 'hidden',
   },
@@ -703,13 +704,13 @@ const styles = StyleSheet.create({
   send: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+    elevation: 2,
   },
   sendPressed: { transform: [{ scale: 0.92 }], opacity: 0.92 },
 });

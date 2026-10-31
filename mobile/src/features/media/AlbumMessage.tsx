@@ -11,6 +11,7 @@ import { formatMediaDuration } from './mediaLayout';
 import { mediaUrl } from './mediaUrl';
 import { VideoThumb } from './MediaMessage';
 import { UploadStatusBadge } from './ProgressRing';
+import { Radii } from '@/constants/theme';
 
 interface AlbumTile {
   message: Message;
@@ -161,7 +162,7 @@ export const AlbumMessageBubble = memo(function AlbumMessageBubble({
 
 const styles = StyleSheet.create({
   grid: {
-    borderRadius: 6,
+    borderRadius: Radii.lg,
     overflow: 'hidden',
     backgroundColor: 'rgba(0,0,0,0.08)',
   },
@@ -186,7 +187,7 @@ const styles = StyleSheet.create({
     height: 34,
     marginTop: -17,
     marginLeft: -17,
-    borderRadius: 17,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
@@ -195,7 +196,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 4,
     bottom: 4,
-    borderRadius: 3,
+    borderRadius: Radii.xs,
     paddingHorizontal: 4,
     paddingVertical: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -226,7 +227,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 4,
     right: 4,
-    borderRadius: 8,
+    borderRadius: Radii.xs,
     paddingHorizontal: 5,
     paddingVertical: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',

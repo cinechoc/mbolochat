@@ -23,7 +23,7 @@ import Animated, {
 import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { EmojiText } from '@/features/emoji/EmojiText';
 import { PresenceDot } from '@/features/presence/PresenceDot';
 import { useTheme } from '@/hooks/use-theme';
@@ -247,7 +247,7 @@ const styles = StyleSheet.create({
   badge: {
     minWidth: 22,
     height: 22,
-    borderRadius: 11,
+    borderRadius: Radii.full,
     paddingHorizontal: 6,
     alignItems: 'center',
     justifyContent: 'center',

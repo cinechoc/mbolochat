@@ -24,6 +24,7 @@ import {
 import { EmojiImage } from './EmojiText';
 import { toEmojiKey } from './emojiUtils';
 import { buildEmojiSearchIndex, searchEmojiIndex } from './emojiSearch';
+import { Radii } from '@/constants/theme';
 
 export type PanelTheme = {
   panelBg: string;
@@ -95,7 +96,7 @@ const BackspaceCell = memo(function BackspaceCell({ onBackspace, width, theme }:
       style={({ pressed }) => [
         styles.cell,
         { width, height: CELL_H },
-        pressed && { backgroundColor: theme.pressed, borderRadius: 8 },
+        pressed && { backgroundColor: theme.pressed, borderRadius: Radii.sm },
       ]}
     >
       <MaterialCommunityIcons name="backspace-outline" size={26} color={theme.icon} />
@@ -148,7 +149,7 @@ const EmojiGrid = memo(function EmojiGrid({
               style={({ pressed }) => [
                 styles.cell,
                 { width: `${100 / cols}%`, height: CELL_H },
-                pressed && { backgroundColor: theme.pressed, borderRadius: 8 },
+                pressed && { backgroundColor: theme.pressed, borderRadius: Radii.sm },
               ]}
             >
               {EMOJI_SOURCES[emoji.key] ? (
@@ -481,7 +482,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 4,
     paddingHorizontal: 10,
-    borderRadius: 10,
+    borderRadius: Radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
@@ -501,6 +502,6 @@ const styles = StyleSheet.create({
     paddingRight: 4,
   },
   tabs: { paddingHorizontal: 8, alignItems: 'center', gap: 4 },
-  tab: { width: 44, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  tab: { width: 44, height: 34, borderRadius: Radii.sm, alignItems: 'center', justifyContent: 'center' },
   backspaceSlot: { justifyContent: 'center', paddingRight: 4 },
 });

@@ -12,7 +12,7 @@ import Animated, {
 
 import { ThemedText } from '@/components/themed-text';
 import { accentColor } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDuration, type VoiceRecorderProps } from '@/lib/voice';
 
@@ -291,7 +291,7 @@ const styles = StyleSheet.create({
   recordingDot: {
     width: 12,
     height: 12,
-    borderRadius: 6,
+    borderRadius: Radii.full,
     backgroundColor: '#e5484d',
   },
   timer: {
@@ -322,7 +322,7 @@ const styles = StyleSheet.create({
   send: {
     width: 46,
     height: 46,
-    borderRadius: 23,
+    borderRadius: Radii.full,
     backgroundColor: '#e5484d',
     alignItems: 'center',
     justifyContent: 'center',

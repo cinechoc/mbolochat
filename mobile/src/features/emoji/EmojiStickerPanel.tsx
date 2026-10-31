@@ -7,6 +7,7 @@ import { GifPanel } from '../media/GifPanel';
 import { StickerPanel } from '../stickers/StickerPanel';
 import type { PersonalSticker } from '../stickers/stickerLibrary';
 import { EmojiPanel, type PanelTheme } from './EmojiPanel';
+import { Radii } from '@/constants/theme';
 
 export type { PanelTheme };
 
@@ -186,7 +187,7 @@ const styles = StyleSheet.create({
   tab: {
     flex: 1,
     height: 36,
-    borderRadius: 9,
+    borderRadius: Radii.sm,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'transparent',
     flexDirection: 'row',
@@ -202,6 +203,6 @@ const styles = StyleSheet.create({
     bottom: 2,
     width: 18,
     height: 2,
-    borderRadius: 1,
+    borderRadius: Radii.full,
   },
 });

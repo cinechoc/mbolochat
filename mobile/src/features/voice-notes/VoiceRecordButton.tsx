@@ -24,6 +24,7 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { LIVE_BARS, MAX_DURATION_MS, VoiceNote, useVoiceRecorder } from './useVoiceRecorder';
+import { Radii } from '@/constants/theme';
 
 const DANGER = '#FA5151';
 /** Distance (px) à glisser vers le haut pour entrer dans la zone "annuler". */
@@ -341,7 +342,7 @@ const styles = StyleSheet.create({
   wrapActive: { zIndex: 1000, elevation: 1000 },
   button: {
     height: 40,
-    borderRadius: 6,
+    borderRadius: Radii.md,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 12,
@@ -355,7 +356,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.78)',
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 10,
+    borderRadius: Radii.sm,
   },
   noticeText: { color: '#fff', fontSize: 14 },
   overlay: { position: 'absolute', zIndex: 1000, elevation: 1000 },
@@ -372,7 +373,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: BUBBLE_WIDTH,
     height: BUBBLE_HEIGHT,
-    borderRadius: 14,
+    borderRadius: Radii.lg,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -380,16 +381,16 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 16,
     height: 16,
-    borderRadius: 3,
+    borderRadius: Radii.xs,
     transform: [{ rotate: '45deg' }],
   },
   bars: { flexDirection: 'row', alignItems: 'center', gap: 3, height: 52 },
-  bar: { width: 3, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.72)' },
+  bar: { width: 3, borderRadius: Radii.full, backgroundColor: 'rgba(0,0,0,0.72)' },
   cancelCircle: {
     position: 'absolute',
     width: 64,
     height: 64,
-    borderRadius: 32,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
   },

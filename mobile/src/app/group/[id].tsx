@@ -874,7 +874,7 @@ const styles = StyleSheet.create({
     bottom: 2,
     width: 30,
     height: 30,
-    borderRadius: Radii.pill,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -919,7 +919,7 @@ const styles = StyleSheet.create({
   permissionChip: {
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
-    borderRadius: 999,
+    borderRadius: Radii.sm,
     borderWidth: StyleSheet.hairlineWidth,
     minHeight: 40,
     justifyContent: 'center',

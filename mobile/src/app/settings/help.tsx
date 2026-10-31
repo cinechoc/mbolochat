@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useAuth } from '@/lib/auth-context';
 
 const FAQ: { question: string; answer: string }[] = [
@@ -95,7 +95,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
   },
   group: {
-    borderRadius: 12,
+    borderRadius: Radii.md,
     overflow: 'hidden',
     marginHorizontal: Spacing.three,
   },

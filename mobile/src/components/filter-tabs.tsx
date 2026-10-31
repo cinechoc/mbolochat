@@ -2,7 +2,7 @@ import { ScrollView, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { accentColor } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { ConversationFilter } from '@/lib/format';
 
@@ -92,7 +92,7 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
     paddingHorizontal: Spacing.three,
     paddingVertical: 6,
-    borderRadius: 999,
+    borderRadius: Radii.sm,
   },
   label: {
     fontWeight: '600',
@@ -106,7 +106,7 @@ const styles = StyleSheet.create({
   dot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
+    borderRadius: Radii.full,
     marginLeft: 1,
   },
   countTextActive: {

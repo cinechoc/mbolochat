@@ -5,6 +5,7 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import { RTCView } from 'react-native-webrtc';
+import { Radii } from '@/constants/theme';
 
 const PIP_WIDTH = 108;
 const PIP_HEIGHT = 144;
@@ -68,16 +69,16 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: PIP_WIDTH,
     height: PIP_HEIGHT,
-    borderRadius: 18,
+    borderRadius: Radii.md,
     overflow: 'hidden',
     backgroundColor: '#111827',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.25)',
     shadowColor: '#000000',
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
   video: { flex: 1 },
 });

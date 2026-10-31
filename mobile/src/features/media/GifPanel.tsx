@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 
 import type { PanelTheme } from '../emoji/EmojiPanel';
+import { Radii } from '@/constants/theme';
 
 /** Un GIF déjà présent dans la conversation et réutilisable tel quel. */
 export interface RecentGif {
@@ -180,7 +181,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 4,
     paddingHorizontal: 10,
-    borderRadius: 10,
+    borderRadius: Radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
@@ -195,12 +196,12 @@ const styles = StyleSheet.create({
   },
   grid: { paddingHorizontal: 6, paddingBottom: 8 },
   cell: { padding: 3 },
-  image: { width: '100%', height: '100%', borderRadius: 8, backgroundColor: 'rgba(127,127,127,0.12)' },
+  image: { width: '100%', height: '100%', borderRadius: Radii.sm, backgroundColor: 'rgba(127,127,127,0.12)' },
   badge: {
     position: 'absolute',
     left: 8,
     bottom: 8,
-    borderRadius: 4,
+    borderRadius: Radii.xs,
     paddingHorizontal: 5,
     paddingVertical: 1,
     backgroundColor: 'rgba(0,0,0,0.62)',

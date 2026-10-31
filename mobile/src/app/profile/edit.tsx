@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   input: {
-    borderRadius: Spacing.three,
+    borderRadius: Radii.md,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two + Spacing.half,
     fontSize: 16,

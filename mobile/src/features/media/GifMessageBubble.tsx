@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ProgressRing } from '@/features/media/ProgressRing';
+import { Radii } from '@/constants/theme';
 
 export interface GifMessageBubbleProps {
   uri: string;
@@ -86,10 +87,10 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   stickerRadius: {
-    borderRadius: 14,
+    borderRadius: Radii.lg,
   },
   framedRadius: {
-    borderRadius: 10,
+    borderRadius: Radii.md,
   },
   imageDim: {
     opacity: 0.55,
@@ -99,7 +100,7 @@ const styles = StyleSheet.create({
   },
   retry: {
     position: 'absolute',
-    borderRadius: 10,
+    borderRadius: Radii.sm,
     backgroundColor: 'rgba(0,0,0,0.55)',
     paddingHorizontal: 10,
     paddingVertical: 6,

@@ -13,7 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useChatColors } from '@/constants/chat-theme';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
   },
   group: {
-    borderRadius: 12,
+    borderRadius: Radii.md,
     overflow: 'hidden',
     marginHorizontal: Spacing.three,
   },
@@ -278,7 +278,7 @@ const styles = StyleSheet.create({
   radio: {
     width: 22,
     height: 22,
-    borderRadius: 11,
+    borderRadius: Radii.full,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
   radioDot: {
     width: 10,
     height: 10,
-    borderRadius: 5,
+    borderRadius: Radii.full,
   },
   explanation: {
     marginTop: Spacing.three,
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
   },
   retry: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
+    borderRadius: Radii.sm,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
   },

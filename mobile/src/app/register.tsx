@@ -9,7 +9,7 @@ import { Select, type SelectOption } from '@/components/select';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button, PasswordField, TextField, accentColor } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
@@ -327,7 +327,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     paddingVertical: 12,
-    borderRadius: 12,
+    borderRadius: Radii.md,
   },
   genderSelectedText: {
     color: '#ffffff',

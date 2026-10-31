@@ -34,6 +34,7 @@ import {
 } from './stickerLibrary';
 import { useStickerLibrary } from './useStickerLibrary';
 import { StickerView } from './StickerView';
+import { Radii } from '@/constants/theme';
 
 type Filter = 'all' | 'favorites' | 'recents' | 'personal';
 
@@ -514,7 +515,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 40,
     paddingHorizontal: 10,
-    borderRadius: 10,
+    borderRadius: Radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
@@ -532,7 +533,7 @@ const styles = StyleSheet.create({
   createPill: {
     height: 40,
     paddingHorizontal: 9,
-    borderRadius: 10,
+    borderRadius: Radii.sm,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
@@ -544,7 +545,7 @@ const styles = StyleSheet.create({
   chip: {
     height: 30,
     paddingHorizontal: 12,
-    borderRadius: 15,
+    borderRadius: Radii.sm,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
@@ -558,7 +559,7 @@ const styles = StyleSheet.create({
     bottom: 7,
     width: 18,
     height: 18,
-    borderRadius: 9,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -574,7 +575,7 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 380,
-    borderRadius: 18,
+    borderRadius: Radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     padding: 18,
     gap: 12,
@@ -582,12 +583,12 @@ const styles = StyleSheet.create({
   },
   modalTitle: { fontSize: 17, fontWeight: '700' },
   modalHint: { fontSize: 12.5, textAlign: 'center', lineHeight: 18 },
-  checker: { borderRadius: 14, overflow: 'hidden', backgroundColor: '#F8F5FA' },
+  checker: { borderRadius: Radii.md, overflow: 'hidden', backgroundColor: '#F8F5FA' },
   modalActions: { flexDirection: 'row', gap: 10, alignSelf: 'stretch', marginTop: 4 },
   modalButton: {
     flex: 1,
     height: 42,
-    borderRadius: 10,
+    borderRadius: Radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',

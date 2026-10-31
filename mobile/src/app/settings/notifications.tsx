@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
   },
   group: {
-    borderRadius: 12,
+    borderRadius: Radii.md,
     overflow: 'hidden',
     marginHorizontal: Spacing.three,
   },
@@ -330,7 +330,7 @@ const styles = StyleSheet.create({
     marginLeft: Spacing.three,
     paddingVertical: Spacing.one,
     paddingHorizontal: Spacing.two,
-    borderRadius: 8,
+    borderRadius: Radii.sm,
   },
   linkLabel: {
     color: '#3c87f7',

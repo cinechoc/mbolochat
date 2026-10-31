@@ -40,7 +40,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { accentColor } from '@/components/ui';
 import { CHAT_TIME_GAP_MS, useChatColors } from '@/constants/chat-theme';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { PresenceSubtitle } from '@/features/presence/PresenceSubtitle';
 import { VoiceMessageBubble, voiceBubbleWidth } from '@/features/voice-notes/VoiceMessageBubble';
 import { ChatComposer, type ComposerTheme } from '@/features/composer/ChatComposer';
@@ -2359,7 +2359,12 @@ export default function ChatScreen() {
       }
 
       const bubble = (
-        <View style={[styles.bubble, mine ? chatStyles.bubbleMine : chatStyles.bubbleTheirs]}>
+        <View
+          style={[
+            styles.bubble,
+            mine ? chatStyles.bubbleMine : chatStyles.bubbleTheirs,
+            mine ? styles.bubbleMineEdge : styles.bubbleTheirsEdge,
+          ]}>
           <View
             pointerEvents="none"
             style={[
@@ -3158,7 +3163,7 @@ const styles = StyleSheet.create({
     gap: 2,
     paddingHorizontal: 4,
     paddingVertical: 2,
-    borderRadius: 999,
+    borderRadius: Radii.sm,
     borderWidth: StyleSheet.hairlineWidth,
   },
   reactionChipEmoji: { fontSize: 12, lineHeight: 16 },
@@ -3185,7 +3190,7 @@ const styles = StyleSheet.create({
   suggestion: {
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
-    borderRadius: 999,
+    borderRadius: Radii.sm,
     borderWidth: StyleSheet.hairlineWidth,
   },
   listContent: {
@@ -3204,19 +3209,22 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   messageAvatar: {
-    borderRadius: Spacing.one,
+    borderRadius: Radii.full,
   },
   bubble: {
-    borderRadius: 6,
+    borderRadius: Radii.lg,
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: Spacing.half,
   },
+  /** Coin côté expéditeur légèrement plus petit : donne la direction de la bulle. */
+  bubbleMineEdge: { borderTopRightRadius: Radii.xs },
+  bubbleTheirsEdge: { borderTopLeftRadius: Radii.xs },
   tail: {
     position: 'absolute',
     width: 10,
     height: 10,
-    borderRadius: 1,
+    borderRadius: Radii.xs,
     top: 15,
     transform: [{ rotate: '45deg' }],
   },
@@ -3243,7 +3251,7 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   stickerQuote: {
-    borderRadius: 6,
+    borderRadius: Radii.sm,
     padding: Spacing.one,
   },
   mediaBlockMine: {
@@ -3254,12 +3262,12 @@ const styles = StyleSheet.create({
   },
   mediaQuote: {
     width: '100%',
-    borderRadius: 6,
+    borderRadius: Radii.sm,
     padding: Spacing.one,
   },
   mediaCaption: {
     width: '100%',
-    borderRadius: 6,
+    borderRadius: Radii.sm,
     paddingHorizontal: 8,
     paddingVertical: 6,
   },
@@ -3287,7 +3295,7 @@ const styles = StyleSheet.create({
   quote: {
     flexDirection: 'row',
     gap: Spacing.one,
-    borderRadius: 4,
+    borderRadius: Radii.xs,
     paddingVertical: 4,
     overflow: 'hidden',
   },
@@ -3331,7 +3339,7 @@ const styles = StyleSheet.create({
     marginVertical: Spacing.two,
   },
   datePill: {
-    borderRadius: 999,
+    borderRadius: Radii.sm,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.half,
   },
@@ -3387,7 +3395,7 @@ const styles = StyleSheet.create({
     right: Spacing.three,
     width: 42,
     height: 42,
-    borderRadius: 21,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
@@ -3399,7 +3407,7 @@ const styles = StyleSheet.create({
     right: -4,
     minWidth: 22,
     height: 22,
-    borderRadius: 11,
+    borderRadius: Radii.full,
     paddingHorizontal: 5,
     alignItems: 'center',
     justifyContent: 'center',
@@ -3447,7 +3455,7 @@ const styles = StyleSheet.create({
   dot: {
     width: 5,
     height: 5,
-    borderRadius: 3,
+    borderRadius: Radii.full,
   },
   /** Bloc du vocal : la bulle fournie gère sa propre largeur et ses couleurs. */
   voiceBlock: {
@@ -3462,7 +3470,7 @@ const styles = StyleSheet.create({
   },
   voiceQuote: {
     width: '100%',
-    borderRadius: 6,
+    borderRadius: Radii.sm,
     padding: Spacing.one,
   },
   tickPending: {

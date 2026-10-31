@@ -1,7 +1,7 @@
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 /** Identité de repli d'un groupe : un emoji et une couleur, sans photo. */
@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
   emojiCell: {
     width: 40,
     height: 40,
-    borderRadius: 12,
+    borderRadius: Radii.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
   colorDot: {
     width: 28,
     height: 28,
-    borderRadius: 14,
+    borderRadius: Radii.full,
     borderColor: 'transparent',
   },
 });

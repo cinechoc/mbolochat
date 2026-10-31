@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
   cell: { aspectRatio: 0.82, maxWidth: 240 },
   tile: {
     flex: 1,
-    borderRadius: Radii.lg,
+    borderRadius: Radii.md,
     backgroundColor: CallSurface.card,
     alignItems: 'center',
     justifyContent: 'center',
@@ -208,7 +208,7 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
     overflow: 'hidden',
   },
-  tileExpanded: { borderRadius: Radii.lg },
+  tileExpanded: { borderRadius: Radii.md},
   tileThumb: { width: 72, height: 96, padding: Spacing.two, gap: Spacing.one },
   video: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   dim: { opacity: 0.45 },
@@ -219,5 +219,5 @@ const styles = StyleSheet.create({
   expandedTile: { flex: 1 },
   stripScroll: { flexGrow: 0 },
   strip: { gap: Spacing.two, paddingVertical: Spacing.one },
-  stripItem: { borderRadius: Radii.lg, overflow: 'hidden' },
+  stripItem: { borderRadius: Radii.md, overflow: 'hidden' },
 });

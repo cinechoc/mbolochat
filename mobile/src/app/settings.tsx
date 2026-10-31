@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
 
@@ -177,7 +177,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.one,
   },
   group: {
-    borderRadius: 12,
+    borderRadius: Radii.md,
     overflow: 'hidden',
   },
   row: {

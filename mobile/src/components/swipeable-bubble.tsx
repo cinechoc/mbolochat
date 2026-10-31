@@ -10,7 +10,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { isSwipeLocked } from '@/lib/swipe-lock';
 
@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
   hintBadge: {
     width: 30,
     height: 30,
-    borderRadius: 15,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
   },

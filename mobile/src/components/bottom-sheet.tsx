@@ -243,8 +243,8 @@ const styles = StyleSheet.create({
   },
   keyboard: { justifyContent: 'flex-end' },
   sheet: {
-    borderTopLeftRadius: Radii.lg,
-    borderTopRightRadius: Radii.lg,
+    borderTopLeftRadius: Radii.sheet,
+    borderTopRightRadius: Radii.sheet,
     borderWidth: StyleSheet.hairlineWidth,
     paddingTop: Spacing.one,
     overflow: 'hidden',
@@ -259,7 +259,7 @@ const styles = StyleSheet.create({
   handle: {
     width: 40,
     height: 4,
-    borderRadius: Radii.pill,
+    borderRadius: Radii.full,
   },
   header: {
     paddingHorizontal: Spacing.three,
@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
     right: Spacing.three,
     width: Spacing.five,
     height: Spacing.five,
-    borderRadius: Radii.pill,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
   },

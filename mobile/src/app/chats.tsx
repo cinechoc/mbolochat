@@ -29,7 +29,7 @@ import { SwipeableRow, type SwipeAction } from '@/components/swipeable-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TextField, accentColor } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -1009,7 +1009,7 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.two,
   },
   search: {
-    borderRadius: 22,
+    borderRadius: Radii.md,
     paddingVertical: Spacing.two,
   },
   pressed: {

@@ -11,7 +11,7 @@ import {
 
 import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { lockSwipe, unlockSwipe } from '@/lib/swipe-lock';
 import { formatDuration, type VoiceBubbleProps } from '@/lib/voice';
 
@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
     bottom: -1,
     width: 15,
     height: 15,
-    borderRadius: 8,
+    borderRadius: Radii.full,
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -404,7 +404,7 @@ const styles = StyleSheet.create({
   },
   bar: {
     width: 2.5,
-    borderRadius: 1.5,
+    borderRadius: Radii.full,
   },
   playhead: {
     position: 'absolute',
@@ -417,7 +417,7 @@ const styles = StyleSheet.create({
   playheadDot: {
     width: 7,
     height: 7,
-    borderRadius: 3.5,
+    borderRadius: Radii.full,
   },
   time: {
     fontSize: 11,

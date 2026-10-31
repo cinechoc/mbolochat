@@ -7,7 +7,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { Button, accentColor } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -207,7 +207,7 @@ const styles = StyleSheet.create({
   },
   card: {
     maxHeight: '85%',
-    borderRadius: Spacing.four,
+    borderRadius: Radii.md,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
@@ -225,7 +225,7 @@ const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.one,
-    borderRadius: 999,
+    borderRadius: Radii.sm,
   },
   chipTextActive: { color: '#ffffff', fontWeight: '600' },
   switchRow: {

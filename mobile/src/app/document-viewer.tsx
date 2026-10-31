@@ -33,7 +33,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { PdfProps } from 'react-native-pdf';
 
 import { useChatColors } from '@/constants/chat-theme';
-import { Fonts, Spacing } from '@/constants/theme';
+import { Fonts, Spacing, Radii } from '@/constants/theme';
 import {
   documentFileName,
   documentPreviewKind,
@@ -844,7 +844,7 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 420,
-    borderRadius: 10,
+    borderRadius: Radii.md,
     padding: Spacing.four,
     alignItems: 'center',
     gap: Spacing.two,
@@ -863,7 +863,7 @@ const styles = StyleSheet.create({
   infoIcon: {
     width: 76,
     height: 76,
-    borderRadius: 18,
+    borderRadius: Radii.lg,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -874,7 +874,7 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     minHeight: 46,
-    borderRadius: 8,
+    borderRadius: Radii.md,
     paddingHorizontal: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
@@ -888,7 +888,7 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     minHeight: 46,
-    borderRadius: 8,
+    borderRadius: Radii.md,
     paddingHorizontal: Spacing.three,
     borderWidth: 1,
     flexDirection: 'row',
@@ -912,7 +912,7 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.five,
   },
   textCard: {
-    borderRadius: 8,
+    borderRadius: Radii.md,
     padding: Spacing.three,
   },
   textContent: {
@@ -933,7 +933,7 @@ const styles = StyleSheet.create({
   pagePill: {
     position: 'absolute',
     alignSelf: 'center',
-    borderRadius: 12,
+    borderRadius: Radii.sm,
     paddingHorizontal: 10,
     paddingVertical: 4,
     backgroundColor: 'rgba(0,0,0,0.55)',

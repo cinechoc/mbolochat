@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { conversationTitle } from '@/lib/format';
@@ -116,7 +116,7 @@ export default function HiddenConversationsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   group: {
-    borderRadius: 12,
+    borderRadius: Radii.md,
     overflow: 'hidden',
     marginHorizontal: Spacing.three,
   },

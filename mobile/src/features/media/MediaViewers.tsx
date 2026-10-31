@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { formatMediaDuration } from './mediaLayout';
+import { Radii } from '@/constants/theme';
 
 export interface MediaViewerItem {
   type: 'image' | 'video';
@@ -239,7 +240,7 @@ const styles = StyleSheet.create({
     left: 16,
     width: 42,
     height: 42,
-    borderRadius: 21,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
@@ -247,7 +248,7 @@ const styles = StyleSheet.create({
   counter: {
     position: 'absolute',
     alignSelf: 'center',
-    borderRadius: 12,
+    borderRadius: Radii.sm,
     paddingHorizontal: 10,
     paddingVertical: 4,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -274,7 +275,7 @@ const styles = StyleSheet.create({
   albumPlayCircle: {
     width: 64,
     height: 64,
-    borderRadius: 32,
+    borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.18)',
@@ -283,7 +284,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 16,
     bottom: 24,
-    borderRadius: 4,
+    borderRadius: Radii.xs,
     paddingHorizontal: 6,
     paddingVertical: 2,
     backgroundColor: 'rgba(0,0,0,0.55)',

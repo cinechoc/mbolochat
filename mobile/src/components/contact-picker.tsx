@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
     paddingLeft: Spacing.one,
     paddingRight: Spacing.two,
     paddingVertical: Spacing.one,
-    borderRadius: Radii.pill,
+    borderRadius: Radii.sm,
     maxWidth: 190,
   },
   chipName: { flexShrink: 1 },
@@ -295,7 +295,7 @@ const styles = StyleSheet.create({
   check: {
     width: 22,
     height: 22,
-    borderRadius: Radii.pill,
+    borderRadius: Radii.full,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',

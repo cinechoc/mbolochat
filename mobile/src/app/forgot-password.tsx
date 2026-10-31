@@ -8,7 +8,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { LogoMark } from '@/components/logo';
 import { Button, PasswordField, TextField, accentColor } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
@@ -242,7 +242,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.two,
   },
   devBox: {
-    borderRadius: Spacing.three,
+    borderRadius: Radii.md,
     padding: Spacing.three,
     alignItems: 'center',
     gap: Spacing.one,

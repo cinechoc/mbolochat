@@ -4,7 +4,7 @@ import { FlatList, Pressable, StyleSheet, type StyleProp, type ViewStyle } from 
 
 import { BottomSheet } from '@/components/bottom-sheet';
 import { ThemedText } from './themed-text';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export interface SelectOption {
@@ -77,7 +77,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderRadius: Spacing.three,
+    borderRadius: Radii.md,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     gap: Spacing.two,

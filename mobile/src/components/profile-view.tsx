@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { UserProfile } from '@/lib/types';
 
@@ -39,7 +39,7 @@ export function ProfileHeader({
               gender={profile.gender}
             />
             {avatarBusy ? (
-              <View style={[styles.avatarOverlay, { borderRadius: 43 }]}>
+              <View style={[styles.avatarOverlay, { borderRadius: Radii.full }]}>
                 <ActivityIndicator color="#ffffff" />
               </View>
             ) : null}
@@ -178,7 +178,7 @@ const styles = StyleSheet.create({
   action: {
     minHeight: 34,
     paddingHorizontal: Spacing.three,
-    borderRadius: 8,
+    borderRadius: Radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -224,7 +224,7 @@ const styles = StyleSheet.create({
   },
   emptyPhotos: {
     borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: Radii.md,
     borderStyle: 'dashed',
     paddingVertical: Spacing.four,
     paddingHorizontal: Spacing.three,

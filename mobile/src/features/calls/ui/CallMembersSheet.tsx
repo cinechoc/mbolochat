@@ -165,7 +165,7 @@ const styles = StyleSheet.create({
   check: {
     width: 22,
     height: 22,
-    borderRadius: Radii.pill,
+    borderRadius: Radii.full,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
