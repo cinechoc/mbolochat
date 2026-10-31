@@ -105,7 +105,15 @@ export default function SettingsScreen() {
   }
 
   const apply = (patch: Parameters<typeof update>[0]) => {
-    void update(patch).catch((cause) => {
+    const payload = { ...patch };
+    // Les heures calmes sont exprimées dans le fuseau de l'appareil.
+    if (payload.quietHours) {
+      payload.quietHours = {
+        ...payload.quietHours,
+        utcOffsetMinutes: -new Date().getTimezoneOffset(),
+      };
+    }
+    void update(payload).catch((cause) => {
       Alert.alert(
         'Réglage non enregistré',
         cause instanceof ApiError ? cause.message : fr.settings.serverError,
