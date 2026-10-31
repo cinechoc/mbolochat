@@ -169,6 +169,13 @@
       "when": 1793350990525,
       "tag": "0023_group_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793409436314,
+      "tag": "0024_profile_privacy_and_city",
+      "breakpoints": true
     }
   ]
 }

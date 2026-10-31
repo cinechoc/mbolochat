@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { JwtPayload } from '../auth/jwt-payload.js';
-import { UsersService, toPublicUser } from './users.service.js';
+import { UsersService, toPublicUser, type SettingsPatch } from './users.service.js';
 import type { Request } from 'express';
 
 @Controller('users')
@@ -44,6 +44,14 @@ export class UsersController {
       notificationPreview?: boolean;
     },
   ) {
+    const incoming = (body ?? {}) as Record<string, unknown>;
+    for (const forbidden of ['city', 'country', 'birthday', 'cityUpdatedAt']) {
+      if (incoming[forbidden] !== undefined) {
+        throw new BadRequestException(
+          'La ville et la date de naissance ne peuvent pas être modifiées ici.',
+        );
+      }
+    }
     const user = await this.usersService.updateProfile(current.sub, {
       displayName: body?.displayName,
       bio: body?.bio?.trim() ? body.bio.trim() : body?.bio === '' ? null : undefined,
@@ -52,6 +60,17 @@ export class UsersController {
       notificationPreview: body?.notificationPreview,
     });
     return toPublicUser(user);
+  }
+
+  /** Réglages de confidentialité, notifications et heures calmes du compte. */
+  @Get('me/settings')
+  async settings(@CurrentUser() current: JwtPayload) {
+    return this.usersService.getSettings(current.sub);
+  }
+
+  @Patch('me/settings')
+  async updateSettings(@CurrentUser() current: JwtPayload, @Body() body: SettingsPatch) {
+    return this.usersService.updateSettings(current.sub, body ?? {});
   }
 
   @Post('me/avatar')

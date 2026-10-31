@@ -1,6 +1,7 @@
 import {
   boolean,
   date,
+  doublePrecision,
   integer,
   jsonb,
   pgEnum,
@@ -22,6 +23,13 @@ export const lastSeenVisibilityEnum = pgEnum('last_seen_visibility', [
 export const onlineVisibilityEnum = pgEnum('online_visibility', [
   'everyone',
   'same_as_last_seen',
+]);
+
+/** Qui peut voir / faire quoi : tout le monde, mes contacts, personne. */
+export const privacyVisibilityEnum = pgEnum('privacy_visibility', [
+  'everyone',
+  'contacts',
+  'nobody',
 ]);
 
 export const users = pgTable('users', {
@@ -50,6 +58,36 @@ export const users = pgTable('users', {
   onlineVisibility: onlineVisibilityEnum('online_visibility')
     .notNull()
     .default('same_as_last_seen'),
+  /** Ville vérifiée par géocodage serveur : jamais de coordonnées stockées. */
+  city: text('city'),
+  country: text('country'),
+  cityUpdatedAt: timestamp('city_updated_at', { withTimezone: true }),
+  /** Photo, bio, ville et âge : même visibilité pour ces quatre champs. */
+  profileVisibility: privacyVisibilityEnum('profile_visibility').notNull().default('everyone'),
+  /** Qui peut m'écrire (nouvelle conversation directe). */
+  writePermission: privacyVisibilityEnum('write_permission').notNull().default('everyone'),
+  /** Qui peut m'ajouter à un groupe. */
+  groupAddPermission: privacyVisibilityEnum('group_add_permission').notNull().default('contacts'),
+  /** Qui peut m'appeler. */
+  callPermission: privacyVisibilityEnum('call_permission').notNull().default('everyone'),
+  /** Qui peut me trouver par nom d'utilisateur. */
+  discoverability: privacyVisibilityEnum('discoverability').notNull().default('everyone'),
+  /** Accusés de lecture diffusés aux autres (la lecture locale reste vraie). */
+  readReceipts: boolean('read_receipts').notNull().default(true),
+  /** Indicateur « en train d'écrire » diffusé aux autres. */
+  typingIndicator: boolean('typing_indicator').notNull().default(true),
+  notifyMessages: boolean('notify_messages').notNull().default(true),
+  notifyGroups: boolean('notify_groups').notNull().default(true),
+  notifyMentions: boolean('notify_mentions').notNull().default(true),
+  notifyCalls: boolean('notify_calls').notNull().default(true),
+  notifyReactions: boolean('notify_reactions').notNull().default(true),
+  quietHoursEnabled: boolean('quiet_hours_enabled').notNull().default(false),
+  /** Minutes depuis minuit, heure locale du compte. */
+  quietStartMinute: integer('quiet_start_minute').notNull().default(1320),
+  quietEndMinute: integer('quiet_end_minute').notNull().default(420),
+  quietUtcOffsetMinutes: integer('quiet_utc_offset_minutes').notNull().default(0),
+  /** Suppression demandée : anonymisation après 30 jours, annulable avant. */
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -406,12 +444,31 @@ export const refreshTokens = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     tokenHash: text('token_hash').notNull().unique(),
+    /** Appareil lisible (« Samsung Galaxy A54 · Android 14 ») pour la liste des sessions. */
+    deviceName: text('device_name'),
+    platform: text('platform'),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('refresh_tokens_user_idx').on(table.userId)],
 );
+
+/**
+ * Cache du géocodage inverse : une cellule arrondie (jamais la position
+ * exacte d'un utilisateur) donne le nom de la ville et le pays. Les
+ * coordonnées ne servent qu'au calcul de distance (anti-téléport) et ne sont
+ * rattachées à aucun compte.
+ */
+export const geoCityCache = pgTable('geo_city_cache', {
+  cell: text('cell').primaryKey(),
+  city: text('city').notNull(),
+  country: text('country'),
+  latitude: doublePrecision('latitude').notNull(),
+  longitude: doublePrecision('longitude').notNull(),
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 export type User = typeof users.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
@@ -421,3 +478,4 @@ export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type RefreshToken = typeof refreshTokens.$inferSelect;
 export type PushToken = typeof pushTokens.$inferSelect;
 export type Upload = typeof uploads.$inferSelect;
+export type GeoCityCache = typeof geoCityCache.$inferSelect;

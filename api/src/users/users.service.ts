@@ -9,6 +9,8 @@ import {
   users,
   type User,
 } from '../db/schema.js';
+import { calculateAge } from './age.js';
+import { canSee, type ViewerRelation, type Visibility } from './visibility.js';
 
 export interface PublicUser {
   id: string;
@@ -23,6 +25,17 @@ export interface PublicUser {
   notificationSound: boolean;
   /** Aperçu du texte dans les notifications. */
   notificationPreview: boolean;
+  createdAt: Date;
+}
+
+/** Vue d'un autre compte : préférences privées retirées, champs filtrés. */
+export interface PublicUserView {
+  id: string;
+  username: string;
+  displayName: string;
+  bio: string | null;
+  avatarUrl: string | null;
+  gender: string | null;
   createdAt: Date;
 }
 
@@ -41,9 +54,32 @@ export function toPublicUser(user: User): PublicUser {
   };
 }
 
-/** Profil « façon Instagram » : infos publiques + quelques statistiques. */
-export interface UserProfile extends PublicUser {
+/**
+ * Profil d'un autre compte : photo et bio masquées selon sa visibilité, et
+ * jamais ses préférences de notification. L'âge et la ville sont ajoutés par
+ * `getProfile` quand la visibilité les autorise.
+ */
+export function toPublicUserView(user: User, relation: ViewerRelation): PublicUserView {
+  const visible = canSee(user.profileVisibility, relation);
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    bio: visible ? user.bio : null,
+    avatarUrl: visible ? user.avatarUrl : null,
+    gender: user.gender,
+    createdAt: user.createdAt,
+  };
+}
+
+/** Profil « façon Instagram » : infos publiques + âge/ville filtrés + stats. */
+export interface UserProfile extends PublicUserView {
   isMe: boolean;
+  /** Âge révolu calculé à la requête ; jamais la date de naissance. */
+  age: number | null;
+  city: string | null;
+  country: string | null;
+  birthdateSet: boolean;
   stats: {
     /** Nombre de messages envoyés par l'utilisateur. */
     messages: number;
@@ -51,6 +87,47 @@ export interface UserProfile extends PublicUser {
     conversations: number;
   };
 }
+
+export interface UserSettings {
+  privacy: {
+    profile: Visibility;
+    write: Visibility;
+    groupAdd: Visibility;
+    call: Visibility;
+    discoverability: Visibility;
+  };
+  readReceipts: boolean;
+  typingIndicator: boolean;
+  notifications: {
+    enabled: boolean;
+    messages: boolean;
+    groups: boolean;
+    mentions: boolean;
+    calls: boolean;
+    reactions: boolean;
+    sound: boolean;
+    preview: boolean;
+  };
+  quietHours: {
+    enabled: boolean;
+    startMinute: number;
+    endMinute: number;
+    utcOffsetMinutes: number;
+  };
+  city: string | null;
+  country: string | null;
+  cityUpdatedAt: Date | null;
+  birthdateSet: boolean;
+  age: number | null;
+}
+
+export type SettingsPatch = {
+  privacy?: Partial<UserSettings['privacy']>;
+  readReceipts?: boolean;
+  typingIndicator?: boolean;
+  notifications?: Partial<UserSettings['notifications']>;
+  quietHours?: Partial<UserSettings['quietHours']>;
+};
 
 @Injectable()
 export class UsersService {
@@ -76,6 +153,176 @@ export class UsersService {
       .where(or(eq(users.email, identifier.toLowerCase()), eq(users.username, identifier)))
       .limit(1);
     return user;
+  }
+
+  /**
+   * Relations visiteur → cibles : contact si une conversation est partagée,
+   * bloqué si l'un des deux a bloqué l'autre. Aucune requête si la liste est vide.
+   */
+  async relationsFor(
+    viewerId: string,
+    targetIds: string[],
+  ): Promise<Map<string, ViewerRelation>> {
+    const unique = [...new Set(targetIds.filter((id) => id !== viewerId))];
+    const map = new Map<string, ViewerRelation>();
+    for (const id of unique) {
+      map.set(id, { isContact: false, blocked: false });
+    }
+    if (unique.length === 0) {
+      return map;
+    }
+
+    const blockRows = await this.db
+      .select({ blockerId: blocks.blockerId, blockedId: blocks.blockedId })
+      .from(blocks)
+      .where(
+        and(
+          or(eq(blocks.blockerId, viewerId), eq(blocks.blockedId, viewerId)),
+          or(inArray(blocks.blockerId, unique), inArray(blocks.blockedId, unique)),
+        ),
+      );
+    for (const row of blockRows) {
+      const other = row.blockerId === viewerId ? row.blockedId : row.blockerId;
+      const entry = map.get(other);
+      if (entry) {
+        entry.blocked = true;
+      }
+    }
+
+    const mine = await this.db
+      .select({ conversationId: conversationMembers.conversationId })
+      .from(conversationMembers)
+      .where(eq(conversationMembers.userId, viewerId));
+    const conversationIds = mine.map((row) => row.conversationId);
+    if (conversationIds.length > 0) {
+      const shared = await this.db
+        .selectDistinct({ userId: conversationMembers.userId })
+        .from(conversationMembers)
+        .where(
+          and(
+            inArray(conversationMembers.conversationId, conversationIds),
+            inArray(conversationMembers.userId, unique),
+          ),
+        );
+      for (const row of shared) {
+        const entry = map.get(row.userId);
+        if (entry) {
+          entry.isContact = true;
+        }
+      }
+    }
+    return map;
+  }
+
+  async relationWith(viewerId: string, targetId: string): Promise<ViewerRelation> {
+    if (viewerId === targetId) {
+      return { isContact: true, blocked: false };
+    }
+    const relations = await this.relationsFor(viewerId, [targetId]);
+    return relations.get(targetId) ?? { isContact: false, blocked: false };
+  }
+
+  async getSettings(userId: string): Promise<UserSettings> {
+    return this.settingsOf(await this.getByIdOrThrow(userId));
+  }
+
+  settingsOf(user: User): UserSettings {
+    return {
+      privacy: {
+        profile: user.profileVisibility,
+        write: user.writePermission,
+        groupAdd: user.groupAddPermission,
+        call: user.callPermission,
+        discoverability: user.discoverability,
+      },
+      readReceipts: user.readReceipts,
+      typingIndicator: user.typingIndicator,
+      notifications: {
+        enabled: user.notificationsEnabled,
+        messages: user.notifyMessages,
+        groups: user.notifyGroups,
+        mentions: user.notifyMentions,
+        calls: user.notifyCalls,
+        reactions: user.notifyReactions,
+        sound: user.notificationSound,
+        preview: user.notificationPreview,
+      },
+      quietHours: {
+        enabled: user.quietHoursEnabled,
+        startMinute: user.quietStartMinute,
+        endMinute: user.quietEndMinute,
+        utcOffsetMinutes: user.quietUtcOffsetMinutes,
+      },
+      city: user.city,
+      country: user.country,
+      cityUpdatedAt: user.cityUpdatedAt,
+      birthdateSet: Boolean(user.birthday),
+      age: calculateAge(user.birthday),
+    };
+  }
+
+  private static visibility(value: unknown): Visibility | undefined {
+    return value === 'everyone' || value === 'contacts' || value === 'nobody'
+      ? value
+      : undefined;
+  }
+
+  private static minute(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 1439
+      ? value
+      : undefined;
+  }
+
+  async updateSettings(userId: string, patch: SettingsPatch): Promise<UserSettings> {
+    const values: Partial<typeof users.$inferInsert> = {};
+    if (patch.privacy) {
+      const profile = UsersService.visibility(patch.privacy.profile);
+      const write = UsersService.visibility(patch.privacy.write);
+      const groupAdd = UsersService.visibility(patch.privacy.groupAdd);
+      const call = UsersService.visibility(patch.privacy.call);
+      const discoverability = UsersService.visibility(patch.privacy.discoverability);
+      if (profile) values.profileVisibility = profile;
+      if (write) values.writePermission = write;
+      if (groupAdd) values.groupAddPermission = groupAdd;
+      if (call) values.callPermission = call;
+      if (discoverability) values.discoverability = discoverability;
+    }
+    if (typeof patch.readReceipts === 'boolean') {
+      values.readReceipts = patch.readReceipts;
+    }
+    if (typeof patch.typingIndicator === 'boolean') {
+      values.typingIndicator = patch.typingIndicator;
+    }
+    if (patch.notifications) {
+      const n = patch.notifications;
+      if (typeof n.enabled === 'boolean') values.notificationsEnabled = n.enabled;
+      if (typeof n.messages === 'boolean') values.notifyMessages = n.messages;
+      if (typeof n.groups === 'boolean') values.notifyGroups = n.groups;
+      if (typeof n.mentions === 'boolean') values.notifyMentions = n.mentions;
+      if (typeof n.calls === 'boolean') values.notifyCalls = n.calls;
+      if (typeof n.reactions === 'boolean') values.notifyReactions = n.reactions;
+      if (typeof n.sound === 'boolean') values.notificationSound = n.sound;
+      if (typeof n.preview === 'boolean') values.notificationPreview = n.preview;
+    }
+    if (patch.quietHours) {
+      const q = patch.quietHours;
+      if (typeof q.enabled === 'boolean') values.quietHoursEnabled = q.enabled;
+      const start = UsersService.minute(q.startMinute);
+      const end = UsersService.minute(q.endMinute);
+      if (start !== undefined) values.quietStartMinute = start;
+      if (end !== undefined) values.quietEndMinute = end;
+      if (
+        typeof q.utcOffsetMinutes === 'number' &&
+        Number.isInteger(q.utcOffsetMinutes) &&
+        Math.abs(q.utcOffsetMinutes) <= 840
+      ) {
+        values.quietUtcOffsetMinutes = q.utcOffsetMinutes;
+      }
+    }
+    if (Object.keys(values).length > 0) {
+      await this.db.update(users).set(values).where(eq(users.id, userId));
+    }
+    return this.getSettings(userId);
   }
 
   async create(data: {
@@ -152,13 +399,19 @@ export class UsersService {
   }
 
   /** Comptes bloqués par l'utilisateur. */
-  async listBlocked(blockerId: string): Promise<PublicUser[]> {
+  async listBlocked(blockerId: string): Promise<PublicUserView[]> {
     const rows = await this.db
       .select({ user: users })
       .from(blocks)
       .innerJoin(users, eq(users.id, blocks.blockedId))
       .where(eq(blocks.blockerId, blockerId));
-    return rows.map((row) => toPublicUser(row.user));
+    const relations = await this.relationsFor(
+      blockerId,
+      rows.map((row) => row.user.id),
+    );
+    return rows.map((row) =>
+      toPublicUserView(row.user, relations.get(row.user.id) ?? { isContact: false, blocked: true }),
+    );
   }
 
   /** L'un des deux a-t-il bloqué l'autre ? */
@@ -232,6 +485,11 @@ export class UsersService {
   async getProfile(userId: string, viewerId: string): Promise<UserProfile> {
     const user = await this.getByIdOrThrow(userId);
     const isMe = user.id === viewerId;
+    const relation = isMe
+      ? { isContact: true, blocked: false }
+      : await this.relationWith(viewerId, user.id);
+    const view = isMe ? toPublicUser(user) : toPublicUserView(user, relation);
+    const canSeeProfile = isMe || canSee(user.profileVisibility, relation);
 
     const [messagesRow] = await this.db
       .select({ value: count() })
@@ -268,8 +526,18 @@ export class UsersService {
     }
 
     return {
-      ...toPublicUser(user),
+      id: view.id,
+      username: view.username,
+      displayName: view.displayName,
+      bio: view.bio,
+      avatarUrl: view.avatarUrl,
+      gender: view.gender,
+      createdAt: view.createdAt,
       isMe,
+      age: canSeeProfile ? calculateAge(user.birthday) : null,
+      city: canSeeProfile ? user.city : null,
+      country: canSeeProfile ? user.country : null,
+      birthdateSet: Boolean(user.birthday),
       stats: {
         messages: messagesRow?.value ?? 0,
         conversations: conversationsCount,
@@ -285,7 +553,7 @@ export class UsersService {
   async suggestions(
     userId: string,
     limit = 50,
-  ): Promise<{ recent: PublicUser[]; contacts: PublicUser[] }> {
+  ): Promise<{ recent: PublicUserView[]; contacts: PublicUserView[] }> {
     const capped = Math.min(Math.max(limit, 1), 100);
     const blockRows = await this.db
       .select({ blockerId: blocks.blockerId, blockedId: blocks.blockedId })
@@ -349,13 +617,35 @@ export class UsersService {
       .orderBy(asc(users.displayName))
       .limit(Math.max(capped - recentUsers.length, 0));
 
+    const relations = await this.relationsFor(userId, [
+      ...recentUsers.map((entry) => entry.user.id),
+      ...others.map((entry) => entry.id),
+    ]);
+
     return {
-      recent: recentUsers.map((entry) => toPublicUser(entry.user)),
-      contacts: others.map(toPublicUser),
+      recent: recentUsers.map((entry) =>
+        toPublicUserView(
+          entry.user,
+          relations.get(entry.user.id) ?? { isContact: true, blocked: false },
+        ),
+      ),
+      contacts: others
+        .filter((candidate) =>
+          canSee(
+            candidate.discoverability,
+            relations.get(candidate.id) ?? { isContact: false, blocked: false },
+          ),
+        )
+        .map((candidate) =>
+          toPublicUserView(
+            candidate,
+            relations.get(candidate.id) ?? { isContact: false, blocked: false },
+          ),
+        ),
     };
   }
 
-  async search(query: string, excludeUserId: string): Promise<PublicUser[]> {
+  async search(query: string, excludeUserId: string): Promise<PublicUserView[]> {
     const pattern = `%${query.trim()}%`;
     const rows = await this.db
       .select()
@@ -367,6 +657,22 @@ export class UsersService {
         ),
       )
       .limit(20);
-    return rows.map(toPublicUser);
+    const relations = await this.relationsFor(
+      excludeUserId,
+      rows.map((row) => row.id),
+    );
+    return rows
+      .filter((row) =>
+        canSee(
+          row.discoverability,
+          relations.get(row.id) ?? { isContact: false, blocked: false },
+        ),
+      )
+      .map((row) =>
+        toPublicUserView(
+          row,
+          relations.get(row.id) ?? { isContact: false, blocked: false },
+        ),
+      );
   }
 }
