@@ -43,6 +43,9 @@ export async function openE2eeDatabase(): Promise<E2eeDatabase> {
         if (!version?.cipher_version) {
           throw new Error('SQLCipher indisponible dans cette build');
         }
+        // Le premier vrai accès au fichier : c'est là qu'un fichier illisible
+        // se révèle, il doit tomber dans le reessai ci-dessous.
+        await db.getFirstAsync<{ c: number }>('SELECT count(*) AS c FROM sqlite_master');
         break;
       } catch (cause) {
         // Fichier illisible avec cette clé (suppression de récupération qui a
