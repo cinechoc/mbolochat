@@ -240,6 +240,39 @@ export async function saveLocalMessage(
   );
 }
 
+/** Ligne provisoire (avant accusé serveur) : id = clientId, renommée après ack. */
+export async function renameLocalMessage(
+  db: SQLiteDatabase,
+  clientId: string,
+  serverId: string,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE e2ee_messages SET id = ?, client_id = ? WHERE id = ?',
+    serverId,
+    clientId,
+    clientId,
+  );
+}
+
+export async function deleteLocalMessage(db: SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync('DELETE FROM e2ee_messages WHERE id = ?', id);
+}
+
+/** Identifiants déjà présents pour ignorer le re-déchiffrement de l'historique. */
+export async function knownMessageKeys(
+  db: SQLiteDatabase,
+  conversationId: string,
+): Promise<{ ids: Set<string>; clientIds: Set<string> }> {
+  const rows = await db.getAllAsync<{ id: string; client_id: string | null }>(
+    'SELECT id, client_id FROM e2ee_messages WHERE conversation_id = ?',
+    conversationId,
+  );
+  return {
+    ids: new Set(rows.map((row) => row.id)),
+    clientIds: new Set(rows.map((row) => row.client_id).filter(Boolean) as string[]),
+  };
+}
+
 export async function listLocalMessages(
   db: SQLiteDatabase,
   conversationId: string,

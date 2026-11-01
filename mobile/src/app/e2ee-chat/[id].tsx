@@ -14,6 +14,7 @@ import { connectSocket, ensureSocket } from '@/lib/socket';
 import type { ConversationSummary, Message } from '@/lib/types';
 import { bootstrapE2ee } from '@/features/e2ee/bootstrap';
 import {
+  knownMessageKeys,
   listLocalMessages,
   loadDraft,
   loadE2eeAccount,
@@ -68,7 +69,11 @@ export default function E2eeChatScreen() {
   }, []);
 
   const addStored = useCallback((stored: StoredE2eeMessage) => {
-    setMessages((previous) => sortMessages([...previous, stored]));
+    setMessages((previous) =>
+      previous.some((item) => item.id === stored.id)
+        ? previous
+        : sortMessages([...previous, stored]),
+    );
   }, []);
 
   const decryptMessage = useCallback(
@@ -84,12 +89,28 @@ export default function E2eeChatScreen() {
         });
         await persistAccount(result.account);
         addStored(result.stored);
+        if (result.keyChanged) {
+          Alert.alert(fr.e2eeChat.keyChangedTitle, fr.e2eeChat.keyChangedBody);
+        }
         return result.stored;
       } catch {
         return null;
       }
     },
     [addStored, persistAccount, token, user?.id],
+  );
+
+  // Les déchiffrements doivent se suivre : deux messages simultanés partiraient
+  // du même pickle de session et le second échouerait silencieusement.
+  const decryptChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const queueDecrypt = useCallback(
+    (message: Message) => {
+      decryptChainRef.current = decryptChainRef.current
+        .then(() => decryptMessage(message))
+        .catch(() => undefined);
+      return decryptChainRef.current;
+    },
+    [decryptMessage],
   );
 
   useEffect(() => {
@@ -114,10 +135,14 @@ export default function E2eeChatScreen() {
         const local = await listLocalMessages(opened.db, conversationId);
         if (!cancelled) setMessages(sortMessages(local));
         const history = await api.listMessages(token, conversationId, { limit: 50 });
+        const known = await knownMessageKeys(opened.db, conversationId);
         for (const message of history) {
-          if (message.encryption === 'v1') {
-            await decryptMessage(message);
-          }
+          if (message.encryption !== 'v1') continue;
+          // Un message déjà stocké (ou sa ligne provisoire) ne se relit pas :
+          // sa clé de ratchet a déjà été consommée.
+          if (known.ids.has(message.id)) continue;
+          if (message.clientId && known.clientIds.has(message.clientId)) continue;
+          await queueDecrypt(message);
         }
         await api.markRead(token, conversationId).catch(() => undefined);
         if (!cancelled) setReady(true);
@@ -131,7 +156,7 @@ export default function E2eeChatScreen() {
     return () => {
       cancelled = true;
     };
-  }, [conversationId, decryptMessage, token, user]);
+  }, [conversationId, queueDecrypt, token, user]);
 
   useEffect(() => {
     if (!token || !ready || !isE2eeEnabled()) return;
@@ -139,7 +164,7 @@ export default function E2eeChatScreen() {
     const onMessage = (message: Message) => {
       if (message.conversationId !== conversationId || message.sender.id === user?.id) return;
       if (message.encryption !== 'v1') return;
-      void decryptMessage(message);
+      void queueDecrypt(message);
       void api.markRead(token, conversationId).catch(() => undefined);
     };
     socket.on('message:new', onMessage);
@@ -147,7 +172,7 @@ export default function E2eeChatScreen() {
     return () => {
       socket.off('message:new', onMessage);
     };
-  }, [conversationId, decryptMessage, ready, token, user?.id]);
+  }, [conversationId, queueDecrypt, ready, token, user?.id]);
 
   useEffect(() => {
     return () => {

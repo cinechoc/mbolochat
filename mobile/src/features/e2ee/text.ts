@@ -6,8 +6,10 @@ import { api } from '@/lib/api';
 import { ensureSocket } from '@/lib/socket';
 import type { ConversationSummary, Message } from '@/lib/types';
 import {
+  deleteLocalMessage,
   loadPeerSigningKey,
   loadSession,
+  renameLocalMessage,
   saveLocalMessage,
   savePeerSigningKey,
   saveSession,
@@ -173,34 +175,43 @@ export async function sendEncryptedText(input: {
     allowKeyChange: input.allowKeyChange ?? false,
   });
   const clientId = newClientId();
-  const socket = await ensureSocket(input.token);
-  const result = (await socket
-    .timeout(15000)
-    .emitWithAck('message:send', {
-      conversationId: input.conversation.id,
-      content: '',
-      encryption: 'v1',
-      payload: encrypted.payload,
-      payloadType: encrypted.payloadType,
-      clientId,
-      replyToId: input.replyToId ?? undefined,
-    })) as Message | { error?: string };
-  if ('error' in result && result.error) {
-    throw new Error(result.error);
-  }
-  const serverMessage = result as Message;
-  const stored: StoredE2eeMessage = {
-    id: serverMessage.id,
+  const provisional: StoredE2eeMessage = {
+    id: clientId,
     conversation_id: input.conversation.id,
     sender_id: input.currentUserId,
     sender_name: input.currentUserName,
     body: input.text,
-    created_at: serverMessage.createdAt,
+    created_at: new Date().toISOString(),
     client_id: clientId,
     mine: 1,
   };
-  await saveLocalMessage(input.db, stored);
-  return { clientId, serverMessage, stored };
+  // La ligne provisoire est écrite avant l'envoi : un plantage entre les deux
+  // ne doit pas rendre le message indéchiffrable et invisible.
+  await saveLocalMessage(input.db, provisional);
+  const socket = await ensureSocket(input.token);
+  try {
+    const result = (await socket
+      .timeout(15000)
+      .emitWithAck('message:send', {
+        conversationId: input.conversation.id,
+        content: '',
+        encryption: 'v1',
+        payload: encrypted.payload,
+        payloadType: encrypted.payloadType,
+        clientId,
+        replyToId: input.replyToId ?? undefined,
+      })) as Message | { error?: string };
+    if ('error' in result && result.error) {
+      throw new Error(result.error);
+    }
+    const serverMessage = result as Message;
+    await renameLocalMessage(input.db, clientId, serverMessage.id);
+    const stored: StoredE2eeMessage = { ...provisional, id: serverMessage.id, created_at: serverMessage.createdAt };
+    return { clientId, serverMessage, stored };
+  } catch (cause) {
+    await deleteLocalMessage(input.db, clientId).catch(() => undefined);
+    throw cause;
+  }
 }
 
 export async function decryptIncoming(input: {
@@ -209,7 +220,7 @@ export async function decryptIncoming(input: {
   account: E2eeAccountRow;
   message: Message;
   currentUserId: string;
-}): Promise<{ text: string; account: E2eeAccountRow; stored: StoredE2eeMessage }> {
+}): Promise<{ text: string; account: E2eeAccountRow; stored: StoredE2eeMessage; keyChanged: boolean }> {
   const message = input.message;
   if (message.encryption !== 'v1' || !message.payload) {
     throw new Error('not_encrypted');
@@ -218,40 +229,75 @@ export async function decryptIncoming(input: {
   let session = await loadSession(input.db, peerId);
   let account = input.account;
   let plaintextB64: string;
+  const knownKey = await loadPeerSigningKey(input.db, peerId);
+  let keyChanged = false;
 
-  if (!session) {
+  const openInbound = async (
+    identityKey: string,
+    deviceId: string,
+    signingKey: string,
+  ): Promise<{
+    plaintextB64: string;
+    account: E2eeAccountRow;
+    session: E2eeSessionRow;
+    keyChanged: boolean;
+  }> => {
+    const inbound = await MboloCrypto.secureCreateInbound(
+      account.account_pickle,
+      identityKey,
+      message.payload!,
+    );
+    return {
+      plaintextB64: inbound.plaintext_b64,
+      account: { ...account, account_pickle: inbound.account_pickle },
+      keyChanged: Boolean(knownKey && knownKey !== signingKey),
+      session: {
+        peer_user_id: peerId,
+        peer_device_id: deviceId,
+        session_pickle: inbound.session_pickle,
+        peer_identity_key: identityKey,
+        peer_signing_key: signingKey,
+        updated_at: new Date().toISOString(),
+      },
+    };
+  };
+
+  if (session) {
+    try {
+      const decrypted = await MboloCrypto.secureDecrypt(
+        session.session_pickle,
+        message.payloadType ?? 'normal',
+        message.payload,
+      );
+      plaintextB64 = decrypted.plaintext_b64;
+      session = {
+        ...session,
+        session_pickle: decrypted.session_pickle,
+        updated_at: new Date().toISOString(),
+      };
+    } catch (cause) {
+      // Le pair a changé d'identité et a ouvert une session depuis sa
+      // nouvelle clé : sans repli, sa première réponse serait perdue.
+      if (message.payloadType !== 'prekey') {
+        throw cause;
+      }
+      const bundle = await api.getE2eeKeyBundle(input.token, peerId, false);
+      const opened = await openInbound(bundle.identityKey, bundle.deviceId, bundle.signingKey);
+      account = opened.account;
+      session = opened.session;
+      plaintextB64 = opened.plaintextB64;
+      keyChanged = opened.keyChanged;
+    }
+  } else {
     if (message.payloadType !== 'prekey') {
       throw new Error('missing_session');
     }
     const bundle = await api.getE2eeKeyBundle(input.token, peerId, false);
-    const inbound = await MboloCrypto.secureCreateInbound(
-      account.account_pickle,
-      bundle.identityKey,
-      message.payload,
-    );
-    account = { ...account, account_pickle: inbound.account_pickle };
-    plaintextB64 = inbound.plaintext_b64;
-    session = {
-      peer_user_id: peerId,
-      peer_device_id: bundle.deviceId,
-      session_pickle: inbound.session_pickle,
-      peer_identity_key: bundle.identityKey,
-      peer_signing_key: bundle.signingKey,
-      updated_at: new Date().toISOString(),
-    };
-    await savePeerSigningKey(input.db, peerId, bundle.signingKey, true);
-  } else {
-    const decrypted = await MboloCrypto.secureDecrypt(
-      session.session_pickle,
-      message.payloadType ?? 'normal',
-      message.payload,
-    );
-    plaintextB64 = decrypted.plaintext_b64;
-    session = {
-      ...session,
-      session_pickle: decrypted.session_pickle,
-      updated_at: new Date().toISOString(),
-    };
+    const opened = await openInbound(bundle.identityKey, bundle.deviceId, bundle.signingKey);
+    account = opened.account;
+    session = opened.session;
+    plaintextB64 = opened.plaintextB64;
+    keyChanged = opened.keyChanged;
   }
 
   let parsed: { v?: number; text?: string };
@@ -264,7 +310,6 @@ export async function decryptIncoming(input: {
     throw new Error('invalid_payload');
   }
 
-  await saveSession(input.db, session);
   const stored: StoredE2eeMessage = {
     id: message.id,
     conversation_id: message.conversationId,
@@ -275,6 +320,12 @@ export async function decryptIncoming(input: {
     client_id: message.clientId,
     mine: 0,
   };
+  // Le texte est écrit avant que la session n'avance : un plantage entre les
+  // deux laisse le message récupérable plutôt que définitivement perdu.
   await saveLocalMessage(input.db, stored);
-  return { text: parsed.text, account, stored };
+  await saveSession(input.db, session);
+  if (keyChanged || !knownKey) {
+    await savePeerSigningKey(input.db, peerId, session.peer_signing_key, true);
+  }
+  return { text: parsed.text, account, stored, keyChanged };
 }
