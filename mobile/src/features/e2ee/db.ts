@@ -291,10 +291,10 @@ export async function searchLocalMessages(
   conversationId: string,
   query: string,
 ): Promise<StoredE2eeMessage[]> {
-  const term = `%${query.replace(/[%_]/g, (character) => `\${character}`)}%`;
+  const term = `%${query.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
   return db.getAllAsync<StoredE2eeMessage>(
     `SELECT * FROM e2ee_messages
-     WHERE conversation_id = ? AND body LIKE ? ESCAPE '\'
+     WHERE conversation_id = ? AND body LIKE ? ESCAPE '\\'
      ORDER BY created_at DESC LIMIT 50`,
     conversationId,
     term,
