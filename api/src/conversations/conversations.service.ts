@@ -490,7 +490,37 @@ export class ConversationsService {
       );
     }
 
+    if (resolvedType === 'DIRECT') {
+      // Les deux appareils peuvent déjà être enregistrés : la conversation
+      // naît chiffrée, sinon elle resterait en clair indéfiniment.
+      await this.enableE2eeIfBothDevices(conversation.id, [
+        currentUserId,
+        ...otherMemberIds,
+      ]);
+    }
+
     return this.getSummaryForUser(conversation.id, currentUserId);
+  }
+
+  /** Bascule une conversation directe si tous ses membres ont un appareil E2EE actif. */
+  private async enableE2eeIfBothDevices(
+    conversationId: string,
+    memberIds: string[],
+  ): Promise<void> {
+    const e2eeEnabled = ['1', 'true'].includes(
+      (process.env.E2EE_ENABLED ?? '').toLowerCase(),
+    );
+    if (!e2eeEnabled) return;
+    const rows = await this.db
+      .select({ userId: e2eeDevices.userId })
+      .from(e2eeDevices)
+      .where(and(inArray(e2eeDevices.userId, memberIds), isNull(e2eeDevices.revokedAt)));
+    if (new Set(rows.map((row) => row.userId)).size !== memberIds.length) return;
+    const now = new Date();
+    await this.db
+      .update(conversations)
+      .set({ e2eeSince: now, updatedAt: now })
+      .where(and(eq(conversations.id, conversationId), isNull(conversations.e2eeSince)));
   }
 
   async listForUser(
