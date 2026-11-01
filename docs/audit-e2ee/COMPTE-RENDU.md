@@ -54,9 +54,32 @@ exerce le vrai noyau crypto et le vrai protocole, sans dépendre d'un second éc
 
 ## 4. Ce qui reste non vérifié et pourquoi
 
-- **Scénario 4 (fichiers du téléphone)** : Waydroid bloque `run-as` et `adb root`. À rejouer sur la machine hôte :
-  `waydroid shell` puis
-  `grep -r "Confirmation_pair_attendue" /data/data/com.groupenzogho.mbolochat/ ; strings /data/data/com.groupenzogho.mbolochat/databases/mbolo-e2ee.db | grep -c onfirmation`
+- **Scénario 4 (fichiers du téléphone)** : Waydroid bloque `run-as` et `adb root`. À rejouer sur la machine hôte avec `waydroid shell` (invite `#` ; si l'invite est `$`, préfixer par `su`). Commandes ci-dessous volontairement sans redirection ni tube, pour être tapées telles quelles. Le paquet est `com.groupenzogho.mbolochat`.
+
+  1. Localiser les fichiers de l'app (expo-sqlite range la base E2EE dans `files/SQLite/`, pas dans `databases/`) :
+     - `ls -la /data/data/com.groupenzogho.mbolochat/files/SQLite/`
+     - `ls -la /data/data/com.groupenzogho.mbolochat/databases/`
+     - repli si la base n'est pas là : `find /data/data/com.groupenzogho.mbolochat -name mbolo-e2ee.db`
+  2. Prouver que la base E2EE est chiffrée — l'en-tête ne doit **pas** être le texte `SQLite format 3` :
+     - `od -An -tx1 -N16 /data/data/com.groupenzogho.mbolochat/files/SQLite/mbolo-e2ee.db`
+     - **succès** : 16 octets quelconques, non reconnaissables (pas la chaîne ASCII `SQLite format 3`).
+     - **défaut** : l'en-tête affiche `SQLite format 3` → la base est en clair.
+  3. Témoin : vérifier que la recherche fonctionne bien sur une base **non** chiffrée (doit trouver au moins une occurrence) :
+     - `grep -a -c -e mbolochat /data/data/com.groupenzogho.mbolochat/databases/mbolochat.db`
+     - **succès** : un nombre ≥ 1 (la sonde lit réellement le fichier).
+     - **défaut** : `0` → la sonde est aveugle, les résultats suivants ne prouvent rien.
+  4. Aucun clair dans l'ensemble des fichiers de l'app (le corps déchiffré ne doit vivre que dans la base chiffrée) :
+     - `grep -r -a -l -e Confirmation_pair_attendue /data/data/com.groupenzogho.mbolochat/`
+     - `grep -r -a -l -e Confirmation_pair_attendue /sdcard/Android/data/com.groupenzogho.mbolochat/`
+     - **succès** : aucune ligne affichée.
+     - **défaut** : un chemin apparaît (par ex. `files/SQLite/mbolo-e2ee.db` ou `databases/RKStorage`) → texte en clair sur disque.
+  5. La base non chiffrée et le stockage AsyncStorage ne contiennent pas le message (`0` attendu) :
+     - `grep -a -c -e Confirmation_pair_attendue /data/data/com.groupenzogho.mbolochat/databases/mbolochat.db`
+     - `grep -a -c -e Confirmation_pair_attendue /data/data/com.groupenzogho.mbolochat/databases/RKStorage`
+     - **succès** : `0` (ou fichier absent pour `RKStorage`).
+     - **défaut** : un nombre ≥ 1.
+
+  Remplacer `Confirmation_pair_attendue` par un texte réellement envoyé dans la conversation chiffrée et connu de ce seul message.
 - **Scénario 11 en app** (livraison réelle FCM) et **scénario 13 appels/voix** : nécessitent un téléphone ARM64 avec Play Services et un second appareil.
 - **Build de release ARM64 avec le drapeau activé** : non testé (les bibliothèques précompilées datent de M2 ; un rebuild EAS est requis avant toute activation).
 
