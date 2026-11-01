@@ -30,5 +30,11 @@ jni = { version = "0.21", optional = true }
 name = "spike"
 path = "src/bin/spike.rs"
 
+[dev-dependencies]
+# Pour les tests de compatibilité : ouverture des pickles libolm (vecteurs
+# croisés générés par scripts/gen-libolm-vectors.c) et vérification des
+# vecteurs officiels RFC 8032 avec les mêmes types que le noyau.
+vodozemac = { version = "=0.11.1", features = ["libolm-compat"] }
+
 [profile.release]
 strip = "debuginfo"
