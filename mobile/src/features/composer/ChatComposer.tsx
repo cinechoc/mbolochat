@@ -16,6 +16,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Svg, { Line, Path } from 'react-native-svg';
+import { LiquidGlass } from '@/components/liquid-glass';
 import { EmojiStickerPanel, type PanelTheme } from '../emoji/EmojiStickerPanel';
 import type { RecentGif } from '../media/GifPanel';
 import type { PersonalSticker } from '../stickers/stickerLibrary';
@@ -484,15 +485,14 @@ export function ChatComposer({
 
         {locked ? (
           <SendButton
-            background={t.sendBg}
-            color={t.accentText}
+            color={t.icon}
             onPress={() => {
               release(false);
               setLocked(false);
             }}
           />
         ) : hasText ? (
-          <SendButton background={t.sendBg} color={t.accentText} onPress={handleSend} />
+          <SendButton color={t.icon} onPress={handleSend} />
         ) : (
           <IconButton
             name={panel === 'plus' ? 'close-circle-outline' : 'plus-circle-outline'}
@@ -571,10 +571,10 @@ function FieldButton({ label, onPress, children }: FieldButtonProps) {
   );
 }
 
-type SendButtonProps = { background: string; color: string; onPress: () => void };
+type SendButtonProps = { color: string; onPress: () => void };
 
-/** Bouton d'envoi : pastille, avion en papier SVG, apparition élastique. */
-function SendButton({ background, color, onPress }: SendButtonProps) {
+/** Bouton d'envoi : pastille en verre, avion en papier SVG, apparition élastique. */
+function SendButton({ color, onPress }: SendButtonProps) {
   const scale = useRef(new Animated.Value(0.55)).current;
   useEffect(() => {
     Animated.spring(scale, { toValue: 1, friction: 6, tension: 140, useNativeDriver: true }).start();
@@ -585,21 +585,19 @@ function SendButton({ background, color, onPress }: SendButtonProps) {
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel="Envoyer"
-        style={({ pressed }) => [
-          styles.send,
-          { backgroundColor: background, shadowColor: background },
-          pressed && styles.sendPressed,
-        ]}
+        style={({ pressed }) => [styles.send, pressed && styles.sendPressed]}
       >
-        <Svg width={20} height={20} viewBox="0 0 24 24">
-          <Path
-            d="M2.4 20.4 21.6 12 2.4 3.6l.1 5.8L14 12 2.5 14.6z"
-            fill={color}
-            stroke={color}
-            strokeWidth={1.2}
-            strokeLinejoin="round"
-          />
-        </Svg>
+        <LiquidGlass radius={Radii.full} tint={color} style={styles.sendGlass}>
+          <Svg width={20} height={20} viewBox="0 0 24 24">
+            <Path
+              d="M2.4 20.4 21.6 12 2.4 3.6l.1 5.8L14 12 2.5 14.6z"
+              fill={color}
+              stroke={color}
+              strokeWidth={1.2}
+              strokeLinejoin="round"
+            />
+          </Svg>
+        </LiquidGlass>
       </Pressable>
     </Animated.View>
   );
@@ -704,13 +702,12 @@ const styles = StyleSheet.create({
   send: {
     width: 40,
     height: 40,
+  },
+  sendGlass: {
+    flex: 1,
     borderRadius: Radii.full,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
   },
   sendPressed: { transform: [{ scale: 0.92 }], opacity: 0.92 },
 });

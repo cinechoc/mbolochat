@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { LiquidGlass } from '@/components/liquid-glass';
 import { Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { fr } from '@/i18n/fr';
@@ -364,9 +365,11 @@ export default function E2eeChatScreen() {
           accessibilityRole="button"
           style={({ pressed }) => [
             styles.send,
-            { backgroundColor: theme.accent, opacity: sending || !draft.trim() ? 0.5 : pressed ? 0.8 : 1 },
+            { opacity: sending || !draft.trim() ? 0.5 : pressed ? 0.85 : 1 },
           ]}>
-          <ThemedText style={styles.sendLabel}>{fr.e2eeChat.send}</ThemedText>
+          <LiquidGlass radius={Radii.button} style={styles.sendGlass}>
+            <ThemedText style={styles.sendLabel}>{fr.e2eeChat.send}</ThemedText>
+          </LiquidGlass>
         </Pressable>
       </View>
     </ThemedView>
@@ -405,8 +408,13 @@ const styles = StyleSheet.create({
   },
   send: {
     minHeight: 44,
-    borderRadius: Radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendGlass: {
+    minHeight: 44,
     paddingHorizontal: Spacing.three,
+    borderRadius: Radii.button,
     alignItems: 'center',
     justifyContent: 'center',
   },

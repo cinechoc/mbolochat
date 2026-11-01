@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Button } from '@/components/ui';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Radii, Spacing } from '@/constants/theme';
@@ -99,17 +100,11 @@ export default function SecurityScreen() {
           autoCapitalize="none"
           style={inputStyle}
         />
-        <Pressable
+        <Button
+          title="Modifier le mot de passe"
           onPress={() => void submit()}
-          disabled={busy}
-          style={({ pressed }) => [
-            styles.submit,
-            { backgroundColor: theme.accent, opacity: busy ? 0.6 : pressed ? 0.85 : 1 },
-          ]}>
-          <ThemedText style={styles.submitLabel}>
-            {busy ? 'Modification…' : 'Modifier le mot de passe'}
-          </ThemedText>
-        </Pressable>
+          loading={busy}
+        />
         <Pressable onPress={() => router.back()} style={styles.cancel}>
           <ThemedText type="small" themeColor="textSecondary">
             {fr.common.cancel}
@@ -133,13 +128,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     fontSize: 16,
   },
-  submit: {
-    minHeight: 48,
-    borderRadius: Radii.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: Spacing.two,
-  },
-  submitLabel: { color: '#ffffff', fontWeight: '700', fontSize: 16 },
   cancel: { alignSelf: 'center', padding: Spacing.two },
 });

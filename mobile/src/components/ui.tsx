@@ -10,7 +10,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { ThemedText } from './themed-text';
-import { Spacing, Radii } from '@/constants/theme';
+import { LiquidGlass } from './liquid-glass';
+import { PressScale, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export const accentColor = '#3c87f7';
@@ -69,19 +70,55 @@ export function Button({ title, onPress, loading, disabled, variant = 'primary' 
     <Pressable
       onPress={onPress}
       disabled={isDisabled}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ disabled: isDisabled, busy: Boolean(loading) }}
       style={({ pressed }) => [
         styles.button,
-        { backgroundColor: isPrimary ? accentColor : theme.backgroundElement },
-        (pressed || isDisabled) && styles.buttonPressed,
+        isDisabled && styles.buttonDisabled,
+        pressed && !isDisabled && styles.buttonPressed,
       ]}>
-      {loading ? (
-        <ActivityIndicator color={isPrimary ? '#ffffff' : theme.text} />
+      {isPrimary ? (
+        <LiquidGlass radius={Radii.button} tint={accentColor} style={styles.glassFill}>
+          <ButtonContent label={title} loading={loading} color={theme.text} emphasized />
+        </LiquidGlass>
       ) : (
-        <ThemedText style={{ color: isPrimary ? '#ffffff' : theme.text, fontWeight: '600' }}>
-          {title}
-        </ThemedText>
+        <View
+          style={[
+            styles.glassFill,
+            styles.plainFill,
+            { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+          ]}>
+          <ButtonContent label={title} loading={loading} color={theme.text} />
+        </View>
       )}
     </Pressable>
+  );
+}
+
+function ButtonContent({
+  label,
+  loading,
+  color,
+  emphasized,
+}: {
+  label: string;
+  loading?: boolean;
+  color: string;
+  emphasized?: boolean;
+}) {
+  return (
+    <View style={styles.buttonContent}>
+      {loading ? <ActivityIndicator size="small" color={color} /> : null}
+      <ThemedText
+        style={[
+          styles.buttonLabel,
+          { color },
+          emphasized ? styles.buttonLabelPrimary : styles.buttonLabelSecondary,
+        ]}>
+        {label}
+      </ThemedText>
+    </View>
   );
 }
 
@@ -105,12 +142,40 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   button: {
-    borderRadius: Radii.md,
-    paddingVertical: Spacing.three,
-    alignItems: 'center',
+    minHeight: 56,
+  },
+  glassFill: {
+    flex: 1,
+    minHeight: 56,
+    alignItems: 'stretch',
     justifyContent: 'center',
   },
+  plainFill: {
+    borderRadius: Radii.button,
+    borderWidth: 1,
+  },
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.three,
+  },
+  buttonLabel: {
+    fontSize: 16,
+  },
+  buttonLabelPrimary: {
+    fontWeight: '700',
+  },
+  buttonLabelSecondary: {
+    fontWeight: '600',
+  },
   buttonPressed: {
-    opacity: 0.6,
+    opacity: 0.85,
+    transform: [{ scale: PressScale }],
+  },
+  buttonDisabled: {
+    opacity: 0.5,
   },
 });
