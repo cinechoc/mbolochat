@@ -14,6 +14,7 @@ import {
   messageReceipts,
   messages,
   users,
+  type E2eeAttachmentRef,
   type MessageAttachment,
 } from '../db/schema.js';
 import { UploadsService } from '../uploads/uploads.service.js';
@@ -72,6 +73,11 @@ export interface MessageDto {
   stickerRef: string | null;
   /** Pièce jointe (photo…), null pour un message texte. */
   attachment: MessageAttachment | null;
+  /**
+   * Référence d'une pièce jointe chiffrée (identifiant du blob), null sinon.
+   * Un message n'a jamais `attachment` et `encryptedAttachment` à la fois.
+   */
+  encryptedAttachment: E2eeAttachmentRef | null;
   /** Clé d'idempotence de l'appareil émetteur (null pour l'historique ancien). */
   clientId: string | null;
   /** Message retiré pour tous : contenu et pièce jointe ne sont plus en base. */
@@ -266,6 +272,7 @@ const messageColumns = {
   payloadType: messages.payloadType,
   senderDeviceId: messages.senderDeviceId,
   attachment: messages.attachment,
+  encryptedAttachment: messages.encryptedAttachment,
   clientId: messages.clientId,
   deletedAt: messages.deletedAt,
   replyToId: messages.replyToId,
@@ -295,6 +302,7 @@ interface MessageRow {
   payloadType: string | null;
   senderDeviceId: string | null;
   attachment: MessageAttachment | null;
+  encryptedAttachment: E2eeAttachmentRef | null;
   clientId: string | null;
   deletedAt: Date | null;
   replyToId: string | null;
@@ -344,6 +352,7 @@ function toMessageDto(row: MessageRow, reactions: ReactionSummary[] = []): Messa
     senderDeviceId: deleted ? null : (row.senderDeviceId ?? null),
     stickerRef: deleted || row.type !== 'sticker' ? null : (row.stickerRef ?? null),
     attachment: deleted ? null : (row.attachment ?? null),
+    encryptedAttachment: deleted ? null : (row.encryptedAttachment ?? null),
     clientId: row.clientId ?? null,
     deleted,
     replyTo: toQuoteDto(row),
@@ -1205,6 +1214,7 @@ export class ConversationsService {
       senderDeviceId: null,
       stickerRef: null,
       attachment: null,
+      encryptedAttachment: null,
       clientId: null,
       deleted: false,
       replyTo: null,
@@ -1452,6 +1462,9 @@ export class ConversationsService {
           eq(messages.conversationId, conversationId),
           isNull(messages.deletedAt),
           isNotNull(messages.attachment),
+          // La galerie ne montre que le clair : une pièce jointe chiffrée est un
+          // ciphertext sans URL, elle n'a rien à y faire (et fuiterait un blob).
+          eq(messages.encryption, 'none'),
           this.hiddenFrom(userId),
         ),
       )
@@ -1765,7 +1778,10 @@ export class ConversationsService {
       ) {
         throw new BadRequestException('Enveloppe chiffrée invalide');
       }
-      if (attachmentId || gifAttachment || sticker) {
+      // Le GIF externe (URL GIPHY) et le sticker de catalogue ne sont pas
+      // chiffrés : ils restent refusés en E2EE. Seule la pièce jointe chiffrée
+      // passe, et son rattachement à cette conversation est vérifié plus bas.
+      if (gifAttachment || sticker) {
         throw new BadRequestException('Média chiffré pas encore disponible');
       }
       if (!senderDeviceId) {
@@ -1818,7 +1834,28 @@ export class ConversationsService {
     // Le GIF GIPHY, lui, n'est pas importé : son URL externe validée est
     // stockée telle quelle (jamais re-hébergée ni altérée, exigence GIPHY).
     let attachment: MessageAttachment | null = null;
-    if (attachmentId) {
+    // Référence d'un ciphertext : ni URL, ni clé, ni nature. Le serveur ne
+    // connaît que le fait qu'un blob chiffré appartient à ce message, pour
+    // pouvoir le purger avec lui. Tout le reste vit dans l'enveloppe Olm.
+    let encryptedAttachment: E2eeAttachmentRef | null = null;
+    if (encryption === 'v1') {
+      if (attachmentId) {
+        // Le fichier doit être un ciphertext rattaché à CETTE conversation :
+        // l'appartenance ayant été journalisée à l'import, on la revérifie ici
+        // plutôt que de faire confiance au client. Un fichier importé pour une
+        // autre discussion est refusé, même si l'expéditeur en est membre.
+        const scoped = await this.uploadsService.isCiphertextForConversation(
+          attachmentId,
+          conversationId,
+          senderId,
+        );
+        const ref = scoped ? await this.uploadsService.encryptedRefOf(attachmentId) : null;
+        if (!ref) {
+          throw new BadRequestException('Pièce jointe chiffrée invalide');
+        }
+        encryptedAttachment = ref;
+      }
+    } else if (attachmentId) {
       const upload = await this.uploadsService.findOwned(attachmentId, senderId);
       if (!upload) {
         throw new BadRequestException('Pièce jointe introuvable');
@@ -1872,6 +1909,7 @@ export class ConversationsService {
         payloadType: encryption === 'v1' ? (payloadType ?? null) : null,
         senderDeviceId: encryption === 'v1' ? (senderDeviceId ?? null) : null,
         attachment,
+        encryptedAttachment: encryption === 'v1' ? encryptedAttachment : null,
         clientId: clientId ?? null,
         replyToId: replyToId ?? null,
       })
@@ -1909,6 +1947,7 @@ export class ConversationsService {
       senderDeviceId: stored.senderDeviceId ?? null,
       stickerRef: stored.type === 'sticker' ? (stored.stickerRef ?? null) : null,
       attachment: stored.attachment ?? null,
+      encryptedAttachment: stored.encryptedAttachment ?? null,
       clientId: stored.clientId ?? null,
       deleted: stored.deletedAt !== null,
       // Un envoi sur deux ne cite rien : on ne paie la jointure que si c'est le cas.
@@ -2004,7 +2043,16 @@ export class ConversationsService {
 
     await this.db
       .update(messages)
-      .set({ content: '', stickerRef: null, attachment: null, deletedAt: new Date() })
+      .set({
+        content: '',
+        stickerRef: null,
+        attachment: null,
+        // Le ciphertext est référencé par le message : retirée pour tous, la
+        // référence disparaît aussi (le blob sera purgé par la rétention).
+        encryptedAttachment: null,
+        payload: null,
+        deletedAt: new Date(),
+      })
       .where(eq(messages.id, messageId));
     return this.messageDto(messageId);
   }
@@ -2080,6 +2128,7 @@ export class ConversationsService {
       payloadType: string | null;
       senderDeviceId: string | null;
       attachment: MessageAttachment | null;
+      encryptedAttachment: E2eeAttachmentRef | null;
       clientId: string | null;
       deletedAt: Date | string | null;
       createdAt: Date;
@@ -2100,6 +2149,7 @@ export class ConversationsService {
         m.payload_type as "payloadType",
         m.sender_device_id as "senderDeviceId",
         m.attachment,
+        m.encrypted_attachment as "encryptedAttachment",
         m.client_id as "clientId",
         m.deleted_at as "deletedAt",
         m.created_at as "createdAt",
@@ -2133,6 +2183,7 @@ export class ConversationsService {
         senderDeviceId: deleted ? null : (row.senderDeviceId ?? null),
         stickerRef: deleted || row.type !== 'sticker' ? null : (row.stickerRef ?? null),
         attachment: deleted ? null : (row.attachment ?? null),
+        encryptedAttachment: deleted ? null : (row.encryptedAttachment ?? null),
         clientId: row.clientId ?? null,
         deleted,
         // L'aperçu d'une liste n'affiche pas la citation : jointure inutile ici.
