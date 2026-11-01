@@ -28,16 +28,34 @@ export interface E2eeDatabase {
 export async function openE2eeDatabase(): Promise<E2eeDatabase> {
   const keys = await MboloCrypto.ensureKeys();
   if (keys.recovered) {
-    await deleteDatabaseAsync(DATABASE_NAME).catch(() => undefined);
+    await deleteDatabaseAsync(DATABASE_NAME);
   }
   const { key } = await MboloCrypto.sqlCipherKey();
   let sqlKey = key;
+  let db: SQLiteDatabase | null = null;
   try {
-    const db = await openDatabaseAsync(DATABASE_NAME);
-    await db.execAsync(`PRAGMA key = "x'${sqlKey}'"`);
-    const version = await db.getFirstAsync<{ cipher_version: string }>('PRAGMA cipher_version');
-    if (!version?.cipher_version) {
-      await db.closeAsync();
+    let version = null as { cipher_version: string } | null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        db = await openDatabaseAsync(DATABASE_NAME);
+        await db.execAsync(`PRAGMA key = "x'${sqlKey}'"`);
+        version = await db.getFirstAsync<{ cipher_version: string }>('PRAGMA cipher_version');
+        if (!version?.cipher_version) {
+          throw new Error('SQLCipher indisponible dans cette build');
+        }
+        break;
+      } catch (cause) {
+        // Fichier illisible avec cette clé (suppression de récupération qui a
+        // échoué, corruption) : on repart d'une base propre plutôt que de
+        // laisser l'app bloquée sur un fichier indéchiffrable.
+        if (attempt === 1 || !String(cause).includes('file is not a database')) {
+          throw cause;
+        }
+        await db?.closeAsync().catch(() => undefined);
+        await deleteDatabaseAsync(DATABASE_NAME);
+      }
+    }
+    if (!db || !version) {
       throw new Error('SQLCipher indisponible dans cette build');
     }
     await db.execAsync(`
