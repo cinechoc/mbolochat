@@ -1,21 +1,55 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use jni::objects::{JObject, JString};
+use jni::objects::{JByteArray, JObject, JString};
 use jni::sys::jstring;
 use jni::JNIEnv;
 use serde::Serialize;
+use zeroize::Zeroizing;
 
 use crate::error::CryptoError;
 use crate::{
-    create_account, create_inbound_and_decrypt, create_outbound_and_encrypt, decrypt, decrypt_file,
-    encrypt, encrypt_file, generate_fallback_key_signed, generate_one_time_keys,
-    generate_one_time_keys_signed, self_test, verify_prekey,
+    create_account_with_key, create_inbound_and_decrypt_with_key,
+    create_outbound_and_encrypt_with_key, decrypt_file, decrypt_with_key, encrypt_file,
+    encrypt_with_key, generate_fallback_key_signed_with_key,
+    generate_one_time_keys_signed_with_key, generate_one_time_keys_with_key, self_test,
+    verify_prekey,
 };
 
-fn read_string(env: &mut JNIEnv, value: &JString) -> Result<String, CryptoError> {
+/// Lit une chaîne sensible : la copie Rust est effacée à la libération.
+/// (La copie côté JVM, immuable, ne peut pas être zeroïsée : risque résiduel
+/// documenté pour les entrées qui existent déjà côté JS.)
+fn read_secret_string(env: &mut JNIEnv, value: &JString) -> Result<Zeroizing<String>, CryptoError> {
     env.get_string(value)
-        .map(Into::into)
+        .map(|reference| Zeroizing::new(String::from(reference)))
         .map_err(|_| CryptoError::InvalidInput)
+}
+
+/// Lit un tableau d'octets sensible (clé de pickle, clé de fichier) : les deux
+/// copies intermédiaires (jbyte i8 puis u8) sont effacées à la libération.
+fn read_secret_bytes(
+    env: &mut JNIEnv,
+    value: &JByteArray,
+) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+    let length = env
+        .get_array_length(value)
+        .map_err(|_| CryptoError::InvalidInput)? as usize;
+    let mut scratch = Zeroizing::new(vec![0i8; length]);
+    env.get_byte_array_region(value, 0, &mut scratch[..])
+        .map_err(|_| CryptoError::InvalidInput)?;
+    let bytes = scratch.iter().map(|&byte| byte as u8).collect::<Vec<u8>>();
+    Ok(Zeroizing::new(bytes))
+}
+
+/// Clé de pickle brute : exactement 32 octets, jamais en base64 côté JVM.
+fn read_pickle_key(
+    env: &mut JNIEnv,
+    value: &JByteArray,
+) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+    let key = read_secret_bytes(env, value)?;
+    if key.len() != 32 {
+        return Err(CryptoError::InvalidInput);
+    }
+    Ok(key)
 }
 
 fn finish<T: Serialize>(env: &mut JNIEnv, result: Result<T, CryptoError>) -> jstring {
@@ -47,13 +81,13 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeVer
 pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeCreateAccount(
     mut env: JNIEnv,
     _this: JObject,
-    pickle_key: JString,
+    pickle_key: JByteArray,
 ) -> jstring {
-    let key = match read_string(&mut env, &pickle_key) {
+    let key = match read_pickle_key(&mut env, &pickle_key) {
         Ok(value) => value,
         Err(error) => return finish::<()>(&mut env, Err(error)),
     };
-    finish(&mut env, guarded(|| create_account(&key)))
+    finish(&mut env, guarded(|| create_account_with_key(&key)))
 }
 
 #[no_mangle]
@@ -61,12 +95,12 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeGen
     mut env: JNIEnv,
     _this: JObject,
     account_pickle: JString,
-    pickle_key: JString,
+    pickle_key: JByteArray,
     count: jni::sys::jint,
 ) -> jstring {
     let (account, key) = match (
-        read_string(&mut env, &account_pickle),
-        read_string(&mut env, &pickle_key),
+        read_secret_string(&mut env, &account_pickle),
+        read_pickle_key(&mut env, &pickle_key),
     ) {
         (Ok(account), Ok(key)) => (account, key),
         (Err(error), _) | (_, Err(error)) => return finish::<()>(&mut env, Err(error)),
@@ -76,7 +110,7 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeGen
     }
     finish(
         &mut env,
-        guarded(|| generate_one_time_keys(&account, &key, count as usize)),
+        guarded(|| generate_one_time_keys_with_key(&account, &key, count as usize)),
     )
 }
 
@@ -85,19 +119,18 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeCre
     mut env: JNIEnv,
     _this: JObject,
     account_pickle: JString,
-    pickle_key: JString,
+    pickle_key: JByteArray,
     identity_key: JString,
     one_time_key: JString,
     plaintext_b64: JString,
 ) -> jstring {
-    let values = (
-        read_string(&mut env, &account_pickle),
-        read_string(&mut env, &pickle_key),
-        read_string(&mut env, &identity_key),
-        read_string(&mut env, &one_time_key),
-        read_string(&mut env, &plaintext_b64),
-    );
-    let (account, key, identity, otk, plaintext) = match values {
+    let (account, key, identity, otk, plaintext) = match (
+        read_secret_string(&mut env, &account_pickle),
+        read_pickle_key(&mut env, &pickle_key),
+        read_secret_string(&mut env, &identity_key),
+        read_secret_string(&mut env, &one_time_key),
+        read_secret_string(&mut env, &plaintext_b64),
+    ) {
         (Ok(a), Ok(k), Ok(i), Ok(o), Ok(p)) => (a, k, i, o, p),
         (Err(error), ..)
         | (_, Err(error), ..)
@@ -105,9 +138,15 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeCre
         | (_, _, _, Err(error), _)
         | (_, _, _, _, Err(error)) => return finish::<()>(&mut env, Err(error)),
     };
+    let mut buffer = Zeroizing::new(match crate::b64::decode(&plaintext) {
+        Ok(value) => value,
+        Err(error) => return finish::<()>(&mut env, Err(error)),
+    });
     finish(
         &mut env,
-        guarded(|| create_outbound_and_encrypt(&account, &key, &identity, &otk, &plaintext)),
+        guarded(|| {
+            create_outbound_and_encrypt_with_key(&account, &key, &identity, &otk, &mut buffer)
+        }),
     )
 }
 
@@ -116,21 +155,27 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeEnc
     mut env: JNIEnv,
     _this: JObject,
     session_pickle: JString,
-    pickle_key: JString,
+    pickle_key: JByteArray,
     plaintext_b64: JString,
 ) -> jstring {
-    let values = (
-        read_string(&mut env, &session_pickle),
-        read_string(&mut env, &pickle_key),
-        read_string(&mut env, &plaintext_b64),
-    );
-    let (session, key, plaintext) = match values {
+    let (session, key, plaintext) = match (
+        read_secret_string(&mut env, &session_pickle),
+        read_pickle_key(&mut env, &pickle_key),
+        read_secret_string(&mut env, &plaintext_b64),
+    ) {
         (Ok(s), Ok(k), Ok(p)) => (s, k, p),
         (Err(error), ..) | (_, Err(error), _) | (_, _, Err(error)) => {
             return finish::<()>(&mut env, Err(error))
         }
     };
-    finish(&mut env, guarded(|| encrypt(&session, &key, &plaintext)))
+    let mut buffer = Zeroizing::new(match crate::b64::decode(&plaintext) {
+        Ok(value) => value,
+        Err(error) => return finish::<()>(&mut env, Err(error)),
+    });
+    finish(
+        &mut env,
+        guarded(|| encrypt_with_key(&session, &key, &mut buffer)),
+    )
 }
 
 #[no_mangle]
@@ -138,17 +183,16 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeCre
     mut env: JNIEnv,
     _this: JObject,
     account_pickle: JString,
-    pickle_key: JString,
+    pickle_key: JByteArray,
     identity_key: JString,
     prekey_message: JString,
 ) -> jstring {
-    let values = (
-        read_string(&mut env, &account_pickle),
-        read_string(&mut env, &pickle_key),
-        read_string(&mut env, &identity_key),
-        read_string(&mut env, &prekey_message),
-    );
-    let (account, key, identity, message) = match values {
+    let (account, key, identity, message) = match (
+        read_secret_string(&mut env, &account_pickle),
+        read_pickle_key(&mut env, &pickle_key),
+        read_secret_string(&mut env, &identity_key),
+        read_secret_string(&mut env, &prekey_message),
+    ) {
         (Ok(a), Ok(k), Ok(i), Ok(m)) => (a, k, i, m),
         (Err(error), ..) | (_, Err(error), ..) | (_, _, Err(error), _) | (_, _, _, Err(error)) => {
             return finish::<()>(&mut env, Err(error))
@@ -156,7 +200,7 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeCre
     };
     finish(
         &mut env,
-        guarded(|| create_inbound_and_decrypt(&account, &key, &identity, &message)),
+        guarded(|| create_inbound_and_decrypt_with_key(&account, &key, &identity, &message)),
     )
 }
 
@@ -165,17 +209,16 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeDec
     mut env: JNIEnv,
     _this: JObject,
     session_pickle: JString,
-    pickle_key: JString,
+    pickle_key: JByteArray,
     message_type: JString,
     message_b64: JString,
 ) -> jstring {
-    let values = (
-        read_string(&mut env, &session_pickle),
-        read_string(&mut env, &pickle_key),
-        read_string(&mut env, &message_type),
-        read_string(&mut env, &message_b64),
-    );
-    let (session, key, kind, message) = match values {
+    let (session, key, kind, message) = match (
+        read_secret_string(&mut env, &session_pickle),
+        read_pickle_key(&mut env, &pickle_key),
+        read_secret_string(&mut env, &message_type),
+        read_secret_string(&mut env, &message_b64),
+    ) {
         (Ok(s), Ok(k), Ok(t), Ok(m)) => (s, k, t, m),
         (Err(error), ..) | (_, Err(error), ..) | (_, _, Err(error), _) | (_, _, _, Err(error)) => {
             return finish::<()>(&mut env, Err(error))
@@ -183,7 +226,7 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeDec
     };
     finish(
         &mut env,
-        guarded(|| decrypt(&session, &key, &kind, &message)),
+        guarded(|| decrypt_with_key(&session, &key, &kind, &message)),
     )
 }
 
@@ -195,8 +238,8 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeEnc
     output_path: JString,
 ) -> jstring {
     let values = (
-        read_string(&mut env, &input_path),
-        read_string(&mut env, &output_path),
+        read_secret_string(&mut env, &input_path),
+        read_secret_string(&mut env, &output_path),
     );
     let (input, output) = match values {
         (Ok(i), Ok(o)) => (i, o),
@@ -214,18 +257,17 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeDec
     _this: JObject,
     input_path: JString,
     output_path: JString,
-    file_key_b64: JString,
-    nonce_b64: JString,
+    file_key: JByteArray,
+    nonce: JByteArray,
     expected_sha256: JString,
 ) -> jstring {
-    let values = (
-        read_string(&mut env, &input_path),
-        read_string(&mut env, &output_path),
-        read_string(&mut env, &file_key_b64),
-        read_string(&mut env, &nonce_b64),
-        read_string(&mut env, &expected_sha256),
-    );
-    let (input, output, key, nonce, expected) = match values {
+    let (input, output, key, nonce, expected) = match (
+        read_secret_string(&mut env, &input_path),
+        read_secret_string(&mut env, &output_path),
+        read_secret_bytes(&mut env, &file_key),
+        read_secret_bytes(&mut env, &nonce),
+        read_secret_string(&mut env, &expected_sha256),
+    ) {
         (Ok(i), Ok(o), Ok(k), Ok(n), Ok(s)) => (i, o, k, n, s),
         (Err(error), ..)
         | (_, Err(error), ..)
@@ -238,14 +280,18 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeDec
     } else {
         Some(expected.as_str())
     };
+    // decrypt_file attend du base64 : l'encodage des octets bruts reste confiné
+    // dans des Zeroizing libérées dès l'appel.
+    let key_b64 = Zeroizing::new(crate::b64::encode(&key));
+    let nonce_b64 = Zeroizing::new(crate::b64::encode(&nonce));
     finish(
         &mut env,
         guarded(|| {
             decrypt_file(
                 std::path::Path::new(&input),
                 std::path::Path::new(&output),
-                &key,
-                &nonce,
+                &key_b64,
+                &nonce_b64,
                 expected,
             )
             .map(|size| serde_json::json!({ "plaintext_size": size }))
@@ -260,7 +306,7 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeSel
     work_dir: JString,
     file_mb: jni::sys::jint,
 ) -> jstring {
-    let directory = match read_string(&mut env, &work_dir) {
+    let directory = match read_secret_string(&mut env, &work_dir) {
         Ok(value) => value,
         Err(error) => return finish::<()>(&mut env, Err(error)),
     };
@@ -278,12 +324,12 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeGen
     mut env: JNIEnv,
     _this: JObject,
     account_pickle: JString,
-    pickle_key: JString,
+    pickle_key: JByteArray,
     count: jni::sys::jint,
 ) -> jstring {
     let (account, key) = match (
-        read_string(&mut env, &account_pickle),
-        read_string(&mut env, &pickle_key),
+        read_secret_string(&mut env, &account_pickle),
+        read_pickle_key(&mut env, &pickle_key),
     ) {
         (Ok(account), Ok(key)) => (account, key),
         (Err(error), _) | (_, Err(error)) => return finish::<()>(&mut env, Err(error)),
@@ -293,7 +339,7 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeGen
     }
     finish(
         &mut env,
-        guarded(|| generate_one_time_keys_signed(&account, &key, count as usize)),
+        guarded(|| generate_one_time_keys_signed_with_key(&account, &key, count as usize)),
     )
 }
 
@@ -302,18 +348,18 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeGen
     mut env: JNIEnv,
     _this: JObject,
     account_pickle: JString,
-    pickle_key: JString,
+    pickle_key: JByteArray,
 ) -> jstring {
     let (account, key) = match (
-        read_string(&mut env, &account_pickle),
-        read_string(&mut env, &pickle_key),
+        read_secret_string(&mut env, &account_pickle),
+        read_pickle_key(&mut env, &pickle_key),
     ) {
         (Ok(account), Ok(key)) => (account, key),
         (Err(error), _) | (_, Err(error)) => return finish::<()>(&mut env, Err(error)),
     };
     finish(
         &mut env,
-        guarded(|| generate_fallback_key_signed(&account, &key)),
+        guarded(|| generate_fallback_key_signed_with_key(&account, &key)),
     )
 }
 
@@ -325,12 +371,11 @@ pub extern "system" fn Java_expo_modules_mbolocrypto_MboloCryptoNative_nativeVer
     prekey: JString,
     signature: JString,
 ) -> jstring {
-    let values = (
-        read_string(&mut env, &signing_key),
-        read_string(&mut env, &prekey),
-        read_string(&mut env, &signature),
-    );
-    let (signing, key, sig) = match values {
+    let (signing, key, sig) = match (
+        read_secret_string(&mut env, &signing_key),
+        read_secret_string(&mut env, &prekey),
+        read_secret_string(&mut env, &signature),
+    ) {
         (Ok(s), Ok(k), Ok(v)) => (s, k, v),
         (Err(error), ..) | (_, Err(error), _) | (_, _, Err(error)) => {
             return finish::<()>(&mut env, Err(error))

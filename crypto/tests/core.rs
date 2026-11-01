@@ -3,9 +3,12 @@ use std::path::PathBuf;
 
 use base64::Engine;
 use mbolo_crypto::{
-    create_account, create_inbound_and_decrypt, create_outbound_and_encrypt, decrypt, decrypt_file,
-    encrypt, encrypt_file, generate_fallback_key_signed, generate_one_time_keys,
-    generate_one_time_keys_signed, self_test, verify_prekey, CryptoError,
+    create_account, create_account_with_key, create_inbound_and_decrypt,
+    create_inbound_and_decrypt_with_key, create_outbound_and_encrypt,
+    create_outbound_and_encrypt_with_key, decrypt, decrypt_file, decrypt_with_key, encrypt,
+    encrypt_file, encrypt_with_key, generate_fallback_key_signed, generate_one_time_keys,
+    generate_one_time_keys_signed, generate_one_time_keys_with_key, self_test, verify_prekey,
+    CryptoError,
 };
 
 const PICKLE_KEY: [u8; 32] = [7u8; 32];
@@ -303,4 +306,64 @@ fn signed_prekeys_and_fallback_verify_and_open_sessions() {
     )
     .unwrap();
     assert_eq!(unb64(&inbound.plaintext_b64), b"fallback hello");
+}
+
+/// Contrat d'effacement à la frontière JNI : après un chiffrement réussi, le
+/// tampon de texte clair fourni par l'appelant est remis à zéro, et le message
+/// produit reste déchiffrable par le pair.
+#[test]
+fn with_key_encryption_erases_plaintext_buffer() {
+    let alice = create_account_with_key(&PICKLE_KEY).unwrap();
+    let alice_keys =
+        generate_one_time_keys_with_key(&alice.account_pickle, &PICKLE_KEY, 3).unwrap();
+    let bob = create_account_with_key(&PICKLE_KEY).unwrap();
+    let otk = &alice_keys.keys[0];
+
+    let mut plaintext = b"secret-a-effacer".to_vec();
+    let outbound = create_outbound_and_encrypt_with_key(
+        &bob.account_pickle,
+        &PICKLE_KEY,
+        &alice.curve25519,
+        &otk.key,
+        &mut plaintext,
+    )
+    .unwrap();
+    assert!(
+        plaintext.iter().all(|&byte| byte == 0),
+        "le tampon doit être effacé après create_outbound_and_encrypt_with_key"
+    );
+
+    let inbound = create_inbound_and_decrypt_with_key(
+        &alice_keys.account_pickle,
+        &PICKLE_KEY,
+        &bob.curve25519,
+        &outbound.message,
+    )
+    .unwrap();
+    assert_eq!(unb64(&inbound.plaintext_b64), b"secret-a-effacer");
+
+    let mut reply = b"reponse-effacee".to_vec();
+    let envelope = encrypt_with_key(&inbound.session_pickle, &PICKLE_KEY, &mut reply).unwrap();
+    assert!(
+        reply.iter().all(|&byte| byte == 0),
+        "le tampon doit être effacé après encrypt_with_key"
+    );
+    let received = decrypt_with_key(
+        &outbound.session_pickle,
+        &PICKLE_KEY,
+        &envelope.message_type,
+        &envelope.message,
+    )
+    .unwrap();
+    assert_eq!(unb64(&received.plaintext_b64), b"reponse-effacee");
+}
+
+/// En cas d'erreur (clé de longueur invalide), la fonction ne touche pas au
+/// tampon : l'effacement incombe alors au `Zeroizing` de l'appelant JNI.
+#[test]
+fn with_key_encryption_leaves_buffer_intact_on_error() {
+    let mut plaintext = b"secret".to_vec();
+    let error = encrypt_with_key("pickle-invalide", &[0u8; 31], &mut plaintext);
+    assert!(error.is_err());
+    assert_eq!(plaintext, b"secret");
 }

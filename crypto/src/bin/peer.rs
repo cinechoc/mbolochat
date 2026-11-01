@@ -65,7 +65,9 @@ fn unb64(value: &str) -> Vec<u8> {
 }
 
 fn text_payload(text: &str) -> String {
-    b64(serde_json::json!({ "v": 1, "text": text }).to_string().as_bytes())
+    b64(serde_json::json!({ "v": 1, "text": text })
+        .to_string()
+        .as_bytes())
 }
 
 fn read_text(path: &PathBuf) -> String {
@@ -86,10 +88,10 @@ fn main() {
             getrandom::fill(&mut key).expect("random");
             let key_b64 = b64(&key);
             let created = create_account(&key_b64).expect("account");
-            let signed = generate_one_time_keys_signed(&created.account_pickle, &key_b64, 5)
-                .expect("otk");
-            let fallback = generate_fallback_key_signed(&signed.account_pickle, &key_b64)
-                .expect("fallback");
+            let signed =
+                generate_one_time_keys_signed(&created.account_pickle, &key_b64, 5).expect("otk");
+            let fallback =
+                generate_fallback_key_signed(&signed.account_pickle, &key_b64).expect("fallback");
             fs::write(&key_path, &key_b64).expect("key");
             fs::write(&account_path, &fallback.account_pickle).expect("account");
             // Nouvelle identité : la session ouverte précédente n'a plus de sens.
@@ -174,7 +176,10 @@ fn main() {
             fs::write(&session_path, &next_session).expect("session");
             let decoded = unb64(&plaintext_b64);
             let json: serde_json::Value = serde_json::from_slice(&decoded).expect("json");
-            println!("{}", json.get("text").and_then(|v| v.as_str()).unwrap_or(""));
+            println!(
+                "{}",
+                json.get("text").and_then(|v| v.as_str()).unwrap_or("")
+            );
         }
         _ => panic!("commands: init | send | receive"),
     }
