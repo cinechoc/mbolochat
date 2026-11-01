@@ -27,6 +27,7 @@ import {
   type StoredE2eeMessage,
 } from '@/features/e2ee/db';
 import { isE2eeEnabled } from '@/features/e2ee/policy';
+import { useSecureScreen } from '@/features/e2ee/screen-security';
 import { decryptIncoming, E2eeKeyChangedError, sendEncryptedText } from '@/features/e2ee/text';
 
 function sortMessages(messages: StoredE2eeMessage[]): StoredE2eeMessage[] {
@@ -52,6 +53,10 @@ export default function E2eeChatScreen() {
   const conversationId = params.id ?? '';
   const peerId = params.peerId ?? '';
   const title = params.name ?? fr.e2eeChat.title;
+
+  // FLAG_SECURE pendant toute la vie de l'écran : la conversation chiffrée
+  // n'apparaît jamais en clair dans l'aperçu « applications récentes ».
+  useSecureScreen(true);
 
   const dbRef = useRef<Awaited<ReturnType<typeof openE2eeDatabase>>['db'] | null>(null);
   const accountRef = useRef<E2eeAccountRow | null>(null);

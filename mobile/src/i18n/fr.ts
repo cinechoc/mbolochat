@@ -33,6 +33,10 @@ export const fr = {
     keysLostTitle: 'Clés de chiffrement perdues',
     keysLostBody:
       'Les clés de cet appareil étaient illisibles. De nouvelles clés ont été générées ; l’historique chiffré de cet appareil ne peut pas être récupéré.',
+    securitySection: 'Chiffrement de bout en bout',
+    hideRecentsPreview: 'Masquer l’aperçu dans les applications récentes',
+    hideRecentsPreviewHint:
+      'Pendant une conversation chiffrée, l’aperçu du sélecteur d’applications et les captures d’écran montrent un écran neutre.',
   },
   e2eeDev: {
     title: 'Auto-test E2EE',

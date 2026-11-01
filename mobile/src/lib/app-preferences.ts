@@ -6,10 +6,13 @@ export type AppPreferences = {
   ringtone: boolean;
   /** Mode économie de données : la vidéo d'appel est désactivée. */
   callDataSaver: boolean;
+  /** FLAG_SECURE sur les écrans de conversation chiffrée : l'aperçu
+   * « applications récentes » et les captures montrent un écran neutre. */
+  hideRecentsPreview: boolean;
 };
 
 const STORAGE_KEY = 'mbolo.app-preferences';
-const DEFAULTS: AppPreferences = { ringtone: true, callDataSaver: false };
+const DEFAULTS: AppPreferences = { ringtone: true, callDataSaver: false, hideRecentsPreview: true };
 
 let state: AppPreferences = DEFAULTS;
 const listeners = new Set<() => void>();
@@ -34,6 +37,7 @@ export async function loadAppPreferences(): Promise<void> {
     state = {
       ringtone: parsed.ringtone !== false,
       callDataSaver: parsed.callDataSaver === true,
+      hideRecentsPreview: parsed.hideRecentsPreview !== false,
     };
     emit();
   } catch {
