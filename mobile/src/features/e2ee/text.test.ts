@@ -116,6 +116,8 @@ describe('decryptIncoming — repli après changement de clé', () => {
       account_pickle: 'account-pickle-2',
       session_pickle: 'new-session',
       session_id: 'sid',
+      message_type: 'prekey',
+      message: 'unused',
       plaintext_b64: plaintext('salut'),
     });
 

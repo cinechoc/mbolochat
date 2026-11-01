@@ -22,7 +22,9 @@ export async function bootstrapE2ee(token: string): Promise<BootstrapResult> {
   const { db, recovered } = await openE2eeDatabase();
   try {
     let account = await loadE2eeAccount(db);
+    let createdNow = false;
     if (!account) {
+      createdNow = true;
       const identity = await MboloCrypto.secureCreateAccount();
       const signedKeys = await MboloCrypto.secureGenerateOneTimeKeysSigned(identity.account_pickle, 5);
       const fallback = await MboloCrypto.secureGenerateFallbackKey(signedKeys.account_pickle);
@@ -39,7 +41,9 @@ export async function bootstrapE2ee(token: string): Promise<BootstrapResult> {
     }
 
     const status = await api.getE2eeStatus(token).catch(() => null);
-    const needsRegistration = !status?.registered || !status?.fallbackAvailable;
+    // Compte recréé localement (perte de clés) : le serveur garde l'ancienne
+    // identité sous le même deviceId — il faut republier, même si « registered ».
+    const needsRegistration = createdNow || !status?.registered || !status?.fallbackAvailable;
     if (needsRegistration) {
       let fallback: {
         key?: string;
