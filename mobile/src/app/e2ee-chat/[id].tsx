@@ -543,10 +543,11 @@ export default function E2eeChatScreen() {
                   caption={item.body}
                   onOpen={(uri, opened) => {
                     const id = opened.blob.uploadId;
-                    if (opened.type === 'FILE' || opened.type === 'AUDIO') {
+                    if (opened.type === 'FILE') {
                       // Un document déchiffré s'ouvre dans la visionneuse locale
                       // (le fichier est déjà sur le disque, plus rien à charger).
                       // Son clair ne sera libéré qu'au retour sur cet écran.
+                      // Les vocaux, eux, se lisent dans la bulle (SecureVoicePlayer).
                       openedDocumentRef.current = id;
                       router.push({
                         pathname: '/document-viewer',

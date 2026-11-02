@@ -6,11 +6,12 @@ import { Alert, Pressable, StyleSheet, useWindowDimensions, View } from 'react-n
 import { ThemedText } from '@/components/themed-text';
 import { useChatColors } from '@/constants/chat-theme';
 import { Radii, Spacing } from '@/constants/theme';
-import { formatFileSize, formatMediaDuration, mediaDisplaySize } from '@/features/media/mediaLayout';
+import { formatMediaDuration, mediaDisplaySize } from '@/features/media/mediaLayout';
 import { DocumentMessageBubble } from '@/features/media/MediaMessage';
 import { useAppPreference } from '@/lib/app-preferences';
 import { fr } from '@/i18n/fr';
 import { shouldAutoLoadThumbnail } from './mediaPolicy';
+import { SecureVoicePlayer } from './SecureVoicePlayer';
 import { closeMedia, loadThumbnailDataUrl, openForView } from './mediaStore';
 import type { EncryptedMedia } from './payload';
 import { useNetworkClass } from './useNetworkClass';
@@ -95,7 +96,18 @@ export function SecureMediaMessage({ token, media, mine, caption, onOpen, onLong
     </View>
   ) : null;
 
-  if (media.type === 'FILE' || media.type === 'AUDIO') {
+  if (media.type === 'AUDIO') {
+    // Le vocal se lit dans la bulle, comme en clair : le déchiffrement part du
+    // toucher, la lecture n'ouvre aucune autre application.
+    return (
+      <>
+        <SecureVoicePlayer token={token} media={media} mine={mine} onLongPress={onLongPress} />
+        {captionBlock}
+      </>
+    );
+  }
+
+  if (media.type === 'FILE') {
     return (
       <>
         <DocumentMessageBubble
@@ -107,11 +119,6 @@ export function SecureMediaMessage({ token, media, mine, caption, onOpen, onLong
           onOpen={() => void open()}
           onLongPress={onLongPress ?? (() => undefined)}
         />
-        {media.type === 'AUDIO' ? (
-          <ThemedText type="small" themeColor="textSecondary" style={styles.audioHint}>
-            {media.name ?? fr.e2eeMedia.fileFallbackName} · {formatFileSize(media.blob.size)}
-          </ThemedText>
-        ) : null}
         {captionBlock}
         {state === 'loading' ? (
           <ThemedText type="small" themeColor="textSecondary">
@@ -210,6 +217,5 @@ const styles = StyleSheet.create({
   durationText: { color: '#ffffff' },
   captionBox: { marginTop: Spacing.one, maxWidth: 280 },
   caption: { lineHeight: 18 },
-  audioHint: { marginTop: Spacing.one },
   closeRow: { marginTop: Spacing.one },
 });

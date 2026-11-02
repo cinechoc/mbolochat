@@ -280,4 +280,65 @@ describe('envoi d un média chiffré', () => {
     ).rejects.toThrow('media_too_large');
     expect(cryptoMock.encryptFile).not.toHaveBeenCalled();
   });
+
+  it('envoie une note vocale : onde et durée dans l enveloppe, aucune vignette', async () => {
+    // Clé à la forme normalisée du mock (schéma compressé), celle que lit sizeOf.
+    files.set('file://notes/vocal.m4a', 300);
+    await sendEncryptedMedia({
+      token: 'jeton',
+      db: { runAsync: vi.fn().mockResolvedValue(undefined) } as never,
+      account,
+      conversation,
+      currentUserId: 'me',
+      currentUserName: 'Moi',
+      asset: {
+        uri: 'file:///notes/vocal.m4a',
+        kind: 'audio',
+        mime: 'audio/mp4',
+        name: 'vocal.m4a',
+        durationMs: 4200,
+        waveform: [0.2, 0.8, 0.5],
+      },
+    });
+    // Un seul blob téléversé : un vocal n'a pas de vignette.
+    expect(apiMock.uploadMedia).toHaveBeenCalledTimes(1);
+    expect(apiMock.uploadMedia.mock.calls[0][1]).toMatchObject({ kind: 'AUDIO' });
+    // Onde, durée et type voyagent dans l'enveloppe chiffrée, jamais en clair.
+    const [envelopeInput] = envelopeMock.mock.calls[0] as unknown as [{ plaintext: string }];
+    const payload = JSON.parse(Buffer.from(envelopeInput.plaintext, 'base64').toString('utf8'));
+    expect(payload.v).toBe(2);
+    expect(payload.media.type).toBe('AUDIO');
+    expect(payload.media.duration).toBe(4200);
+    expect(payload.media.waveform).toEqual([0.2, 0.8, 0.5]);
+    expect(payload.media.thumb).toBeUndefined();
+  });
+
+  it('envoie une vidéo : vignette générée, clair non réduit, deux blobs', async () => {
+    // Clé à la forme normalisée du mock (schéma compressé), celle que lit sizeOf.
+    files.set('file://videos/clip.mp4', 1000);
+    await sendEncryptedMedia({
+      token: 'jeton',
+      db: { runAsync: vi.fn().mockResolvedValue(undefined) } as never,
+      account,
+      conversation,
+      currentUserId: 'me',
+      currentUserName: 'Moi',
+      asset: {
+        uri: 'file:///videos/clip.mp4',
+        kind: 'video',
+        mime: 'video/mp4',
+        name: 'clip.mp4',
+      },
+    });
+    // La vidéo n'est pas ré-encodée : sa vignette vient de expo-video-thumbnails,
+    // ImageManipulator n'intervient pas du tout.
+    expect(manipulations).toEqual([]);
+    expect(apiMock.uploadMedia).toHaveBeenCalledTimes(2);
+    expect(apiMock.uploadMedia.mock.calls[0][1]).toMatchObject({ kind: 'VIDEO' });
+    expect(apiMock.uploadMedia.mock.calls[1][1]).toMatchObject({ kind: 'IMAGE' });
+    const [envelopeInput] = envelopeMock.mock.calls[0] as unknown as [{ plaintext: string }];
+    const payload = JSON.parse(Buffer.from(envelopeInput.plaintext, 'base64').toString('utf8'));
+    expect(payload.media.type).toBe('VIDEO');
+    expect(payload.media.thumb).toBeDefined();
+  });
 });

@@ -389,6 +389,65 @@ describe('Médias chiffrés de bout en bout (e2e)', () => {
       .from(uploadConversations)
       .where(eq(uploadConversations.uploadId, saved.id));
     expect(link).toBeUndefined();
+
+    // Après purge, le téléchargement répond 404 — indiscernable d'un
+    // identifiant inconnu, rien à sonder.
+    await request(app.getHttpServer())
+      .get(`/uploads/${saved.id}`)
+      .set('Authorization', `Bearer ${alice.token}`)
+      .expect(404);
+  });
+
+  it('sert la vignette chiffrée comme blob distinct et la tient hors de la galerie', async () => {
+    const { alice, bob, conversation, aliceDevice, conversationsService } =
+      await directPair('MediaThumbA', 'MediaThumbB');
+    const uploadsService = app.get(UploadsService);
+
+    const video = await uploadsService.save(
+      alice.id,
+      asFile('video.bin', 'application/octet-stream', Buffer.from('VIDEO-CIPHER')),
+      {},
+      { encrypted: true, conversationId: conversation.id, kind: 'VIDEO' },
+    );
+    const thumb = await uploadsService.save(
+      alice.id,
+      asFile('thumb.bin', 'application/octet-stream', Buffer.from('THUMB-CIPHER')),
+      {},
+      { encrypted: true, conversationId: conversation.id, kind: 'IMAGE' },
+    );
+    written.push(video.url.replace(/^\//, ''), thumb.url.replace(/^\//, ''));
+
+    // Les deux blobs se téléchargent indépendamment, octet pour octet.
+    const gotVideo = await request(app.getHttpServer())
+      .get(`/uploads/${video.id}`)
+      .set('Authorization', `Bearer ${bob.token}`)
+      .expect(200);
+    expect(Buffer.from(gotVideo.body).equals(Buffer.from('VIDEO-CIPHER'))).toBe(true);
+    const gotThumb = await request(app.getHttpServer())
+      .get(`/uploads/${thumb.id}`)
+      .set('Authorization', `Bearer ${bob.token}`)
+      .expect(200);
+    expect(Buffer.from(gotThumb.body).equals(Buffer.from('THUMB-CIPHER'))).toBe(true);
+
+    // Référencés dans un message chiffré, ils restent exclus de la galerie.
+    await conversationsService.createMessage(
+      conversation.id,
+      alice.id,
+      '',
+      video.id,
+      'm3-thumb',
+      undefined,
+      null,
+      null,
+      'text',
+      undefined,
+      'v1',
+      Buffer.from('E').toString('base64'),
+      aliceDevice.deviceId,
+      'prekey',
+    );
+    const gallery = await conversationsService.listMedia(conversation.id, bob.id, 50);
+    expect(gallery.attachments).toHaveLength(0);
   });
 
   it('refuse l’import chiffré à un non-membre de la conversation déclarée', async () => {

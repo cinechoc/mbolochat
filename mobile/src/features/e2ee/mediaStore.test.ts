@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
-import { extensionForMime, fileSystemPath, openForView, sweepSecureMedia } from './mediaStore';
+import {
+  extensionForMime,
+  fileSystemPath,
+  loadThumbnailDataUrl,
+  openForView,
+  sweepSecureMedia,
+} from './mediaStore';
 
 /** Système de fichiers simulé : on ne garde que ce qui existe encore. */
 const existing = new Set<string>();
@@ -71,6 +77,9 @@ vi.mock('expo-file-system', () => {
       if (downloadsShouldFail) return Promise.reject(new Error('UnableToDownload 404'));
       existing.add(destination.uri);
       return Promise.resolve(destination);
+    }
+    async base64(): Promise<string> {
+      return 'ZmFrZQ==';
     }
   }
   return {
@@ -157,6 +166,24 @@ describe('médias chiffrés — dossier privé', () => {
     sweepSecureMedia();
     // Rien ne subsiste sous le dossier privé ; le reste du domaine documentaire
     // n'appartient pas au média et n'est pas touché.
+    expect(mediaLeftovers()).toHaveLength(0);
+  });
+});
+
+describe('vignette chiffrée — mémoire seule', () => {
+  it('renvoie une data URI du bon MIME et ne laisse rien sur le disque', async () => {
+    const dataUrl = await loadThumbnailDataUrl({ token: 'jeton', blob, mime: 'image/jpeg' });
+    expect(dataUrl.startsWith('data:image/jpeg;base64,')).toBe(true);
+    // Contrairement au média complet, la vignette ne laisse même pas de
+    // dossier : le clair est relu puis effacé dans la foulée.
+    expect(mediaLeftovers()).toHaveLength(0);
+  });
+
+  it('ne laisse aucun reste quand le déchiffrement de la vignette échoue', async () => {
+    cryptoMock.decryptFile.mockRejectedValue(new Error('sha256_mismatch'));
+    await expect(
+      loadThumbnailDataUrl({ token: 'jeton', blob, mime: 'image/jpeg' }),
+    ).rejects.toThrow('sha256_mismatch');
     expect(mediaLeftovers()).toHaveLength(0);
   });
 });
