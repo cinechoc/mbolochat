@@ -1,9 +1,9 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { randomUUID } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -11,7 +11,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { DRIZZLE, type Database } from '../src/db/db.module.js';
 import {
-  conversations,
   messages,
   uploadConversations,
   uploads,
@@ -233,6 +232,45 @@ describe('Médias chiffrés de bout en bout (e2e)', () => {
       {},
     );
     written.push(saved.url.replace(/^\//, ''));
+
+    await request(app.getHttpServer())
+      .get(`/uploads/${saved.id}`)
+      .set('Authorization', `Bearer ${alice.token}`)
+      .expect(404);
+  });
+
+  it('refuse une pièce jointe en clair dans un message chiffré', async () => {
+    const { alice, conversation, aliceDevice, conversationsService } =
+      await directPair('MediaPlainRef', 'MediaPlainRefPeer');
+    const uploadsService = app.get(UploadsService);
+    // Import **en clair** (historique) : aucune autorisation de lecture chiffrée.
+    const saved = await uploadsService.save(
+      alice.id,
+      asFile('photo.png', 'image/png', Buffer.from('PNG')),
+      {},
+    );
+    written.push(saved.url.replace(/^\//, ''));
+
+    // Le message chiffré ne doit pas pouvoir s'appuyer sur un upload clair : la
+    // référence n'a pas d'autorisation de ciphertext, elle est rejetée.
+    await expect(
+      conversationsService.createMessage(
+        conversation.id,
+        alice.id,
+        '',
+        saved.id,
+        'm3-plainref',
+        undefined,
+        null,
+        null,
+        'text',
+        undefined,
+        'v1',
+        Buffer.from('E').toString('base64'),
+        aliceDevice.deviceId,
+        'prekey',
+      ),
+    ).rejects.toThrow(/chiffrée invalide/i);
 
     await request(app.getHttpServer())
       .get(`/uploads/${saved.id}`)

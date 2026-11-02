@@ -3,6 +3,7 @@ import { defaultDatabaseDirectory } from 'expo-sqlite';
 
 import { openE2eeDatabase } from '@/features/e2ee/db';
 import { bootstrapE2ee, type BootstrapResult } from '@/features/e2ee/bootstrap';
+import { sweepSecureMedia } from '@/features/e2ee/mediaStore';
 import { useAuth } from '@/lib/auth-context';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -104,6 +105,9 @@ export function E2eeSpikeScreen() {
     try {
       const simulated = await MboloCrypto.simulateKeyLoss();
       const ensured = await MboloCrypto.ensureKeys();
+      // Identité perdue : les clés des médias temporaires le sont aussi, rien ne
+      // doit rester déchiffrable sur le disque.
+      sweepSecureMedia();
       setKeyLoss({ simulated: simulated.simulated, recovered: ensured.recovered });
     } finally {
       setKeyLossRunning(false);

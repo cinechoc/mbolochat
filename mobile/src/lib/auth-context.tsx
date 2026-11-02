@@ -4,6 +4,7 @@ import { cache } from './cache';
 import { resetEmojiFavorites } from '@/features/emoji/useEmojiFavorites';
 import { resetRecentEmoji } from '@/features/emoji/useRecentEmoji';
 import { resetStickerLibrary } from '@/features/stickers/stickerLibrary';
+import { sweepSecureMedia } from '@/features/e2ee/mediaStore';
 import { resetLocalStore } from './store';
 import { syncPushToken, ensurePushRegistration, getExistingPushToken } from './push';
 import { disconnectSocket } from './socket';
@@ -127,6 +128,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // La file d'envoi, le curseur et l'historique d'émojis appartiennent à
         // ce compte : ils ne doivent pas passer sur le suivant.
         void resetLocalStore();
+        // Un clair de média lu par ce compte ne doit pas survivre à la
+        // déconnexion, même si l'appareil reste allumé.
+        sweepSecureMedia();
         void resetRecentEmoji();
         void resetEmojiFavorites();
         void resetStickerLibrary();

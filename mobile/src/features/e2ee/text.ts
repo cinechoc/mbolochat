@@ -1,4 +1,3 @@
-import { fromByteArray, toByteArray } from 'base64-js';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
@@ -17,6 +16,7 @@ import {
   type E2eeSessionRow,
   type StoredE2eeMessage,
 } from './db';
+import { buildTextV1, encodeMediaMeta, parsePayload, type EncryptedMedia } from './payload';
 
 export class E2eeKeyChangedError extends Error {
   constructor(
@@ -25,29 +25,6 @@ export class E2eeKeyChangedError extends Error {
   ) {
     super('key_changed');
   }
-}
-
-function encodeText(value: string): string {
-  const encoded = encodeURIComponent(value);
-  const bytes: number[] = [];
-  for (let index = 0; index < encoded.length; index += 1) {
-    if (encoded[index] === '%') {
-      bytes.push(Number.parseInt(encoded.slice(index + 1, index + 3), 16));
-      index += 2;
-    } else {
-      bytes.push(encoded.charCodeAt(index));
-    }
-  }
-  return fromByteArray(Uint8Array.from(bytes));
-}
-
-function decodeText(value: string): string {
-  const bytes = toByteArray(value);
-  let encoded = '';
-  for (const byte of bytes) {
-    encoded += `%${byte.toString(16).padStart(2, '0')}`;
-  }
-  return decodeURIComponent(encoded);
 }
 
 function newClientId(): string {
@@ -71,13 +48,21 @@ async function peerOf(
   return { id: peer.id, name: peer.displayName };
 }
 
-async function encryptPayload(input: {
+/**
+ * Chiffre un contenu déjà sérialisé (`plaintext`, base64) et gère la session Olm
+ * avec le pair : réutilise la session existante, ou en ouvre une nouvelle en
+ * consommant une prekey (ou le fallback). Détecte un changement de clé.
+ *
+ * Exporté pour que le chemin média (`media.ts`) partage exactement la même
+ * mécanique de session que le chemin texte : une seule implémentation à éprouver.
+ */
+export async function encryptEnvelope(input: {
   token: string;
   db: SQLiteDatabase;
   account: E2eeAccountRow;
   conversation: ConversationSummary;
   currentUserId: string;
-  text: string;
+  plaintext: string;
   allowKeyChange: boolean;
 }): Promise<{ payload: string; payloadType: 'prekey' | 'normal'; peerId: string; signingKey: string; identityKey: string; deviceId: string }> {
   const peer = await peerOf(input.conversation, input.currentUserId);
@@ -95,7 +80,7 @@ async function encryptPayload(input: {
     session = null;
   }
 
-  const plaintext = encodeText(JSON.stringify({ v: 1, text: input.text }));
+  const plaintext = input.plaintext;
   let result;
   if (session) {
     const envelope = await MboloCrypto.secureEncrypt(session.session_pickle, plaintext);
@@ -165,13 +150,13 @@ export async function sendEncryptedText(input: {
   allowKeyChange?: boolean;
   replyToId?: string | null;
 }): Promise<SendResult> {
-  const encrypted = await encryptPayload({
+  const encrypted = await encryptEnvelope({
     token: input.token,
     db: input.db,
     account: input.account,
     conversation: input.conversation,
     currentUserId: input.currentUserId,
-    text: input.text,
+    plaintext: buildTextV1(input.text),
     allowKeyChange: input.allowKeyChange ?? false,
   });
   const clientId = newClientId();
@@ -184,6 +169,7 @@ export async function sendEncryptedText(input: {
     created_at: new Date().toISOString(),
     client_id: clientId,
     mine: 1,
+    media_meta: null,
   };
   // La ligne provisoire est écrite avant l'envoi : un plantage entre les deux
   // ne doit pas rendre le message indéchiffrable et invisible.
@@ -214,13 +200,28 @@ export async function sendEncryptedText(input: {
   }
 }
 
-export async function decryptIncoming(input: {
+export interface DecryptedEnvelope {
+  plaintextB64: string;
+  account: E2eeAccountRow;
+  session: E2eeSessionRow;
+  keyChanged: boolean;
+  knownKey: string | null;
+}
+
+/**
+ * Ouvre une enveloppe Olm entrante : session existante, ou repli sur une session
+ * entrante quand le pair a changé d'identité. Renvoie le clair codé et la
+ * session avancée, sans rien interpréter du contenu — le décodage du payload est
+ * laissé à l'appelant, qui sait s'il attend un texte ou un média.
+ *
+ * Exporté pour que le chemin média réutilise exactement cette mécanique.
+ */
+export async function decryptEnvelope(input: {
   token: string;
   db: SQLiteDatabase;
   account: E2eeAccountRow;
   message: Message;
-  currentUserId: string;
-}): Promise<{ text: string; account: E2eeAccountRow; stored: StoredE2eeMessage; keyChanged: boolean }> {
+}): Promise<DecryptedEnvelope> {
   const message = input.message;
   if (message.encryption !== 'v1' || !message.payload) {
     throw new Error('not_encrypted');
@@ -300,32 +301,59 @@ export async function decryptIncoming(input: {
     keyChanged = opened.keyChanged;
   }
 
-  let parsed: { v?: number; text?: string };
-  try {
-    parsed = JSON.parse(decodeText(plaintextB64)) as { v?: number; text?: string };
-  } catch {
-    throw new Error('invalid_payload');
-  }
-  if (parsed.v !== 1 || typeof parsed.text !== 'string') {
-    throw new Error('invalid_payload');
-  }
+  return { plaintextB64, account, session, keyChanged, knownKey };
+}
+
+export async function decryptIncoming(input: {
+  token: string;
+  db: SQLiteDatabase;
+  account: E2eeAccountRow;
+  message: Message;
+  currentUserId: string;
+}): Promise<{
+  text: string;
+  media?: EncryptedMedia;
+  account: E2eeAccountRow;
+  stored: StoredE2eeMessage;
+  keyChanged: boolean;
+}> {
+  const message = input.message;
+  const opened = await decryptEnvelope({
+    token: input.token,
+    db: input.db,
+    account: input.account,
+    message,
+  });
+  const { account, session, keyChanged, knownKey } = opened;
+  const parsed = parsePayload(opened.plaintextB64);
+  // Le corps affiché est le texte, ou la légende qui accompagne un média.
+  const body = parsed.kind === 'text' ? parsed.text : parsed.caption;
 
   const stored: StoredE2eeMessage = {
     id: message.id,
     conversation_id: message.conversationId,
     sender_id: message.sender.id,
     sender_name: message.sender.displayName,
-    body: parsed.text,
+    body,
     created_at: message.createdAt,
     client_id: message.clientId,
     mine: 0,
+    // Les clés du média ne vivent que dans la base chiffrée : c'est ici, et
+    // nulle part ailleurs, qu'elles sont conservées pour une lecture ultérieure.
+    media_meta: parsed.kind === 'media' ? encodeMediaMeta(parsed.media) : null,
   };
-  // Le texte est écrit avant que la session n'avance : un plantage entre les
+  // Le message est écrit avant que la session n'avance : un plantage entre les
   // deux laisse le message récupérable plutôt que définitivement perdu.
   await saveLocalMessage(input.db, stored);
   await saveSession(input.db, session);
   if (keyChanged || !knownKey) {
-    await savePeerSigningKey(input.db, peerId, session.peer_signing_key, true);
+    await savePeerSigningKey(input.db, session.peer_user_id, session.peer_signing_key, true);
   }
-  return { text: parsed.text, account, stored, keyChanged };
+  return {
+    text: parsed.kind === 'text' ? parsed.text : parsed.caption,
+    media: parsed.kind === 'media' ? parsed.media : undefined,
+    account,
+    stored,
+    keyChanged,
+  };
 }

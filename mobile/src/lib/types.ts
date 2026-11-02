@@ -205,6 +205,12 @@ export interface Message {
   /** Référence de catalogue d'un sticker (« mbolo/merci »), sinon null. */
   stickerRef: string | null;
   attachment: MessageAttachment | null;
+  /**
+   * Pièce jointe chiffrée de bout en bout : le serveur n'en connaît que
+   * l'identifiant d'upload. Le type, la taille et la clé voyagent dans
+   * l'enveloppe Olm (`payload`), jamais ici.
+   */
+  encryptedAttachment?: { uploadId: string } | null;
   /** Clé d'idempotence de l'appareil émetteur (null pour l'historique ancien). */
   clientId: string | null;
   /** Retiré pour tous : contenu et pièce jointe ne sont plus nulle part. */

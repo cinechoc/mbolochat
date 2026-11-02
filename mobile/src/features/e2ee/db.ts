@@ -21,6 +21,26 @@ export interface E2eeDatabase {
 }
 
 /**
+ * Ajoute à une table les colonnes qui manquent, sans erreur si elles existent
+ * déjà : `ALTER TABLE ... ADD COLUMN` n'est pas idempotent, `PRAGMA table_info`
+ * l'est. C'est la façon dont une base ouverte par une version antérieure gagne
+ * les colonnes d'une version plus récente.
+ */
+async function addMissingColumns(
+  db: SQLiteDatabase,
+  table: string,
+  columns: [string, string][],
+): Promise<void> {
+  const existing = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+  const present = new Set(existing.map((column) => column.name));
+  for (const [name, type] of columns) {
+    if (!present.has(name)) {
+      await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    }
+  }
+}
+
+/**
  * Ouvre la base locale chiffrée. La clé SQLCipher est générée et protégée par
  * le Keystore ; elle ne transite ici que le temps du PRAGMA key (risque accepté
  * pour la v1, documenté dans le rapport).
@@ -28,6 +48,11 @@ export interface E2eeDatabase {
 export async function openE2eeDatabase(): Promise<E2eeDatabase> {
   const keys = await MboloCrypto.ensureKeys();
   if (keys.recovered) {
+    // Identité recréée : les clés qui ouvraient les médias temporaires ont
+    // disparu, ces fichiers sont désormais illisibles et ne doivent pas rester.
+    // Import paresseux : la base ne doit pas dépendre du système de fichiers.
+    const { sweepSecureMedia } = await import('./mediaStore');
+    sweepSecureMedia();
     await deleteDatabaseAsync(DATABASE_NAME);
   }
   const { key } = await MboloCrypto.sqlCipherKey();
@@ -71,18 +96,11 @@ export async function openE2eeDatabase(): Promise<E2eeDatabase> {
         created_at TEXT NOT NULL
       );
     `);
-    const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(e2ee_account)');
-    const existing = new Set(columns.map((column) => column.name));
-    const additions: [string, string][] = [
+    await addMissingColumns(db, 'e2ee_account', [
       ['fallback_key', 'TEXT'],
       ['fallback_signature', 'TEXT'],
       ['fallback_key_id', 'TEXT'],
-    ];
-    for (const [name, type] of additions) {
-      if (!existing.has(name)) {
-        await db.execAsync(`ALTER TABLE e2ee_account ADD COLUMN ${name} ${type}`);
-      }
-    }
+    ]);
     await db.execAsync(`
       CREATE TABLE IF NOT EXISTS e2ee_sessions (
         peer_user_id TEXT PRIMARY KEY,
@@ -115,6 +133,10 @@ export async function openE2eeDatabase(): Promise<E2eeDatabase> {
         body TEXT NOT NULL
       );
     `);
+    // Colonnes ajoutées après coup : `media_meta` porte la référence du média
+    // chiffré (clé du fichier, nonce, empreinte) — elle ne quitte jamais cette
+    // base SQLCipher, contrairement au corps du message qui peut être vide.
+    await addMissingColumns(db, 'e2ee_messages', [['media_meta', 'TEXT']]);
     return { db, recovered: keys.recovered, cipherVersion: version.cipher_version };
   } finally {
     sqlKey = '';
@@ -239,6 +261,12 @@ export interface StoredE2eeMessage {
   created_at: string;
   client_id: string | null;
   mine: number;
+  /**
+   * Référence JSON du média chiffré (blob + vignette, clés comprises), ou
+   * `null` pour un message texte. Stockée dans la base SQLCipher : c'est la
+   * seule copie des clés, elle ne doit jamais atterrir dans `mbolochat.db`.
+   */
+  media_meta: string | null;
 }
 
 export async function saveLocalMessage(
@@ -247,8 +275,8 @@ export async function saveLocalMessage(
 ): Promise<void> {
   await db.runAsync(
     `INSERT INTO e2ee_messages
-       (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine, media_meta)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET body = excluded.body`,
     message.id,
     message.conversation_id,
@@ -258,6 +286,7 @@ export async function saveLocalMessage(
     message.created_at,
     message.client_id,
     message.mine,
+    message.media_meta ?? null,
   );
 }
 

@@ -2,6 +2,7 @@ import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
 import { api } from '@/lib/api';
 import { isE2eeEnabled } from './policy';
 import { loadE2eeAccount, openE2eeDatabase, saveE2eeAccount } from './db';
+import { sweepSecureMedia } from './mediaStore';
 
 export interface BootstrapResult {
   disabled: boolean;
@@ -19,6 +20,9 @@ export async function bootstrapE2ee(token: string): Promise<BootstrapResult> {
   if (!isE2eeEnabled()) {
     return { disabled: true, recovered: false, registered: false };
   }
+  // Un démarrage laisse toujours le dossier privé vide : s'il restait un clair
+  // d'une session arrêtée en plein visionnage, il disparaît avant tout accès.
+  sweepSecureMedia();
   const { db, recovered } = await openE2eeDatabase();
   try {
     let account = await loadE2eeAccount(db);

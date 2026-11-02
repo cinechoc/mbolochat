@@ -289,6 +289,12 @@ export const api = {
       width?: number;
       height?: number;
       durationMs?: number;
+      /** Import chiffré de bout en bout : le corps est déjà du ciphertext. */
+      encrypted?: boolean;
+      /** Conversation déclarée, vérifiée par le serveur avant tout enregistrement. */
+      conversationId?: string;
+      /** Nature du clair d'origine (IMAGE, VIDEO…), pour l'affichage. */
+      kind?: string;
     },
     onProgress?: (fraction: number, uploadedBytes: number, totalBytes: number) => void,
   ): Promise<UploadResult> {
@@ -302,6 +308,9 @@ export const api = {
       if (asset.width) form.append('width', String(Math.round(asset.width)));
       if (asset.height) form.append('height', String(Math.round(asset.height)));
       if (asset.durationMs) form.append('duration', String(Math.round(asset.durationMs)));
+      if (asset.encrypted) form.append('encrypted', '1');
+      if (asset.conversationId) form.append('conversationId', asset.conversationId);
+      if (asset.kind) form.append('kind', asset.kind);
       return form;
     };
 

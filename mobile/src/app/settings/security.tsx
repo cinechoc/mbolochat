@@ -26,6 +26,8 @@ export default function SecurityScreen() {
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [hidePreview, setHidePreview] = useAppPreference('hideRecentsPreview');
+  const [wifiDownload, setWifiDownload] = useAppPreference('mediaAutoDownloadWifi');
+  const [cellularDownload, setCellularDownload] = useAppPreference('mediaAutoDownloadCellular');
 
   if (!token) {
     return <Redirect href="/login" />;
@@ -129,6 +131,27 @@ export default function SecurityScreen() {
             </View>
             <ThemedText type="small" themeColor="textSecondary">
               {fr.e2ee.hideRecentsPreviewHint}
+            </ThemedText>
+            <View style={styles.switchRow}>
+              <ThemedText style={styles.switchLabel}>{fr.e2ee.mediaAutoDownloadWifi}</ThemedText>
+              <Switch
+                value={wifiDownload}
+                onValueChange={setWifiDownload}
+                accessibilityLabel={fr.e2ee.mediaAutoDownloadWifi}
+              />
+            </View>
+            <View style={styles.switchRow}>
+              <ThemedText style={styles.switchLabel}>
+                {fr.e2ee.mediaAutoDownloadCellular}
+              </ThemedText>
+              <Switch
+                value={cellularDownload}
+                onValueChange={setCellularDownload}
+                accessibilityLabel={fr.e2ee.mediaAutoDownloadCellular}
+              />
+            </View>
+            <ThemedText type="small" themeColor="textSecondary">
+              {fr.e2ee.mediaAutoDownloadHint}
             </ThemedText>
           </View>
         ) : null}

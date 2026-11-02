@@ -28,6 +28,24 @@ export const fr = {
     keyChangedBody: 'Vérifiez le code de sécurité ou envoyez quand même à vos risques.',
     verifyCode: 'Vérifier le code',
     sendAnyway: 'Envoyer quand même',
+    attachPhotos: 'Photos/Vidéos',
+    attachCamera: 'Appareil photo',
+    attachFile: 'Fichier',
+    mediaTooLarge: 'Ce fichier est trop lourd pour être envoyé.',
+    mediaUnreadable: 'Ce fichier n’a pas pu être préparé.',
+    mediaSendFailed: 'L’envoi du média a échoué.',
+    sendingMedia: 'Envoi en cours…',
+  },
+  e2eeMedia: {
+    openLabel: 'Ouvrir le média',
+    fileFallbackName: 'fichier',
+    opening: 'Ouverture…',
+    close: 'Fermer le média',
+    errorTitle: 'Lecture impossible',
+    errorBody: 'Le média n’a pas pu être ouvert. Réessaie dans un instant.',
+    voiceName: 'Note vocale',
+    micTitle: 'Micro non autorisé',
+    micBody: 'Autorise le micro dans les réglages pour envoyer une note vocale.',
   },
   e2ee: {
     keysLostTitle: 'Clés de chiffrement perdues',
@@ -37,6 +55,10 @@ export const fr = {
     hideRecentsPreview: 'Masquer l’aperçu dans les applications récentes',
     hideRecentsPreviewHint:
       'Pendant une conversation chiffrée, l’aperçu du sélecteur d’applications et les captures d’écran montrent un écran neutre.',
+    mediaAutoDownloadWifi: 'Charger les aperçus en Wi-Fi',
+    mediaAutoDownloadCellular: 'Charger les aperçus en données mobiles',
+    mediaAutoDownloadHint:
+      'Les photos et vidéos reçues ne se chargent entièrement qu’à l’ouverture ; ces réglages ne concernent que leur aperçu.',
   },
   e2eeDev: {
     title: 'Auto-test E2EE',

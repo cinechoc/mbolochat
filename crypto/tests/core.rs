@@ -236,6 +236,10 @@ fn file_hash_mismatch_is_reported() {
     )
     .unwrap_err();
     assert!(matches!(error, CryptoError::HashMismatch));
+    // Une empreinte refusée ne doit laisser aucun clair partiel derrière elle :
+    // l'appelant efface son dossier de travail, mais le noyau ne doit déjà rien
+    // avoir écrit quand il détecte la fraude.
+    assert!(!output.exists());
 }
 
 #[test]
