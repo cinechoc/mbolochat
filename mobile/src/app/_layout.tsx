@@ -15,6 +15,7 @@ import { TextScaleProvider } from '@/lib/text-scale';
 import { ThemePreferenceProvider, useThemePreference } from '@/lib/theme-preference';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { E2eeBootstrapGate } from '@/features/e2ee/BootstrapGate';
+import { CityAutoDetector } from '@/features/location/CityAutoDetector';
 import { drain } from '@/lib/outbox';
 import { configureNotificationHandler, subscribeToNotificationOpens } from '@/lib/push';
 import { runSync, startReliability } from '@/lib/sync';
@@ -55,6 +56,7 @@ function RootLayoutBody() {
               <CallBanner />
               <NotificationRouter />
               <ReliabilityLoop />
+              <CityAutoDetector />
               <PresenceProvider />
             </CallProvider>
           </ThemeProvider>

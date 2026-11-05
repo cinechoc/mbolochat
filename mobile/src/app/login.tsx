@@ -1,25 +1,33 @@
 import { Link, Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
-import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { useRef, useState, type ComponentRef } from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 
+import { BlurTarget } from '@/components/blur-target';
 import { LogoMark } from '@/components/logo';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Button, PasswordField, TextField, accentColor } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { AuthSurface, Button, PasswordField, TextField, accentColor } from '@/components/ui';
+import { Colors, Spacing } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
-import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 
 export default function LoginScreen() {
   const { token, signIn } = useAuth();
-  const theme = useTheme();
   const router = useRouter();
   const { next } = useLocalSearchParams<{ next?: string }>();
   const keyboardHeight = useKeyboardHeight();
+  /** Cible du flou Android : le fond qui défile derrière les champs en verre. */
+  const blurTargetRef = useRef<ComponentRef<typeof View>>(null);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +77,8 @@ export default function LoginScreen() {
 
   return (
     <ThemedView
+      lightColor={AuthSurface.background}
+      darkColor={AuthSurface.background}
       style={[
         styles.container,
         keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
@@ -77,6 +87,7 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
         <SafeAreaView style={styles.flex}>
+          <BlurTarget ref={blurTargetRef} style={styles.flex}>
           <ScrollView
             contentContainerStyle={styles.content}
             keyboardShouldPersistTaps="handled"
@@ -88,13 +99,15 @@ export default function LoginScreen() {
                   MboloChat
                 </ThemedText>
               </ThemedView>
-              <ThemedText themeColor="textSecondary" style={styles.tagline}>
+              <ThemedText style={[styles.tagline, { color: AuthSurface.subtle }]}>
                 Messagerie simple, rapide, en temps réel.
               </ThemedText>
             </Animated.View>
 
             <Animated.View entering={FadeInUp.duration(520).delay(120)} style={styles.form}>
               <TextField
+                glass
+                blurTarget={blurTargetRef}
                 placeholder="Email ou nom d’utilisateur"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -102,6 +115,8 @@ export default function LoginScreen() {
                 onChangeText={setIdentifier}
               />
               <PasswordField
+                glass
+                blurTarget={blurTargetRef}
                 placeholder="Mot de passe"
                 value={password}
                 onChangeText={setPassword}
@@ -116,11 +131,17 @@ export default function LoginScreen() {
                 </ThemedText>
               </Pressable>
               {error ? (
-                <ThemedText type="small" style={{ color: theme.error }}>
+                <ThemedText type="small" style={{ color: Colors.dark.error }}>
                   {error}
                 </ThemedText>
               ) : null}
-              <Button title="Se connecter" onPress={onSubmit} loading={submitting} />
+              <Button
+                glass
+                blurTarget={blurTargetRef}
+                title="Se connecter"
+                onPress={onSubmit}
+                loading={submitting}
+              />
             </Animated.View>
 
             <Link href="/register" style={styles.link}>
@@ -129,6 +150,7 @@ export default function LoginScreen() {
               </ThemedText>
             </Link>
           </ScrollView>
+          </BlurTarget>
         </SafeAreaView>
       </KeyboardAvoidingView>
     </ThemedView>

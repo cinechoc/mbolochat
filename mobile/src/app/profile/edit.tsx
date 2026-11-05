@@ -1,5 +1,5 @@
 import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,9 +9,9 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { fr } from '@/i18n/fr';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { captureCity, locationAvailable } from '@/lib/location';
 import { useUserSettings } from '@/features/settings/useUserSettings';
 
 const BIO_MAX_LENGTH = 160;
@@ -23,13 +23,7 @@ export default function EditProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ displayName?: string; bio?: string }>();
-  const { settings, reload: reloadSettings } = useUserSettings();
-  const [canLocate, setCanLocate] = useState(false);
-  const [locating, setLocating] = useState(false);
-
-  useEffect(() => {
-    void locationAvailable().then(setCanLocate);
-  }, []);
+  const { settings } = useUserSettings();
 
   const [displayName, setDisplayName] = useState(params.displayName ?? user?.displayName ?? '');
   const [bio, setBio] = useState(params.bio ?? user?.bio ?? '');
@@ -220,31 +214,11 @@ export default function EditProfileScreen() {
               styles.readonly,
               { backgroundColor: theme.backgroundElement, color: theme.textSecondary },
             ]}>
-            {settings.city ?? 'Non détectée'}
+            {settings.city ?? fr.location.unknownCity}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            Ville détectée automatiquement
+            {fr.location.automatic}
           </ThemedText>
-          {!settings.city && canLocate ? (
-            <Pressable
-              onPress={() => {
-                if (!token || locating) return;
-                setLocating(true);
-                void captureCity(token)
-                  .then((status) => {
-                    if (status === 'updated') void reloadSettings();
-                    else if (status === 'denied') {
-                      Alert.alert('Localisation refusée', 'La ville restera masquée.');
-                    }
-                  })
-                  .finally(() => setLocating(false));
-              }}
-              disabled={locating}>
-              <ThemedText style={styles.changePhoto}>
-                {locating ? 'Localisation…' : 'Activer la localisation'}
-              </ThemedText>
-            </Pressable>
-          ) : null}
         </View>
 
         <View style={styles.field}>

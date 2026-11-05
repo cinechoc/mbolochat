@@ -1,17 +1,23 @@
 import { Link, Redirect, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { useRef, useMemo, useState, type ComponentRef } from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 
-import { LogoMark } from '@/components/logo';
+import { BlurTarget } from '@/components/blur-target';
 import { Select, type SelectOption } from '@/components/select';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Button, PasswordField, TextField, accentColor } from '@/components/ui';
-import { Spacing, Radii } from '@/constants/theme';
+import { AuthSurface, Button, PasswordField, TextField, accentColor } from '@/components/ui';
+import { Colors, Spacing, Radii } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
-import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import type { Gender } from '@/lib/types';
@@ -39,9 +45,10 @@ const GENDER_OPTIONS: { value: Gender; label: string }[] = [
 
 export default function RegisterScreen() {
   const { token, signIn } = useAuth();
-  const theme = useTheme();
   const router = useRouter();
   const keyboardHeight = useKeyboardHeight();
+  /** Cible du flou Android : le fond qui défile derrière les surfaces en verre. */
+  const blurTargetRef = useRef<ComponentRef<typeof View>>(null);
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -51,6 +58,7 @@ export default function RegisterScreen() {
   const [month, setMonth] = useState<string | null>(null);
   const [year, setYear] = useState<string | null>(null);
   const [gender, setGender] = useState<Gender | null>(null);
+  const [genderCustom, setGenderCustom] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -99,6 +107,11 @@ export default function RegisterScreen() {
       setError('Sélectionne un genre.');
       return;
     }
+    const customGender = genderCustom.trim();
+    if (gender === 'CUSTOM' && !customGender) {
+      setError('Indique ton genre personnalisé.');
+      return;
+    }
 
     const dayNumber = Number(day);
     const monthNumber = Number(month);
@@ -125,6 +138,7 @@ export default function RegisterScreen() {
         password,
         birthday,
         gender,
+        genderCustom: gender === 'CUSTOM' ? customGender : undefined,
       });
       await signIn(result.accessToken, result.refreshToken, result.user);
       router.replace('/chats');
@@ -143,6 +157,8 @@ export default function RegisterScreen() {
 
   return (
     <ThemedView
+      lightColor={AuthSurface.background}
+      darkColor={AuthSurface.background}
       style={[
         styles.container,
         keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
@@ -150,23 +166,17 @@ export default function RegisterScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
-        <SafeAreaView style={styles.flex} edges={['top', 'left', 'right']}>
+        <SafeAreaView style={styles.flex}>
+          <BlurTarget ref={blurTargetRef} style={styles.flex}>
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-            <Animated.View entering={FadeInUp.duration(520)} style={styles.brandBlock}>
-              <ThemedView style={styles.brandRow}>
-                <LogoMark size={40} />
-                <ThemedText type="subtitle" style={{ color: accentColor }}>
-                  MboloChat
-                </ThemedText>
-              </ThemedView>
-              <ThemedText type="small" themeColor="textSecondary">
-                Créer un compte — c&apos;est rapide et facile.
-              </ThemedText>
-            </Animated.View>
-
+            <ThemedText type="small" style={[styles.intro, { color: AuthSurface.subtle }]}>
+              Créer un compte — c&apos;est rapide et facile.
+            </ThemedText>
             <Animated.View entering={FadeInUp.duration(520).delay(120)} style={styles.form}>
             <ThemedView style={styles.nameRow}>
               <TextField
+                glass
+                blurTarget={blurTargetRef}
                 style={styles.flex}
                 placeholder="Prénom"
                 autoCapitalize="words"
@@ -174,6 +184,8 @@ export default function RegisterScreen() {
                 onChangeText={setFirstName}
               />
               <TextField
+                glass
+                blurTarget={blurTargetRef}
                 style={styles.flex}
                 placeholder="Nom de famille"
                 autoCapitalize="words"
@@ -183,6 +195,8 @@ export default function RegisterScreen() {
             </ThemedView>
 
             <TextField
+              glass
+              blurTarget={blurTargetRef}
               placeholder="Adresse e-mail"
               autoCapitalize="none"
               autoCorrect={false}
@@ -191,17 +205,20 @@ export default function RegisterScreen() {
               onChangeText={setEmail}
             />
             <PasswordField
+              glass
+              blurTarget={blurTargetRef}
               placeholder="Nouveau mot de passe"
               value={password}
               onChangeText={setPassword}
             />
 
             <ThemedView style={styles.birthdaySection}>
-              <ThemedText type="smallBold" themeColor="textSecondary">
+              <ThemedText type="smallBold" style={{ color: AuthSurface.subtle }}>
                 Date de naissance
               </ThemedText>
               <ThemedView style={styles.birthdayRow}>
                 <Select
+                  glass
                   style={styles.flex}
                   placeholder="Jour"
                   options={dayOptions}
@@ -209,6 +226,7 @@ export default function RegisterScreen() {
                   onChange={setDay}
                 />
                 <Select
+                  glass
                   style={styles.flex}
                   placeholder="Mois"
                   options={monthOptions}
@@ -216,6 +234,7 @@ export default function RegisterScreen() {
                   onChange={setMonth}
                 />
                 <Select
+                  glass
                   style={styles.flex}
                   placeholder="Année"
                   options={yearOptions}
@@ -226,7 +245,7 @@ export default function RegisterScreen() {
             </ThemedView>
 
             <ThemedView style={styles.genderSection}>
-              <ThemedText type="smallBold" themeColor="textSecondary">
+              <ThemedText type="smallBold" style={{ color: AuthSurface.subtle }}>
                 Genre
               </ThemedText>
               <ThemedView style={styles.genderRow}>
@@ -238,31 +257,49 @@ export default function RegisterScreen() {
                       onPress={() => setGender(option.value)}
                       style={({ pressed }) => [
                         styles.genderOption,
-                        { backgroundColor: selected ? accentColor : theme.backgroundElement },
+                        {
+                          backgroundColor: selected ? accentColor : 'transparent',
+                          borderColor: AuthSurface.border,
+                        },
                         pressed && styles.pressed,
                       ]}>
                       <ThemedText
                         type="small"
-                        style={selected ? styles.genderSelectedText : undefined}>
+                        style={
+                          selected
+                            ? styles.genderSelectedText
+                            : { color: AuthSurface.text }
+                        }>
                         {option.label}
                       </ThemedText>
                     </Pressable>
                   );
                 })}
               </ThemedView>
+              {gender === 'CUSTOM' ? (
+                <TextField
+                  glass
+                  blurTarget={blurTargetRef}
+                  placeholder="Ton genre (ex. Non-binaire)"
+                  autoCapitalize="sentences"
+                  maxLength={32}
+                  value={genderCustom}
+                  onChangeText={setGenderCustom}
+                />
+              ) : null}
             </ThemedView>
 
-            <ThemedText type="small" themeColor="textSecondary" style={styles.terms}>
+            <ThemedText type="small" style={[styles.terms, { color: AuthSurface.subtle }]}>
               En cliquant sur « S&apos;inscrire », tu acceptes nos conditions générales.
             </ThemedText>
 
             {error ? (
-              <ThemedText type="small" style={{ color: theme.error }}>
+              <ThemedText type="small" style={{ color: Colors.dark.error }}>
                 {error}
               </ThemedText>
             ) : null}
 
-            <Button title="S'inscrire" onPress={onSubmit} loading={submitting} />
+            <Button glass title="S'inscrire" onPress={onSubmit} loading={submitting} />
 
             <Link href="/login" style={styles.link}>
               <ThemedText type="link" style={{ color: accentColor }}>
@@ -271,6 +308,7 @@ export default function RegisterScreen() {
             </Link>
             </Animated.View>
           </ScrollView>
+          </BlurTarget>
         </SafeAreaView>
       </KeyboardAvoidingView>
     </ThemedView>
@@ -292,15 +330,9 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
   },
-  brandBlock: {
-    alignItems: 'center',
-    gap: Spacing.two,
+  intro: {
+    textAlign: 'center',
     marginBottom: Spacing.two,
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
   },
   form: {
     gap: Spacing.three,
@@ -326,11 +358,12 @@ const styles = StyleSheet.create({
   genderOption: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: Spacing.threeHalf,
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radii.md,
   },
   genderSelectedText: {
-    color: '#ffffff',
+    color: Colors.dark.onAccent,
     fontWeight: '700',
   },
   pressed: {

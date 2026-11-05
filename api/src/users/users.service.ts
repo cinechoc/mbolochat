@@ -22,6 +22,8 @@ export interface PublicUser {
   avatarUrl: string | null;
   /** Genre déclaré à l'inscription, pour choisir l'avatar par défaut. */
   gender: string | null;
+  /** Libellé libre quand le genre est « Personnalisé ». */
+  genderCustom: string | null;
   notificationsEnabled: boolean;
   /** Son des notifications poussées. */
   notificationSound: boolean;
@@ -38,6 +40,8 @@ export interface PublicUserView {
   bio: string | null;
   avatarUrl: string | null;
   gender: string | null;
+  /** Libellé libre quand le genre est « Personnalisé ». */
+  genderCustom: string | null;
   createdAt: Date;
 }
 
@@ -49,6 +53,7 @@ export function toPublicUser(user: User): PublicUser {
     bio: user.bio,
     avatarUrl: user.avatarUrl,
     gender: user.gender,
+    genderCustom: user.genderCustom,
     notificationsEnabled: user.notificationsEnabled,
     notificationSound: user.notificationSound,
     notificationPreview: user.notificationPreview,
@@ -70,6 +75,7 @@ export function toPublicUserView(user: User, relation: ViewerRelation): PublicUs
     bio: visible ? user.bio : null,
     avatarUrl: visible ? user.avatarUrl : null,
     gender: user.gender,
+    genderCustom: user.genderCustom,
     createdAt: user.createdAt,
   };
 }
@@ -450,6 +456,7 @@ export class UsersService {
     passwordHash: string;
     birthday?: string | null;
     gender?: string | null;
+    genderCustom?: string | null;
   }): Promise<User> {
     const [user] = await this.db
       .insert(users)
@@ -460,6 +467,7 @@ export class UsersService {
         passwordHash: data.passwordHash,
         birthday: data.birthday ?? null,
         gender: data.gender ?? null,
+        genderCustom: data.genderCustom ?? null,
       })
       .returning();
     return user;
@@ -658,6 +666,7 @@ export class UsersService {
       bio: view.bio,
       avatarUrl: view.avatarUrl,
       gender: view.gender,
+      genderCustom: view.genderCustom,
       createdAt: view.createdAt,
       isMe,
       age: canSeeProfile ? calculateAge(user.birthday) : null,

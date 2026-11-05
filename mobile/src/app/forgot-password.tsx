@@ -1,16 +1,22 @@
 import { useRouter } from 'expo-router';
 import { Check } from 'lucide-react-native';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BlurTarget } from '@/components/blur-target';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { LogoMark } from '@/components/logo';
-import { Button, PasswordField, TextField, accentColor } from '@/components/ui';
-import { Spacing, Radii } from '@/constants/theme';
+import { AuthSurface, Button, PasswordField, TextField, accentColor } from '@/components/ui';
+import { Colors, Spacing, Radii } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
-import { useTheme } from '@/hooks/use-theme';
 import { ApiError, api } from '@/lib/api';
 
 type Step = 'request' | 'reset' | 'done';
@@ -27,7 +33,6 @@ function errorMessage(err: unknown, fallback: string): string {
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
-  const theme = useTheme();
   const keyboardHeight = useKeyboardHeight();
   const [step, setStep] = useState<Step>('request');
   const [identifier, setIdentifier] = useState('');
@@ -83,6 +88,8 @@ export default function ForgotPasswordScreen() {
 
   return (
     <ThemedView
+      lightColor={AuthSurface.background}
+      darkColor={AuthSurface.background}
       style={[
         styles.container,
         keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
@@ -90,7 +97,12 @@ export default function ForgotPasswordScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
-        <SafeAreaView style={styles.content} edges={['bottom']}>
+        <SafeAreaView style={styles.flex} edges={['bottom']}>
+          <BlurTarget style={styles.flex}>
+          <ScrollView
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
           {step === 'request' ? (
             <>
               <ThemedView style={styles.block}>
@@ -100,13 +112,14 @@ export default function ForgotPasswordScreen() {
                     MboloChat
                   </ThemedText>
                 </ThemedView>
-                <ThemedText themeColor="textSecondary" style={styles.hint}>
+                <ThemedText style={[styles.hint, { color: AuthSurface.subtle }]}>
                   Indique ton email ou ton nom d’utilisateur pour recevoir un code de
                   réinitialisation à 6 chiffres.
                 </ThemedText>
               </ThemedView>
               <ThemedView style={styles.form}>
                 <TextField
+                  glass
                   placeholder="Email ou nom d’utilisateur"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -115,11 +128,11 @@ export default function ForgotPasswordScreen() {
                   onSubmitEditing={onRequest}
                 />
                 {error ? (
-                  <ThemedText type="small" style={{ color: theme.error }}>
+                  <ThemedText type="small" style={{ color: Colors.dark.error }}>
                     {error}
                   </ThemedText>
                 ) : null}
-                <Button title="Envoyer le code" onPress={onRequest} loading={submitting} />
+                <Button glass title="Envoyer le code" onPress={onRequest} loading={submitting} />
               </ThemedView>
               <Pressable
                 onPress={() => router.replace('/login')}
@@ -136,13 +149,13 @@ export default function ForgotPasswordScreen() {
             <>
               <ThemedView style={styles.block}>
                 <ThemedText type="subtitle">Code de vérification</ThemedText>
-                <ThemedText themeColor="textSecondary" style={styles.hint}>
+                <ThemedText style={[styles.hint, { color: AuthSurface.subtle }]}>
                   Entre le code à 6 chiffres puis choisis un nouveau mot de passe.
                 </ThemedText>
               </ThemedView>
               {devCode ? (
-                <ThemedView style={[styles.devBox, { backgroundColor: theme.backgroundElement }]}>
-                  <ThemedText type="small" themeColor="textSecondary">
+                <ThemedView style={[styles.devBox, { backgroundColor: AuthSurface.glassField }]}>
+                  <ThemedText type="small" style={{ color: AuthSurface.subtle }}>
                     Mode démo (sans serveur e-mail) — ton code :
                   </ThemedText>
                   <ThemedText selectable style={styles.devCode}>
@@ -152,6 +165,7 @@ export default function ForgotPasswordScreen() {
               ) : null}
               <ThemedView style={styles.form}>
                 <TextField
+                  glass
                   placeholder="Code à 6 chiffres"
                   keyboardType="number-pad"
                   maxLength={6}
@@ -160,17 +174,19 @@ export default function ForgotPasswordScreen() {
                   style={styles.codeInput}
                 />
                 <PasswordField
+                  glass
                   placeholder="Nouveau mot de passe"
                   value={newPassword}
                   onChangeText={setNewPassword}
                   onSubmitEditing={onReset}
                 />
                 {error ? (
-                  <ThemedText type="small" style={{ color: theme.error }}>
+                  <ThemedText type="small" style={{ color: Colors.dark.error }}>
                     {error}
                   </ThemedText>
                 ) : null}
                 <Button
+                  glass
                   title="Réinitialiser le mot de passe"
                   onPress={onReset}
                   loading={submitting}
@@ -195,13 +211,15 @@ export default function ForgotPasswordScreen() {
               <ThemedView style={styles.block}>
                 <Check size={44} strokeWidth={2.6} color={accentColor} />
                 <ThemedText type="subtitle">Mot de passe modifié</ThemedText>
-                <ThemedText themeColor="textSecondary" style={styles.hint}>
+                <ThemedText style={[styles.hint, { color: AuthSurface.subtle }]}>
                   Tu peux maintenant te connecter avec ton nouveau mot de passe.
                 </ThemedText>
               </ThemedView>
-              <Button title="Se connecter" onPress={() => router.replace('/login')} />
+              <Button glass title="Se connecter" onPress={() => router.replace('/login')} />
             </>
           ) : null}
+          </ScrollView>
+          </BlurTarget>
         </SafeAreaView>
       </KeyboardAvoidingView>
     </ThemedView>

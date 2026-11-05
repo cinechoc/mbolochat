@@ -1,3 +1,4 @@
+import { setDefaultResultOrder } from 'node:dns';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Logger, ValidationPipe } from '@nestjs/common';
@@ -9,6 +10,15 @@ import helmet from 'helmet';
 import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module.js';
 import { DRIZZLE, type Database } from './db/db.module.js';
+
+/**
+ * Certains réseaux (conteneurs, box, hébergeurs) annoncent une route IPv6 mais
+ * ne l'acheminent pas. `fetch` choisit alors l'adresse IPv6 en premier et
+ * expire avant de retomber sur IPv4, ce qui faisait échouer le géocodage
+ * inverse alors que `curl` fonctionnait. On privilégie IPv4 tout en gardant
+ * IPv6 en repli quand aucune adresse IPv4 n'existe.
+ */
+setDefaultResultOrder('ipv4first');
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);

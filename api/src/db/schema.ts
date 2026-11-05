@@ -51,6 +51,8 @@ export const users = pgTable('users', {
   avatarUrl: text('avatar_url'),
   birthday: date('birthday'),
   gender: text('gender'),
+  /** Libellé libre saisi quand le genre choisi est « Personnalisé ». */
+  genderCustom: text('gender_custom'),
   /** Dernier passage en ligne → hors ligne, en UTC. */
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
   lastSeenVisibility: lastSeenVisibilityEnum('last_seen_visibility')

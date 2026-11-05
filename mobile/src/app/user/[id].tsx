@@ -50,6 +50,7 @@ export default function UserProfileScreen() {
       bio: null,
       avatarUrl: avatar ? avatar : null,
       gender: initialGender,
+      genderCustom: null,
       notificationsEnabled: true,
       notificationSound: true,
       notificationPreview: true,

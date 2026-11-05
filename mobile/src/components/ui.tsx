@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ComponentRef, type RefObject } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,37 +9,87 @@ import {
   type TextInputProps,
   type ViewStyle,
 } from 'react-native';
+import { Glass } from './glass';
 import { ThemedText } from './themed-text';
-import { Spacing, Radii } from '@/constants/theme';
+import { Colors, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-export const accentColor = '#3c87f7';
+/**
+ * Surfaces d'authentification : le texte y reste toujours clair, posé sur un
+ * fond sombre (comme l'écran d'appel). Ces valeurs n'existent qu'ici ; elles
+ * évitent aux trois écrans de login/register/mot de passe oublié de répéter
+ * les mêmes couleurs en dur.
+ */
+export const AuthSurface = {
+  background: Colors.dark.background,
+  /** Repli opaque du verre quand le flou n'est pas disponible. */
+  glassField: 'rgba(26, 34, 45, 0.92)',
+  glassButton: 'rgba(26, 34, 45, 0.72)',
+  border: 'rgba(255, 255, 255, 0.14)',
+  text: Colors.dark.text,
+  subtle: Colors.dark.textSecondary,
+} as const;
 
-export function TextField({ style, ...props }: TextInputProps) {
+/** Bleu de marque MboloChat, seul accent des surfaces d'authentification. */
+export const accentColor = Colors.light.accent;
+
+export type TextFieldProps = TextInputProps & {
+  /** Surface en verre (écrans d'authentification). */
+  glass?: boolean;
+  /** Cible du flou Android : le contenu derrière le champ. */
+  blurTarget?: RefObject<ComponentRef<typeof View> | null>;
+};
+
+export function TextField({ glass = false, blurTarget, ...props }: TextFieldProps) {
   const theme = useTheme();
-  return (
+  const text = glass ? AuthSurface.text : theme.text;
+  const placeholder = glass ? AuthSurface.subtle : theme.textSecondary;
+  const input = (
     <TextInput
-      placeholderTextColor={theme.textSecondary}
-      style={[styles.input, { backgroundColor: theme.backgroundElement, color: theme.text }, style]}
+      placeholderTextColor={placeholder}
+      // La couleur du texte est appliquée après `props.style` : sur une surface
+      // en verre sombre, hériter la couleur du thème clair serait illisible.
+      style={[
+        styles.input,
+        glass && styles.transparent,
+        props.style,
+        { color: text },
+      ]}
       {...props}
     />
+  );
+  if (!glass) {
+    return input;
+  }
+  return (
+    <Glass
+      variant="clear"
+      blurTarget={blurTarget}
+      fallbackColor={AuthSurface.glassField}
+      style={[styles.field, props.style]}>
+      {input}
+    </Glass>
   );
 }
 
 interface PasswordFieldProps extends Omit<TextInputProps, 'style'> {
   style?: StyleProp<ViewStyle>;
+  /** Surface en verre (écrans d'authentification). */
+  glass?: boolean;
+  /** Cible du flou Android : le contenu derrière le champ. */
+  blurTarget?: RefObject<ComponentRef<typeof View> | null>;
 }
 
-export function PasswordField({ style, ...props }: PasswordFieldProps) {
+export function PasswordField({ style, glass = false, blurTarget, ...props }: PasswordFieldProps) {
   const theme = useTheme();
   const [visible, setVisible] = useState(false);
 
-  return (
+  const wrapper = (
     <View
-      style={[styles.passwordWrapper, { backgroundColor: theme.backgroundElement }, style]}>
+      style={[styles.passwordWrapper, glass && styles.transparent, style]}>
       <TextInput
-        placeholderTextColor={theme.textSecondary}
-        style={[styles.passwordInput, { color: theme.text }]}
+        placeholderTextColor={glass ? AuthSurface.subtle : theme.textSecondary}
+        style={[styles.passwordInput, { color: glass ? AuthSurface.text : theme.text }]}
         secureTextEntry={!visible}
         {...props}
       />
@@ -50,6 +100,19 @@ export function PasswordField({ style, ...props }: PasswordFieldProps) {
       </Pressable>
     </View>
   );
+
+  if (!glass) {
+    return wrapper;
+  }
+  return (
+    <Glass
+      variant="clear"
+      blurTarget={blurTarget}
+      fallbackColor={AuthSurface.glassField}
+      style={styles.field}>
+      {wrapper}
+    </Glass>
+  );
 }
 
 interface ButtonProps {
@@ -58,34 +121,71 @@ interface ButtonProps {
   loading?: boolean;
   disabled?: boolean;
   variant?: 'primary' | 'secondary';
+  /** Surface en verre (écrans d'authentification). */
+  glass?: boolean;
+  /** Cible du flou Android : le contenu derrière le bouton. */
+  blurTarget?: RefObject<ComponentRef<typeof View> | null>;
 }
 
-export function Button({ title, onPress, loading, disabled, variant = 'primary' }: ButtonProps) {
+export function Button({
+  title,
+  onPress,
+  loading,
+  disabled,
+  variant = 'primary',
+  glass = false,
+  blurTarget,
+}: ButtonProps) {
   const theme = useTheme();
   const isPrimary = variant === 'primary';
   const isDisabled = disabled || loading;
+  // En verre, la couleur d'accent reste visible mais posée sur la surface.
+  const background = isPrimary
+    ? accentColor
+    : glass
+      ? AuthSurface.glassButton
+      : theme.backgroundElement;
+  const foreground = isPrimary || glass ? Colors.dark.onAccent : theme.text;
 
-  return (
+  const pressable = (
     <Pressable
       onPress={onPress}
       disabled={isDisabled}
       style={({ pressed }) => [
         styles.button,
-        { backgroundColor: isPrimary ? accentColor : theme.backgroundElement },
+        glass && styles.buttonGlass,
+        { backgroundColor: background },
         (pressed || isDisabled) && styles.buttonPressed,
       ]}>
       {loading ? (
-        <ActivityIndicator color={isPrimary ? '#ffffff' : theme.text} />
+        <ActivityIndicator color={foreground} />
       ) : (
-        <ThemedText style={{ color: isPrimary ? '#ffffff' : theme.text, fontWeight: '600' }}>
-          {title}
-        </ThemedText>
+        <ThemedText style={{ color: foreground, fontWeight: '600' }}>{title}</ThemedText>
       )}
     </Pressable>
+  );
+
+  if (!glass) {
+    return pressable;
+  }
+  return (
+    <Glass blurTarget={blurTarget} fallbackColor={background} style={styles.buttonGlass}>
+      {pressable}
+    </Glass>
   );
 }
 
 const styles = StyleSheet.create({
+  field: {
+    borderRadius: Radii.md,
+    overflow: 'hidden',
+  },
+  buttonGlass: {
+    borderRadius: Radii.md,
+    overflow: 'hidden',
+  },
+  /** Le fond vient de la surface en verre, jamais du champ lui-même. */
+  transparent: { backgroundColor: 'transparent' },
   input: {
     borderRadius: Radii.md,
     paddingHorizontal: Spacing.three,

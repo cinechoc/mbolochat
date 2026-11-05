@@ -17,7 +17,15 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react-native';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentRef,
+  type ReactNode,
+} from 'react';
 import {
   Alert,
   Animated,
@@ -36,9 +44,10 @@ import { ActionSheet, type SheetAction } from '@/components/action-sheet';
 import { AttachPanel } from '@/components/attach-panel';
 import { Avatar } from '@/components/avatar';
 import { SwipeableBubble } from '@/components/swipeable-bubble';
+import { BlurTarget } from '@/components/blur-target';
+import { Glass } from '@/components/glass';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { accentColor } from '@/components/ui';
 import { CHAT_TIME_GAP_MS, useChatColors } from '@/constants/chat-theme';
 import { Spacing, Radii } from '@/constants/theme';
 import { PresenceSubtitle } from '@/features/presence/PresenceSubtitle';
@@ -166,8 +175,6 @@ function toggleLocalReaction(
 }
 /** Au-delà de ce défilement, la pastille de retour en bas apparaît. */
 const JUMP_AFTER_PX = 320;
-/** Double coche bleue : le message a été lu. */
-const TICK_READ = '#53bdeb';
 /** Le backend n'a pas de « playedBy » : l'écoute des vocaux reste locale. */
 const PLAYED_VOICES_KEY = 'mbolochat.played-voices';
 
@@ -314,12 +321,15 @@ function aggregateTick(states: (TickState | undefined)[]): TickState | undefined
 
 function Ticks({
   state,
-  tone = '#d7e6ff',
-  failedTone = '#ffd2d2',
+  tone,
+  failedTone,
+  readTone,
 }: {
   state: TickState;
   tone?: string;
   failedTone?: string;
+  /** Couleur de la double coche bleue (palette de la conversation). */
+  readTone?: string;
 }) {
   const Glyph = TICK_ICON[state];
   return (
@@ -330,7 +340,7 @@ function Ticks({
       <Glyph
         size={state === 'failed' ? 14 : 16}
         strokeWidth={2.6}
-        color={state === 'read' ? TICK_READ : state === 'failed' ? failedTone : tone}
+        color={state === 'read' ? readTone : state === 'failed' ? failedTone : tone}
       />
     </View>
   );
@@ -446,6 +456,7 @@ function TypingDots({ color }: { color: string }) {
 }
 
 function TypingLine({ name, text }: { name: string; text: string }) {
+  const theme = useTheme();
   const [opacity] = useState(() => new Animated.Value(0));
   const [translateY] = useState(() => new Animated.Value(4));
 
@@ -463,7 +474,7 @@ function TypingLine({ name, text }: { name: string; text: string }) {
       <ThemedText type="small" themeColor="textSecondary" style={styles.typing} numberOfLines={1}>
         {name} : {text}
       </ThemedText>
-      <TypingDots color={accentColor} />
+      <TypingDots color={theme.accent} />
     </Animated.View>
   );
 }
@@ -653,6 +664,8 @@ export default function ChatScreen() {
   const [playedVoiceIds, setPlayedVoiceIds] = useState<Set<string>>(() => new Set());
   const playedLoadedRef = useRef(false);
   const listRef = useRef<FlatList<ListRow>>(null);
+  /** Cible du flou Android : la liste des messages que le verre recouvre. */
+  const blurTargetRef = useRef<ComponentRef<typeof View>>(null);
   /** Le dernier message est-il à l'écran ? Décide si on doit y recoller. */
   const atBottomRef = useRef(true);
   /** Séparateur de non-lus, figé à l'ouverture : il ne suit pas les arrivages. */
@@ -681,7 +694,6 @@ export default function ChatScreen() {
 
   const composerTheme = useMemo<ComposerTheme>(
     () => ({
-      barBg: chat.composer,
       inputBg: chat.input,
       inputText: chat.primaryText,
       placeholder: chat.inputPlaceholder,
@@ -1031,6 +1043,7 @@ export default function ChatScreen() {
         displayName: user.displayName,
         avatarUrl: user.avatarUrl,
         gender: user.gender,
+        genderCustom: user.genderCustom,
       };
       const confirmed = new Set(
         messages.map((message) => message.clientId).filter((clientId): clientId is string => Boolean(clientId)),
@@ -1301,12 +1314,12 @@ export default function ChatScreen() {
       headerTitleAlign: 'center' as const,
       headerShadowVisible: false,
       headerTintColor: chat.headerText,
+      // Fond verre : le contenu défile dessous, le flou le masque sans le cacher.
       headerBackground: () => (
-        <View
-          style={[
-            styles.headerBackground,
-            { backgroundColor: chat.screen, borderBottomColor: chat.border },
-          ]}
+        <Glass
+          blurTarget={blurTargetRef}
+          fallbackColor={chat.screen}
+          style={styles.headerBackground}
         />
       ),
       headerTitle: () => (
@@ -1795,7 +1808,7 @@ export default function ChatScreen() {
                   />
                   {sentTick ? (
                     <View style={styles.mediaTicks}>
-                      <Ticks state={sentTick} tone={chat.tick} failedTone={chat.error} />
+                      <Ticks state={sentTick} tone={chat.tick} failedTone={chat.error} readTone={chat.tickRead} />
                     </View>
                   ) : null}
                 </View>
@@ -1918,7 +1931,7 @@ export default function ChatScreen() {
               </View>
               {mine && tick && !waiting ? (
                 <View style={styles.mediaTicks}>
-                  <Ticks state={tick} tone={chat.tick} failedTone={chat.error} />
+                  <Ticks state={tick} tone={chat.tick} failedTone={chat.error} readTone={chat.tickRead} />
                 </View>
               ) : null}
               {stuck ? (
@@ -2014,7 +2027,7 @@ export default function ChatScreen() {
                     {formatClock(message.createdAt)}
                   </ThemedText>
                   {mine && tick ? (
-                    <Ticks state={tick} tone={chat.tick} failedTone={chat.error} />
+                    <Ticks state={tick} tone={chat.tick} failedTone={chat.error} readTone={chat.tickRead} />
                   ) : null}
                 </View>
                 {stuck ? (
@@ -2109,7 +2122,7 @@ export default function ChatScreen() {
               />
               {mine && tick ? (
                 <View style={styles.voiceMeta}>
-                  <Ticks state={tick} tone={chat.tick} failedTone={chat.error} />
+                  <Ticks state={tick} tone={chat.tick} failedTone={chat.error} readTone={chat.tickRead} />
                 </View>
               ) : null}
               {stuck ? (
@@ -2173,7 +2186,7 @@ export default function ChatScreen() {
               />
               {mine && tick && !waiting ? (
                 <View style={styles.mediaTicks}>
-                  <Ticks state={tick} tone={chat.tick} failedTone={chat.error} />
+                  <Ticks state={tick} tone={chat.tick} failedTone={chat.error} readTone={chat.tickRead} />
                 </View>
               ) : null}
               {stuck ? (
@@ -2330,7 +2343,7 @@ export default function ChatScreen() {
               ) : null}
               {mine && tick && !waiting ? (
                 <View style={styles.mediaTicks}>
-                  <Ticks state={tick} tone={chat.tick} failedTone={chat.error} />
+                  <Ticks state={tick} tone={chat.tick} failedTone={chat.error} readTone={chat.tickRead} />
                 </View>
               ) : null}
               {stuck ? (
@@ -2411,7 +2424,7 @@ export default function ChatScreen() {
           ) : null}
           {mine && tick ? (
             <View style={styles.ticksRow}>
-              <Ticks state={tick} tone={chat.tick} failedTone={chat.error} />
+              <Ticks state={tick} tone={chat.tick} failedTone={chat.error} readTone={chat.tickRead} />
             </View>
           ) : null}
           {stuck ? (
@@ -2751,33 +2764,35 @@ export default function ChatScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         onLayout={(event) => setChatAreaHeight(event.nativeEvent.layout.height)}
         style={styles.flex}>
-        <FlatList
-          ref={listRef}
-          data={rows}
-          inverted
-          keyExtractor={keyExtractor}
-          onEndReached={loadOlder}
-          onEndReachedThreshold={0.3}
-          contentContainerStyle={styles.listContent}
-          onScroll={event => {
-            // Liste inversée : offset 0 = le dernier message. On n'y recolle un
-            // nouvel arrivant que si l'utilisateur y était déjà.
-            const offset = event.nativeEvent.contentOffset.y;
-            atBottomRef.current = offset <= 32;
-            // Ce callback tourne à chaque frame : on n'agit qu'aux changements d'état.
-            const shouldShow = !atBottomRef.current && offset > JUMP_AFTER_PX;
-            if (shouldShow !== showJumpRef.current) {
-              showJumpRef.current = shouldShow;
-              setShowJump(shouldShow);
-            }
-            if (atBottomRef.current && unseenRef.current > 0) {
-              unseenRef.current = 0;
-              setUnseen(0);
-            }
-          }}
-          scrollEventThrottle={160}
-          renderItem={renderItem}
-        />
+        <BlurTarget ref={blurTargetRef} style={styles.flex}>
+          <FlatList
+            ref={listRef}
+            data={rows}
+            inverted
+            keyExtractor={keyExtractor}
+            onEndReached={loadOlder}
+            onEndReachedThreshold={0.3}
+            contentContainerStyle={styles.listContent}
+            onScroll={event => {
+              // Liste inversée : offset 0 = le dernier message. On n'y recolle un
+              // nouvel arrivant que si l'utilisateur y était déjà.
+              const offset = event.nativeEvent.contentOffset.y;
+              atBottomRef.current = offset <= 32;
+              // Ce callback tourne à chaque frame : on n'agit qu'aux changements d'état.
+              const shouldShow = !atBottomRef.current && offset > JUMP_AFTER_PX;
+              if (shouldShow !== showJumpRef.current) {
+                showJumpRef.current = shouldShow;
+                setShowJump(shouldShow);
+              }
+              if (atBottomRef.current && unseenRef.current > 0) {
+                unseenRef.current = 0;
+                setUnseen(0);
+              }
+            }}
+            scrollEventThrottle={160}
+            renderItem={renderItem}
+          />
+        </BlurTarget>
 
         {ready && messages.length === 0 ? (
           <View
@@ -2837,29 +2852,30 @@ export default function ChatScreen() {
               styles.jump,
               {
                 backgroundColor: theme.backgroundElement,
+                borderColor: theme.border,
                 // Au-dessus du compositeur (et des panneaux emoji/+ éventuels).
                 bottom: (composerHeight || 92) + Spacing.two,
               },
             ]}>
             {unseen > 0 ? (
-              <View style={styles.jumpBadge}>
-                <ThemedText style={styles.jumpBadgeText}>
+              <View style={[styles.jumpBadge, { backgroundColor: theme.accent }]}>
+                <ThemedText style={[styles.jumpBadgeText, { color: theme.onAccent }]}>
                   {unseen > 99 ? '99+' : unseen}
                 </ThemedText>
               </View>
             ) : null}
-            <ChevronDown size={26} color={accentColor} />
+            <ChevronDown size={26} color={theme.accent} />
           </Pressable>
         ) : null}
 
         {offline ? (
-          <ThemedText type="small" style={styles.offline}>
+          <ThemedText type="small" style={[styles.offline, { color: theme.accent }]}>
             Hors ligne — les messages partiront au retour du réseau
           </ThemedText>
         ) : null}
 
         {error ? (
-          <ThemedText type="small" style={styles.error}>
+          <ThemedText type="small" style={[styles.error, { color: theme.error }]}>
             {error}
           </ThemedText>
         ) : null}
@@ -2888,7 +2904,7 @@ export default function ChatScreen() {
               style={styles.replyClose}
               accessibilityRole="button"
               accessibilityLabel="Annuler la réponse">
-              <X size={20} color={accentColor} />
+              <X size={20} color={theme.accent} />
             </Pressable>
           </View>
         ) : null}
@@ -2928,6 +2944,7 @@ export default function ChatScreen() {
         ) : (
         <ChatComposer
           key={composerKey}
+          blurTarget={blurTargetRef}
           theme={composerTheme}
           initialText={draft}
           mentionCandidates={
@@ -3121,7 +3138,6 @@ const styles = StyleSheet.create({
   },
   headerBackground: {
     flex: 1,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerTitleBody: {
     flexDirection: 'row',
@@ -3418,7 +3434,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.14)',
   },
   jumpBadge: {
     position: 'absolute',
@@ -3430,21 +3445,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: accentColor,
   },
   jumpBadgeText: {
-    color: '#ffffff',
     fontSize: 11,
     lineHeight: 14,
     fontWeight: '700',
   },
   error: {
-    color: '#e5484d',
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.one,
   },
   offline: {
-    color: accentColor,
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.one,
     fontStyle: 'italic',

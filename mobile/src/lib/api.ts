@@ -165,6 +165,8 @@ export const api = {
     password: string;
     birthday: string;
     gender: Gender;
+    /** Libellé libre, envoyé uniquement pour le genre « Personnalisé ». */
+    genderCustom?: string;
   }) {
     return request<AuthResult>('/auth/register', {
       method: 'POST',

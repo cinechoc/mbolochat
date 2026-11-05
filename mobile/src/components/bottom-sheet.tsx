@@ -20,8 +20,9 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { Glass } from './glass';
 import { ThemedText } from './themed-text';
-import { Motion, Radii, Spacing } from '@/constants/theme';
+import { Motion, Radii, Scrim, Spacing } from '@/constants/theme';
 import { useBottomInset } from '@/hooks/use-bottom-inset';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/use-theme';
@@ -78,12 +79,6 @@ export function BottomSheet({
   const sheetHeight = useSharedValue(0);
 
   useEffect(() => {
-    if (visible && __DEV__) {
-      // Diagnostic : marge système vue depuis l'intérieur de la feuille.
-      console.log(
-        `[sheet] insets=${insets.bottom} top=${insets.top} window=${window.height} bottomInset=${bottomInset}`,
-      );
-    }
     if (visible) {
       // Montage différé d'une frame : la feuille doit exister avant de monter.
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -98,7 +93,7 @@ export function BottomSheet({
         runOnJS(setOpen)(false);
       }
     });
-  }, [visible, reduced, backdrop, translateY, insets.bottom, insets.top, window.height, bottomInset]);
+  }, [visible, reduced, backdrop, translateY]);
 
   // Clavier ouvert : la barre système est cachée, la marge basse devient inutile.
   useEffect(() => {
@@ -170,60 +165,60 @@ export function BottomSheet({
             onLayout={(event) => {
               sheetHeight.value = event.nativeEvent.layout.height;
             }}
-            style={[
-              styles.sheet,
-              {
-                backgroundColor: theme.background,
-                borderColor: theme.border,
-                maxHeight,
-                ...(fill ? { height: maxHeight } : null),
-                // Feuille collée au bas de la fenêtre : marge système obligatoire,
-                // sauf clavier ouvert où la barre système est déjà recouverte.
-                paddingBottom: keyboardOpen ? Spacing.three : bottomInset,
-              },
-              sheetStyle,
-            ]}>
-            {/* Poignée et en-tête forment la zone de glissement : le contenu
-                garde ses propres gestes de défilement. */}
-            <GestureDetector gesture={pan}>
-              <View style={styles.dragZone}>
-                <View style={styles.handleZone}>
-                  <View style={[styles.handle, { backgroundColor: theme.border }]} />
-                </View>
-                {title ? (
-                  <View style={[styles.header, showClose && styles.headerWithClose]}>
-                    <ThemedText type="smallBold" numberOfLines={1}>
-                      {title}
-                    </ThemedText>
-                    {subtitle ? (
-                      <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>
-                        {subtitle}
-                      </ThemedText>
-                    ) : null}
+            style={sheetStyle}>
+            <Glass
+              variant="regular"
+              fallbackColor={theme.background}
+              style={[
+                styles.sheet,
+                {
+                  maxHeight,
+                  ...(fill ? { height: maxHeight } : null),
+                  paddingBottom: keyboardOpen ? Spacing.three : bottomInset,
+                },
+              ]}>
+              {/* Poignée et en-tête forment la zone de glissement : le contenu
+                  garde ses propres gestes de défilement. */}
+              <GestureDetector gesture={pan}>
+                <View style={styles.dragZone}>
+                  <View style={styles.handleZone}>
+                    <View style={[styles.handle, { backgroundColor: theme.border }]} />
                   </View>
-                ) : (
-                  <View style={styles.headerSpacer} />
-                )}
-              </View>
-            </GestureDetector>
-            {showClose ? (
-              <Pressable
-                onPress={onClose}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel="Fermer la feuille"
-                style={({ pressed }) => [
-                  styles.close,
-                  { backgroundColor: theme.backgroundElement },
-                  pressed && styles.pressed,
-                ]}>
-                <X size={18} strokeWidth={2.4} color={theme.textSecondary} />
-              </Pressable>
-            ) : null}
-            <View style={[styles.body, fill && styles.bodyFill]}>{children}</View>
-            {footer ? (
-              <View style={[styles.footer, { borderTopColor: theme.border }]}>{footer}</View>
-            ) : null}
+                  {title ? (
+                    <View style={[styles.header, showClose && styles.headerWithClose]}>
+                      <ThemedText type="smallBold" numberOfLines={1}>
+                        {title}
+                      </ThemedText>
+                      {subtitle ? (
+                        <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>
+                          {subtitle}
+                        </ThemedText>
+                      ) : null}
+                    </View>
+                  ) : (
+                    <View style={styles.headerSpacer} />
+                  )}
+                </View>
+              </GestureDetector>
+              {showClose ? (
+                <Pressable
+                  onPress={onClose}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Fermer la feuille"
+                  style={({ pressed }) => [
+                    styles.close,
+                    { backgroundColor: theme.backgroundElement },
+                    pressed && styles.pressed,
+                  ]}>
+                  <X size={18} strokeWidth={2.4} color={theme.textSecondary} />
+                </Pressable>
+              ) : null}
+              <View style={[styles.body, fill && styles.bodyFill]}>{children}</View>
+              {footer ? (
+                <View style={[styles.footer, { borderTopColor: theme.border }]}>{footer}</View>
+              ) : null}
+            </Glass>
           </Animated.View>
         </KeyboardAvoidingView>
       </GestureHandlerRootView>
@@ -239,13 +234,12 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    backgroundColor: Scrim,
   },
   keyboard: { justifyContent: 'flex-end' },
   sheet: {
     borderTopLeftRadius: Radii.sheet,
     borderTopRightRadius: Radii.sheet,
-    borderWidth: StyleSheet.hairlineWidth,
     paddingTop: Spacing.one,
     overflow: 'hidden',
     // Une feuille haute doit laisser son contenu défiler, pas le rogner.

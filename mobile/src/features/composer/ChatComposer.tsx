@@ -1,4 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentRef,
+  type RefObject,
+} from 'react';
 import {
   Animated,
   BackHandler,
@@ -24,10 +32,12 @@ import { useRecentEmoji } from '../emoji/useRecentEmoji';
 import { deleteBackward, insertAt } from '../emoji/emojiUtils';
 import { useVoiceRecorder, type VoiceNote } from '../voice-notes/useVoiceRecorder';
 import { RecordingTimeline } from './RecordingTimeline';
-import { Radii } from '@/constants/theme';
+import { Radii, Type, type ThemePalette, type ThemeScheme } from '@/constants/theme';
+import { Glass } from '@/components/glass';
+import { useTheme } from '@/hooks/use-theme';
+import { useThemePreference } from '@/lib/theme-preference';
 
 export type ComposerTheme = PanelTheme & {
-  barBg: string;
   inputBg: string;
   inputText: string;
   placeholder: string;
@@ -35,24 +45,26 @@ export type ComposerTheme = PanelTheme & {
   sendBg: string;
 };
 
-/** Valeurs WeChat (thème clair). Associe-les au thème existant du projet (clair ET sombre). */
-export const DEFAULT_COMPOSER_THEME: ComposerTheme = {
-  barBg: '#F7F7F7',
-  inputBg: '#FFFFFF',
-  inputText: '#111111',
-  placeholder: '#9B9B9B',
-  sendBg: '#3C87F7',
-  panelBg: '#EDEDED',
-  tabBg: '#E3E3E3',
-  tabActiveBg: '#FFFFFF',
-  text: '#111111',
-  subtle: '#9B9B9B',
-  icon: '#181818',
-  border: '#DCDCDC',
-  pressed: '#DADADA',
-  accent: '#07C160',
-  accentText: '#FFFFFF',
-};
+/** Palette du compositeur, dérivée du thème de l'app (clair et sombre). */
+export function composerThemeFor(theme: ThemePalette, scheme: ThemeScheme): ComposerTheme {
+  const dark = scheme === 'dark';
+  return {
+    inputBg: theme.backgroundElement,
+    inputText: theme.text,
+    placeholder: theme.textSecondary,
+    sendBg: theme.accent,
+    panelBg: theme.background,
+    tabBg: theme.backgroundSelected,
+    tabActiveBg: theme.backgroundElement,
+    text: theme.text,
+    subtle: theme.textSecondary,
+    icon: dark ? theme.text : theme.textSecondary,
+    border: theme.border,
+    pressed: theme.backgroundSelected,
+    accent: theme.accent,
+    accentText: theme.onAccent,
+  };
+}
 
 type Panel = 'none' | 'emoji' | 'plus';
 
@@ -84,6 +96,8 @@ type Props = {
   initialText?: string;
   /** Membres proposés après « @ » (groupes uniquement). */
   mentionCandidates?: { id: string; username: string; displayName: string }[];
+  /** Cible du flou Android (la conversation) pour les surfaces de verre. */
+  blurTarget?: RefObject<ComponentRef<typeof View> | null>;
 };
 
 const DEFAULT_PANEL_HEIGHT = 290;
@@ -117,8 +131,11 @@ export function ChatComposer({
   theme: themeOverride,
   initialText = '',
   mentionCandidates,
+  blurTarget,
 }: Props) {
-  const t: ComposerTheme = { ...DEFAULT_COMPOSER_THEME, ...themeOverride };
+  const theme = useTheme();
+  const { scheme } = useThemePreference();
+  const t: ComposerTheme = { ...composerThemeFor(theme, scheme), ...themeOverride };
   const { recents, push } = useRecentEmoji();
   const { favorites, toggle: toggleFavorite } = useEmojiFavorites();
 
@@ -281,6 +298,7 @@ export function ChatComposer({
 
   // Fin d'enregistrement (envoi, annulation, limite 60 s) : on relâche le verrou.
   // Un tap court arme le verrou dès que la capture démarre réellement.
+  // L'état vient du module natif d'enregistrement : il n'est pas dérivable au rendu.
   useEffect(() => {
     if (recording && lockRequestedRef.current) {
       lockRequestedRef.current = false;
@@ -288,6 +306,7 @@ export function ChatComposer({
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     }
     if (status === 'idle') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocked(false);
       lockRequestedRef.current = false;
     }
@@ -295,8 +314,11 @@ export function ChatComposer({
 
   // Tap court = enregistrement verrouillé ; appui maintenu puis relâche = envoi.
   const TAP_MS = 400;
+  // PanResponder lit des refs dans ses callbacks : ceux-ci ne s'exécutent
+  // qu'après un geste, jamais pendant le rendu.
   const voicePan = useMemo(
     () =>
+      // eslint-disable-next-line react-hooks/refs
       PanResponder.create({
         onStartShouldSetPanResponder: () => !disabled,
         onMoveShouldSetPanResponder: () => false,
@@ -308,6 +330,7 @@ export function ChatComposer({
           // clavier ouvert pendant l'enregistrement (comportement WhatsApp).
           cancellingRef.current = false;
           setCancelling(false);
+          // eslint-disable-next-line react-hooks/purity
           grantAtRef.current = Date.now();
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
           void start();
@@ -321,6 +344,7 @@ export function ChatComposer({
           }
         },
         onPanResponderRelease: () => {
+          // eslint-disable-next-line react-hooks/purity
           if (Date.now() - grantAtRef.current < TAP_MS && !cancellingRef.current) {
             lockRequestedRef.current = true;
             return;
@@ -370,7 +394,7 @@ export function ChatComposer({
   const showBottomInset = panel === 'none' && !keyboardVisible;
 
   return (
-    <View style={{ backgroundColor: t.barBg }}>
+    <View>
       {mention ? (
         <View
           style={[styles.mentionPanel, { backgroundColor: t.panelBg, borderColor: t.border }]}>
@@ -394,9 +418,9 @@ export function ChatComposer({
           ))}
         </View>
       ) : null}
-      <View style={[styles.bar, { borderTopColor: t.border }]}>
+      <Glass blurTarget={blurTarget} fallbackColor={t.panelBg} style={styles.bar}>
         <View style={styles.center}>
-          <View style={[styles.field, { backgroundColor: t.inputBg }]}>
+          <Glass blurTarget={blurTarget} variant="clear" fallbackColor={t.inputBg} style={styles.field}>
             <TextInput
               ref={inputRef}
               value={text}
@@ -429,7 +453,7 @@ export function ChatComposer({
                   cancelling={cancelling}
                   colors={{
                     bar: t.sendBg,
-                    cancel: '#FA5151',
+                    cancel: theme.danger,
                     text: t.inputText,
                     dot: t.sendBg,
                   }}
@@ -444,7 +468,11 @@ export function ChatComposer({
                 }}
                 label="Annuler l'enregistrement"
               >
-                <MaterialCommunityIcons name="close-circle-outline" size={24} color="#FA5151" />
+                <MaterialCommunityIcons
+                  name="close-circle-outline"
+                  size={24}
+                  color={theme.danger}
+                />
               </FieldButton>
             ) : recording || text.length === 0 ? (
               <View
@@ -467,10 +495,10 @@ export function ChatComposer({
             )}
             {notice && !recording ? (
               <View style={[styles.noticeOverlay, { backgroundColor: t.inputBg }]}>
-                <Text style={{ color: t.subtle, fontSize: 13 }}>{notice}</Text>
+                <Text style={[styles.noticeText, { color: t.subtle }]}>{notice}</Text>
               </View>
             ) : null}
-          </View>
+          </Glass>
         </View>
 
         {locked ? null : (
@@ -501,7 +529,7 @@ export function ChatComposer({
             onPress={() => togglePanel('plus')}
           />
         )}
-      </View>
+      </Glass>
 
       {panel === 'emoji' && (
         <View style={{ height: emojiPanelHeight + bottomInset, backgroundColor: t.panelBg }}>
@@ -575,7 +603,8 @@ type SendButtonProps = { background: string; color: string; onPress: () => void 
 
 /** Bouton d'envoi : pastille, avion en papier SVG, apparition élastique. */
 function SendButton({ background, color, onPress }: SendButtonProps) {
-  const scale = useRef(new Animated.Value(0.55)).current;
+  // Valeur animée créée une seule fois, sans ref lue pendant le rendu.
+  const [scale] = useState(() => new Animated.Value(0.55));
   useEffect(() => {
     Animated.spring(scale, { toValue: 1, friction: 6, tension: 140, useNativeDriver: true }).start();
   }, [scale]);
@@ -652,15 +681,15 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: 12,
   },
+  noticeText: Type.caption,
   mentionName: { fontWeight: '600' },
-  mentionDisplay: { flexShrink: 1, fontSize: 13 },
+  mentionDisplay: { flexShrink: 1, ...Type.caption },
   bar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 6,
     paddingVertical: 8,
     gap: 4,
-    borderTopWidth: StyleSheet.hairlineWidth,
   },
   center: { flex: 1, justifyContent: 'flex-end' },
   field: {

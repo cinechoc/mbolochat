@@ -1,4 +1,12 @@
-import { IsDateString, IsEmail, IsIn, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsDateString,
+  IsEmail,
+  IsIn,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 
 export type Gender = 'FEMALE' | 'MALE' | 'CUSTOM';
 
@@ -26,4 +34,15 @@ export class RegisterDto {
 
   @IsIn(['FEMALE', 'MALE', 'CUSTOM'], { message: 'Choisis un genre valide.' })
   gender: Gender;
+
+  /**
+   * Libellé libre, requis uniquement quand le genre choisi est « Personnalisé ».
+   * Le `ValidateIf` laisse le champ optionnel pour les autres genres, y compris
+   * son absence : les clients plus anciens n'envoient que `gender`.
+   */
+  @ValidateIf((dto: RegisterDto) => dto.gender === 'CUSTOM')
+  @IsString({ message: 'Le genre personnalisé doit être un texte.' })
+  @MinLength(1, { message: 'Indique ton genre personnalisé.' })
+  @MaxLength(32, { message: 'Le genre personnalisé ne peut pas dépasser 32 caractères.' })
+  genderCustom?: string;
 }

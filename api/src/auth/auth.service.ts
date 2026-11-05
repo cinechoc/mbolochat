@@ -89,6 +89,9 @@ export class AuthService {
     const username = await this.generateUsername(dto.firstName, dto.lastName);
     const displayName = `${dto.firstName} ${dto.lastName}`.trim().slice(0, 48);
 
+    const genderCustom =
+      dto.gender === 'CUSTOM' ? (dto.genderCustom?.trim() || null) : null;
+
     const user = await this.usersService.create({
       email: dto.email,
       username,
@@ -96,6 +99,7 @@ export class AuthService {
       passwordHash,
       birthday: dto.birthday,
       gender: dto.gender,
+      genderCustom,
     });
     if (isMinor(dto.birthday)) {
       await this.usersService.applyMinorDefaults(user.id);

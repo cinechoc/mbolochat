@@ -178,6 +178,30 @@ export const fr = {
     cacheClearedBody: 'Les fichiers temporaires ont été supprimés.',
     serverError: 'Impossible de charger les réglages.',
   },
+  location: {
+    title: 'Localisation',
+    city: 'Ville',
+    unknownCity: 'Non détectée',
+    automatic: 'Détection automatique',
+    access: 'Accès à la localisation',
+    granted: 'Activée',
+    undetermined: 'Non activée',
+    denied: 'Refusée',
+    unavailable: 'Indisponible',
+    loading: 'Vérification…',
+    activating: 'Activation…',
+    openSettings: 'Ouvrir les réglages Android',
+    privacy:
+      'La ville est détectée automatiquement à partir de votre position approximative, au maximum une fois par 24 h. Les coordonnées ne sont jamais enregistrées.',
+    deniedHint:
+      'Android bloque la localisation pour MboloChat. Autorisez-la dans les réglages du téléphone.',
+    unavailableHint:
+      'La détection sera disponible après la prochaine mise à jour de l’application.',
+    failedHint:
+      'Impossible de détecter la ville pour le moment. Vérifie ta connexion ; une nouvelle tentative aura lieu automatiquement.',
+    errorTitle: 'Localisation impossible',
+    mocked: 'La ville ne peut pas être mise à jour depuis une position simulée.',
+  },
   privacy: {
     profile: 'Qui voit votre photo, votre bio, votre ville et votre âge.',
     write: 'Qui peut démarrer une conversation avec vous.',
@@ -197,10 +221,6 @@ export const fr = {
     noPhotos: 'Aucune photo pour le moment.',
     cityAge: (city: string, age: number) => `${city} · ${age} ans`,
     ageOnly: (age: number) => `${age} ans`,
-    detectCity: 'Ville détectée automatiquement',
-    cityMissing: 'Ville non détectée',
-    enableLocation: 'Activer la localisation',
-    locationRefused: 'Localisation refusée. La ville reste masquée.',
     birthdateTitle: 'Votre date de naissance',
     birthdateBody:
       'Elle sert uniquement à calculer votre âge et ne peut pas être modifiée ensuite.',

@@ -17,6 +17,7 @@ function user(overrides: Partial<User> = {}): User {
     avatarUrl: null,
     birthday: null,
     gender: 'FEMALE',
+    genderCustom: null,
     lastSeenAt: null,
     lastSeenVisibility: 'contacts',
     onlineVisibility: 'same_as_last_seen',
@@ -55,5 +56,16 @@ describe('toPublicUser', () => {
 
   it('préserve un genre absent sans en inventer un', () => {
     expect(toPublicUser(user({ gender: null })).gender).toBeNull();
+  });
+
+  it('expose le libellé libre du genre personnalisé', () => {
+    const custom = toPublicUser(user({ gender: 'CUSTOM', genderCustom: 'Non-binaire' }));
+    expect(custom.gender).toBe('CUSTOM');
+    expect(custom.genderCustom).toBe('Non-binaire');
+  });
+
+  it('ne renvoie pas de libellé libre pour les autres genres', () => {
+    expect(toPublicUser(user({ gender: 'FEMALE', genderCustom: null })).genderCustom).toBeNull();
+    expect(toPublicUser(user({ gender: 'MALE' })).genderCustom).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useThemePreference } from '@/lib/theme-preference';
 import { Colors } from './theme';
 
 /** Écart au-delà duquel on réaffiche une heure entre deux messages. */
@@ -26,6 +26,8 @@ export interface ChatPalette {
   systemText: string;
   unreadText: string;
   tick: string;
+  /** Double coche bleue : message lu (même bleu sur les deux thèmes). */
+  tickRead: string;
   error: string;
   voiceBarOff: string;
   voiceBarOn: string;
@@ -59,6 +61,7 @@ export const ChatColors: { light: ChatPalette; dark: ChatPalette } = {
     systemText: '#9B9B9B',
     unreadText: '#9B9B9B',
     tick: '#445B49',
+    tickRead: '#53BDEB',
     error: '#FA5151',
     voiceBarOff: 'rgba(0,0,0,0.22)',
     voiceBarOn: '#111111',
@@ -90,6 +93,7 @@ export const ChatColors: { light: ChatPalette; dark: ChatPalette } = {
     systemText: Colors.dark.textSecondary,
     unreadText: Colors.dark.textSecondary,
     tick: '#C8D8CC',
+    tickRead: '#53BDEB',
     error: Colors.dark.error,
     voiceBarOff: 'rgba(255,255,255,0.25)',
     voiceBarOn: '#F5F5F5',
@@ -102,7 +106,12 @@ export const ChatColors: { light: ChatPalette; dark: ChatPalette } = {
   },
 };
 
+/**
+ * Palette de la conversation. Suit la préférence d'apparence de l'app (et non
+ * le seul thème système), sinon forcer « sombre » dans les réglages ne
+ * changerait pas les couleurs du chat.
+ */
 export function useChatColors(): ChatPalette {
-  const scheme = useColorScheme();
+  const { scheme } = useThemePreference();
   return scheme === 'dark' ? ChatColors.dark : ChatColors.light;
 }

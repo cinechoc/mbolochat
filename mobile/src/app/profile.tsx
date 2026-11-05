@@ -1,7 +1,7 @@
 import { Redirect, Stack, useFocusEffect, useRouter } from 'expo-router';
 import { Settings } from 'lucide-react-native';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ProfileAction, ProfileHeader } from '@/components/profile-view';
@@ -13,7 +13,6 @@ import { fr } from '@/i18n/fr';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { cache } from '@/lib/cache';
-import { captureCity, locationAvailable } from '@/lib/location';
 import type { UserProfile } from '@/lib/types';
 
 export default function ProfileScreen() {
@@ -36,6 +35,7 @@ export default function ProfileScreen() {
       bio: user.bio,
       avatarUrl: user.avatarUrl,
       gender: user.gender,
+      genderCustom: user.genderCustom,
       notificationsEnabled: user.notificationsEnabled,
       notificationSound: user.notificationSound ?? true,
       notificationPreview: user.notificationPreview ?? true,
@@ -49,13 +49,6 @@ export default function ProfileScreen() {
     };
   });
   const [error, setError] = useState<string | null>(null);
-  const [canLocate, setCanLocate] = useState(false);
-  const [locating, setLocating] = useState(false);
-  const cityAttempted = useRef(false);
-
-  useEffect(() => {
-    void locationAvailable().then(setCanLocate);
-  }, []);
 
   const load = useCallback(async () => {
     if (!token || !user) {
@@ -77,48 +70,9 @@ export default function ProfileScreen() {
     }, [load]),
   );
 
-  // Ville vérifiée : une tentative par session ; le serveur applique lui-même
-  // le délai de 24 h et l'anti-téléport. Rien n'est conservé côté app.
-  useEffect(() => {
-    if (!token || !canLocate || cityAttempted.current) {
-      return;
-    }
-    cityAttempted.current = true;
-    void captureCity(token).then((status) => {
-      if (status === 'updated') {
-        void load();
-      }
-    });
-  }, [token, canLocate, load]);
-
   if (!token || !user) {
     return <Redirect href="/login" />;
   }
-
-  const askLocation = async () => {
-    if (!token || locating) return;
-    setLocating(true);
-    const status = await captureCity(token);
-    setLocating(false);
-    if (status === 'denied') {
-      Alert.alert('Localisation refusée', fr.profile.locationRefused);
-      return;
-    }
-    if (status === 'mocked') {
-      Alert.alert('Position simulée refusée', 'La ville ne peut pas être mise à jour.');
-      return;
-    }
-    if (status === 'unavailable') {
-      Alert.alert(
-        'Localisation indisponible',
-        'La détection de ville sera disponible après la prochaine mise à jour de l’application.',
-      );
-      return;
-    }
-    if (status === 'updated') {
-      void load();
-    }
-  };
 
   return (
     <ThemedView style={styles.container}>
@@ -153,13 +107,6 @@ export default function ProfileScreen() {
                   <ProfileAction
                     label="Renseigner ma date de naissance"
                     onPress={() => router.push('/profile/birthdate')}
-                  />
-                ) : null}
-                {!profile.city && canLocate ? (
-                  <ProfileAction
-                    label={locating ? 'Localisation…' : fr.profile.enableLocation}
-                    onPress={() => void askLocation()}
-                    loading={locating}
                   />
                 ) : null}
               </View>

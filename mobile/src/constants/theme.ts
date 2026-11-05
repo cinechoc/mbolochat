@@ -44,6 +44,11 @@ export const Colors = {
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
+/** Palette élargie : mêmes clés pour les deux thèmes, valeurs libres. */
+export type ThemePalette = { readonly [K in ThemeColor]: string };
+
+export type ThemeScheme = keyof typeof Colors;
+
 export const Fonts = Platform.select({
   ios: {
     /** iOS `UIFontDescriptorSystemDesignDefault` */
@@ -116,8 +121,35 @@ export const Motion = {
   sheetDismissDistance: 120,
 } as const;
 
+/** Voile sombre derrière les feuilles et modales. */
+export const Scrim = 'rgba(0, 0, 0, 0.45)';
+
 /** Bouton : réduction d'échelle à l'appui. */
 export const PressScale = 0.97;
+
+/**
+ * Surface « verre » (Liquid Glass iOS 26 / Material 3 Expressive Android).
+ *
+ * `tint` est la teinte de flou système ; `fallback` est la couleur opaque
+ * utilisée quand le flou n'est pas disponible (Android sans cible de flou,
+ * appareil ancien). Un voile translucide sans flou superposerait le contenu du
+ * dessous au texte : on ne le fait jamais.
+ */
+export const GlassColors = {
+  light: {
+    tint: 'light',
+    fallback: Colors.light.background,
+    border: 'rgba(11,15,20,0.08)',
+  },
+  dark: {
+    tint: 'dark',
+    fallback: Colors.dark.background,
+    border: 'rgba(255,255,255,0.14)',
+  },
+} as const;
+
+/** Intensité de flou Android, sur l'échelle `expo-blur` (1 à 100). */
+export const BlurIntensity = 72;
 
 /**
  * Écran d'appel (1:1 et groupe) : surface bleutée sombre, indépendante du thème

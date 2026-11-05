@@ -377,6 +377,35 @@ describe('MboloChat API (e2e)', () => {
       .expect(400);
   });
 
+  it('accepts a custom gender label and returns it', async () => {
+    const registered = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({
+        ...registerBody('Camille', 'Roux'),
+        gender: 'CUSTOM',
+        genderCustom: 'Non-binaire',
+      })
+      .expect(201);
+    expect(registered.body.user.gender).toBe('CUSTOM');
+    expect(registered.body.user.genderCustom).toBe('Non-binaire');
+  });
+
+  it('requires a label when the gender is custom', async () => {
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ ...registerBody('Alex', 'Blanc'), gender: 'CUSTOM' })
+      .expect(400);
+  });
+
+  it('ignores a custom label for the other genders', async () => {
+    const registered = await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ ...registerBody('Sam', 'Noir'), gender: 'MALE', genderCustom: 'Peu importe' })
+      .expect(201);
+    expect(registered.body.user.gender).toBe('MALE');
+    expect(registered.body.user.genderCustom).toBeNull();
+  });
+
   it('resets a forgotten password with a 6-digit code', async () => {
     const user = (await register('Nina', 'Rossi')).body;
 

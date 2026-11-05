@@ -5,6 +5,8 @@ export interface SenderInfo {
   avatarUrl: string | null;
   /** Genre déclaré, pour l'avatar par défaut quand il n'y a pas de photo. */
   gender: Gender | null;
+  /** Libellé libre quand le genre déclaré est « Personnalisé ». */
+  genderCustom: string | null;
 }
 
 /** Membre d'une conversation, avec son dernier accusé de lecture. */
@@ -24,6 +26,8 @@ export interface User {
   avatarUrl: string | null;
   /** Genre déclaré à l'inscription, pour l'avatar par défaut. */
   gender: Gender | null;
+  /** Libellé libre quand le genre déclaré est « Personnalisé ». */
+  genderCustom: string | null;
   /** Notifications dans l'application (badges de non-lus). */
   notificationsEnabled: boolean;
   /** Son des notifications poussées. */

@@ -6,6 +6,7 @@ import {
   HelpCircle,
   Lock,
   LogOut,
+  MapPin,
   MessageSquare,
   Phone,
   Trash2,
@@ -80,6 +81,11 @@ export default function SettingsScreen() {
             icon={Lock}
             label={fr.settings.privacyTitle}
             onPress={() => router.push('/settings/privacy')}
+          />
+          <SettingRow
+            icon={MapPin}
+            label={fr.location.title}
+            onPress={() => router.push('/settings/location')}
           />
           <SettingRow
             icon={Bell}
