@@ -154,13 +154,11 @@ export default function UserProfileScreen() {
         {profile ? (
           <ProfileHeader
             profile={profile}
+            onPressEdit={
+              profile.isMe ? () => router.push('/profile/edit') : undefined
+            }
             actions={
-              profile.isMe ? (
-                <ProfileAction
-                  label="Modifier le profil"
-                  onPress={() => router.push('/profile/edit')}
-                />
-              ) : blocked ? (
+              profile.isMe ? null : blocked ? (
                 <ProfileAction
                   label="Débloquer le compte"
                   onPress={() => void toggleBlock()}
@@ -191,7 +189,7 @@ export default function UserProfileScreen() {
         ) : null}
 
         {error ? (
-          <ThemedText type="small" style={styles.error}>
+          <ThemedText type="small" themeColor="danger">
             {error}
           </ThemedText>
         ) : null}
@@ -214,9 +212,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.three,
     gap: Spacing.four,
-  },
-  error: {
-    color: '#e5484d',
   },
   section: {
     gap: Spacing.three,

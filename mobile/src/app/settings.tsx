@@ -75,6 +75,7 @@ export default function SettingsScreen() {
             icon={CircleUserRound}
             label={fr.settings.accountTitle}
             value={`@${user.username}`}
+            copyValue={user.username}
             onPress={() => router.push('/settings/account')}
           />
           <SettingRow

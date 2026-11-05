@@ -1,15 +1,20 @@
-import { ChevronRight, type LucideIcon } from 'lucide-react-native';
+import { Check, ChevronRight, Copy, type LucideIcon } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import * as Clipboard from 'expo-clipboard';
 import { Pressable, StyleSheet, Switch, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { Icon } from '@/components/icon';
 import { ThemedText } from '@/components/themed-text';
 import { Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { fr } from '@/i18n/fr';
 
 type SettingRowProps = {
   icon?: LucideIcon;
   label: string;
   value?: string;
+  /** Affiche une icône copie qui place cette valeur dans le presse-papiers. */
+  copyValue?: string;
   onPress?: () => void;
   destructive?: boolean;
   disabled?: boolean;
@@ -23,6 +28,7 @@ export function SettingRow({
   icon,
   label,
   value,
+  copyValue,
   onPress,
   destructive,
   disabled,
@@ -30,8 +36,17 @@ export function SettingRow({
   style,
 }: SettingRowProps) {
   const theme = useTheme();
+  const [copied, setCopied] = useState(false);
   const pressable = Boolean(onPress) || Boolean(toggle);
   const color = destructive ? '#e5484d' : theme.text;
+
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
 
   return (
     <Pressable
@@ -54,6 +69,22 @@ export function SettingRow({
         <ThemedText type="small" themeColor="textSecondary" numberOfLines={1} style={styles.value}>
           {value}
         </ThemedText>
+      ) : null}
+      {copyValue ? (
+        <Pressable
+          onPress={() => {
+            void Clipboard.setStringAsync(copyValue);
+            setCopied(true);
+          }}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={copied ? fr.settings.copied : fr.settings.copyUsername}>
+          {copied ? (
+            <Check size={18} color={theme.accent} />
+          ) : (
+            <Copy size={18} color={theme.textSecondary} />
+          )}
+        </Pressable>
       ) : null}
       {toggle ? (
         <View pointerEvents="none">

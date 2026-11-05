@@ -72,6 +72,8 @@ export const fr = {
   settings: {
     title: 'Paramètres',
     accountTitle: 'Compte',
+    copyUsername: "Copier le nom d'utilisateur",
+    copied: 'Copié',
     notificationsTitle: 'Notifications',
     privacyTitle: 'Confidentialité',
     discussionsTitle: 'Discussions',

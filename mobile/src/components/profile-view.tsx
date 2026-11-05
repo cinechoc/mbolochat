@@ -1,10 +1,11 @@
+import { Pencil } from 'lucide-react-native';
 import { type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Radii, Spacing } from '@/constants/theme';
+import { Radii, Scrim, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { fr } from '@/i18n/fr';
 import type { UserProfile } from '@/lib/types';
@@ -13,6 +14,10 @@ interface ProfileHeaderProps {
   profile: UserProfile;
   /** Boutons d'action (modifier, écrire, appeler…). */
   actions?: ReactNode;
+  /** Icône de crayon à côté du nom complet (accès à l'édition du profil). */
+  onPressEdit?: () => void;
+  /** Masqué sur son propre profil : le @pseudo se consulte et se copie dans les paramètres. */
+  showUsername?: boolean;
   onPressAvatar?: () => void;
   /** Affiche un voile pendant un changement de photo. */
   avatarBusy?: boolean;
@@ -22,9 +27,12 @@ interface ProfileHeaderProps {
 export function ProfileHeader({
   profile,
   actions,
+  onPressEdit,
+  showUsername = true,
   onPressAvatar,
   avatarBusy = false,
 }: ProfileHeaderProps) {
+  const theme = useTheme();
   const meta =
     profile.city && profile.age !== null
       ? fr.profile.cityAge(profile.city, profile.age)
@@ -46,19 +54,32 @@ export function ProfileHeader({
           />
           {avatarBusy ? (
             <View style={[styles.avatarOverlay, { borderRadius: Radii.full }]}>
-              <ActivityIndicator color="#ffffff" />
+              <ActivityIndicator color={theme.onAccent} />
             </View>
           ) : null}
         </View>
       </Pressable>
 
       <View style={styles.identity}>
-        <ThemedText style={styles.name} numberOfLines={1}>
-          {profile.displayName}
-        </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-          @{profile.username}
-        </ThemedText>
+        <View style={styles.nameRow}>
+          <ThemedText style={styles.name} numberOfLines={1}>
+            {profile.displayName}
+          </ThemedText>
+          {onPressEdit ? (
+            <Pressable
+              onPress={onPressEdit}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={fr.profile.edit}>
+              <Pencil size={20} color={theme.textSecondary} />
+            </Pressable>
+          ) : null}
+        </View>
+        {showUsername ? (
+          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+            @{profile.username}
+          </ThemedText>
+        ) : null}
         {meta ? (
           <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
             {meta}
@@ -101,17 +122,17 @@ export function ProfileAction({
       style={({ pressed }) => [
         styles.action,
         {
-          backgroundColor: primary ? accentColor : theme.backgroundElement,
+          backgroundColor: primary ? theme.accent : theme.backgroundElement,
           opacity: pressed || loading ? 0.6 : 1,
         },
       ]}>
       {loading ? (
-        <ActivityIndicator size="small" color={primary ? '#ffffff' : theme.text} />
+        <ActivityIndicator size="small" color={primary ? theme.onAccent : theme.text} />
       ) : (
         <ThemedText
           style={[
             styles.actionLabel,
-            { color: primary ? '#ffffff' : danger ? '#e5484d' : theme.text },
+            { color: primary ? theme.onAccent : danger ? theme.danger : theme.text },
           ]}>
           {label}
         </ThemedText>
@@ -142,8 +163,6 @@ export function PhotoGrid({ photos }: PhotoGridProps) {
   );
 }
 
-const accentColor = '#3c87f7';
-
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
@@ -152,10 +171,18 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.two,
   },
   identity: { flex: 1, alignItems: 'flex-start', gap: 2, minWidth: 0 },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: Spacing.two,
+    maxWidth: '100%',
+  },
   name: {
     fontSize: 22,
     lineHeight: 28,
     fontWeight: '700',
+    flexShrink: 1,
   },
   bio: {
     fontSize: 14,
@@ -188,7 +215,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: Scrim,
   },
   grid: {
     flexDirection: 'row',

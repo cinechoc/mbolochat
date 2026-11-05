@@ -9,7 +9,6 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { fr } from '@/i18n/fr';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { cache } from '@/lib/cache';
@@ -96,26 +95,23 @@ export default function ProfileScreen() {
         {profile ? (
           <ProfileHeader
             profile={profile}
+            showUsername={false}
+            onPressEdit={() => router.push('/profile/edit')}
             actions={
-              <View style={styles.actions}>
-                <ProfileAction
-                  label={fr.profile.edit}
-                  onPress={() => router.push('/profile/edit')}
-                  primary
-                />
-                {!profile.birthdateSet ? (
+              !profile.birthdateSet ? (
+                <View style={styles.actions}>
                   <ProfileAction
                     label="Renseigner ma date de naissance"
                     onPress={() => router.push('/profile/birthdate')}
                   />
-                ) : null}
-              </View>
+                </View>
+              ) : null
             }
           />
         ) : null}
 
         {error ? (
-          <ThemedText type="small" style={styles.error}>
+          <ThemedText type="small" style={{ color: theme.danger }}>
             {error}
           </ThemedText>
         ) : null}
@@ -137,5 +133,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.two,
   },
-  error: { color: '#e5484d' },
 });

@@ -1,6 +1,16 @@
 import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  type ScrollViewInstance,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,6 +18,7 @@ import { Avatar } from '@/components/avatar';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing, Radii } from '@/constants/theme';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { fr } from '@/i18n/fr';
 import { ApiError, api } from '@/lib/api';
@@ -21,6 +32,7 @@ export default function EditProfileScreen() {
   const { token, user, setUser } = useAuth();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
   const router = useRouter();
   const params = useLocalSearchParams<{ displayName?: string; bio?: string }>();
   const { settings } = useUserSettings();
@@ -31,6 +43,14 @@ export default function EditProfileScreen() {
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const scrollRef = useRef<ScrollViewInstance>(null);
+
+  // Android réduit la fenêtre sous le clavier mais ne fait jamais défiler le
+  // champ focus dans la vue : on l'amène nous-mêmes, une fois le resize posé.
+  const scrollToBio = useCallback(() => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 350);
+  }, []);
 
   const save = useCallback(async () => {
     if (!token || !user) {
@@ -122,139 +142,160 @@ export default function EditProfileScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
-      <Stack.Screen
-        options={{
-          title: 'Modifier le profil',
-          headerRight: () => (
-            <Pressable
-              onPress={() => void save()}
-              hitSlop={8}
-              disabled={saving || uploading || deleting}>
-              <ThemedText style={styles.save}>{saving ? '…' : 'Enregistrer'}</ThemedText>
-            </Pressable>
-          ),
-        }}
-      />
-      <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          { paddingBottom: insets.bottom + Spacing.four },
-        ]}
-        keyboardShouldPersistTaps="handled">
-        <View style={styles.photoRow}>
-          <Avatar
-            name={user.displayName}
-            uri={user.avatarUrl}
-            size={86}
-            gender={user.gender}
-          />
-          <View style={styles.photoActions}>
-            <Pressable
-              onPress={() => void pickAvatar()}
-              disabled={uploading || deleting}>
-              <ThemedText style={styles.changePhoto}>
-                {uploading ? 'Envoi…' : 'Changer la photo'}
-              </ThemedText>
-            </Pressable>
-            {user.avatarUrl ? (
+    <ThemedView
+      style={[
+        styles.container,
+        keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
+      ]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.flex}>
+        <Stack.Screen
+          options={{
+            title: 'Modifier le profil',
+            headerRight: () => (
               <Pressable
-                onPress={confirmDeleteAvatar}
-                disabled={uploading || deleting}
-                hitSlop={6}>
-                <ThemedText style={styles.deletePhoto}>
-                  {deleting ? 'Suppression…' : 'Supprimer la photo'}
+                onPress={() => void save()}
+                hitSlop={8}
+                disabled={saving || uploading || deleting}>
+                <ThemedText style={[styles.save, { color: theme.accent }]}>
+                  {saving ? '…' : 'Enregistrer'}
                 </ThemedText>
               </Pressable>
-            ) : null}
+            ),
+          }}
+        />
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: insets.bottom + Spacing.four },
+          ]}
+          keyboardShouldPersistTaps="handled">
+          <View style={styles.photoRow}>
+            <Avatar
+              name={user.displayName}
+              uri={user.avatarUrl}
+              size={86}
+              gender={user.gender}
+            />
+            <View style={styles.photoActions}>
+              <Pressable
+                onPress={() => void pickAvatar()}
+                disabled={uploading || deleting}>
+                <ThemedText style={[styles.changePhoto, { color: theme.accent }]}>
+                  {uploading ? 'Envoi…' : 'Changer la photo'}
+                </ThemedText>
+              </Pressable>
+              {user.avatarUrl ? (
+                <Pressable
+                  onPress={confirmDeleteAvatar}
+                  disabled={uploading || deleting}
+                  hitSlop={6}>
+                  <ThemedText style={[styles.deletePhoto, { color: theme.danger }]}>
+                    {deleting ? 'Suppression…' : 'Supprimer la photo'}
+                  </ThemedText>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
-        </View>
 
-        <View style={styles.field}>
-          <ThemedText type="smallBold" themeColor="textSecondary">
-            Nom
-          </ThemedText>
-          <TextInput
-            value={displayName}
-            onChangeText={setDisplayName}
-            placeholder="Ton nom"
-            placeholderTextColor={theme.textSecondary}
-            style={[
-              styles.input,
-              { backgroundColor: theme.backgroundElement, color: theme.text },
-            ]}
-          />
-        </View>
+          <View style={styles.field}>
+            <ThemedText type="smallBold" themeColor="textSecondary">
+              Nom
+            </ThemedText>
+            <TextInput
+              value={displayName}
+              onChangeText={setDisplayName}
+              onFocus={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
+              placeholder="Ton nom"
+              placeholderTextColor={theme.textSecondary}
+              style={[
+                styles.input,
+                { backgroundColor: theme.backgroundElement, color: theme.text },
+              ]}
+            />
+          </View>
 
-        <View style={styles.field}>
-          <ThemedText type="smallBold" themeColor="textSecondary">
-            Nom d&apos;utilisateur
-          </ThemedText>
-          <ThemedText
-            type="small"
-            themeColor="textSecondary"
-            style={[
-              styles.input,
-              styles.readonly,
-              { backgroundColor: theme.backgroundElement, color: theme.textSecondary },
-            ]}>
-            @{user.username}
-          </ThemedText>
-        </View>
+          <View style={styles.field}>
+            <ThemedText type="smallBold" themeColor="textSecondary">
+              Nom d&apos;utilisateur
+            </ThemedText>
+            <ThemedText
+              type="small"
+              themeColor="textSecondary"
+              style={[
+                styles.input,
+                styles.readonly,
+                { backgroundColor: theme.backgroundElement, color: theme.textSecondary },
+              ]}>
+              @{user.username}
+            </ThemedText>
+          </View>
 
-        <View style={styles.field}>
-          <ThemedText type="smallBold" themeColor="textSecondary">
-            Ville
-          </ThemedText>
-          <ThemedText
-            type="small"
-            themeColor="textSecondary"
-            style={[
-              styles.input,
-              styles.readonly,
-              { backgroundColor: theme.backgroundElement, color: theme.textSecondary },
-            ]}>
-            {settings.city ?? fr.location.unknownCity}
-          </ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {fr.location.automatic}
-          </ThemedText>
-        </View>
+          <View style={styles.field}>
+            <ThemedText type="smallBold" themeColor="textSecondary">
+              Ville
+            </ThemedText>
+            <ThemedText
+              type="small"
+              themeColor="textSecondary"
+              style={[
+                styles.input,
+                styles.readonly,
+                { backgroundColor: theme.backgroundElement, color: theme.textSecondary },
+              ]}>
+              {settings.city ?? fr.location.unknownCity}
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {fr.location.automatic}
+            </ThemedText>
+          </View>
 
-        <View style={styles.field}>
-          <ThemedText type="smallBold" themeColor="textSecondary">
-            Biographie
-          </ThemedText>
-          <TextInput
-            value={bio}
-            onChangeText={(value) => setBio(value.slice(0, BIO_MAX_LENGTH))}
-            placeholder="Parle un peu de toi"
-            placeholderTextColor={theme.textSecondary}
-            multiline
-            numberOfLines={4}
-            style={[
-              styles.input,
-              styles.bioInput,
-              { backgroundColor: theme.backgroundElement, color: theme.text },
-            ]}
-          />
-          <ThemedText type="small" themeColor="textSecondary">
-            {bio.length}/{BIO_MAX_LENGTH}
-          </ThemedText>
-        </View>
+          <View style={styles.field}>
+            <ThemedText type="smallBold" themeColor="textSecondary">
+              Biographie
+            </ThemedText>
+            <TextInput
+              value={bio}
+              onChangeText={(value) => {
+                setBio(value.slice(0, BIO_MAX_LENGTH));
+                requestAnimationFrame(() =>
+                  scrollRef.current?.scrollToEnd({ animated: false }),
+                );
+              }}
+              onFocus={scrollToBio}
+              placeholder="Parle un peu de toi"
+              placeholderTextColor={theme.textSecondary}
+              multiline
+              numberOfLines={4}
+              style={[
+                styles.input,
+                styles.bioInput,
+                { backgroundColor: theme.backgroundElement, color: theme.text },
+              ]}
+            />
+            <ThemedText type="small" themeColor="textSecondary">
+              {bio.length}/{BIO_MAX_LENGTH}
+            </ThemedText>
+          </View>
 
-        {error ? (
-          <ThemedText type="small" style={styles.error}>
-            {error}
-          </ThemedText>
-        ) : null}
-      </ScrollView>
+          {error ? (
+            <ThemedText type="small" style={{ color: theme.danger }}>
+              {error}
+            </ThemedText>
+          ) : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  flex: {
     flex: 1,
   },
   content: {
@@ -273,12 +314,10 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   changePhoto: {
-    color: '#3c87f7',
     fontWeight: '700',
     fontSize: 15,
   },
   deletePhoto: {
-    color: '#e5484d',
     fontWeight: '600',
     fontSize: 14,
   },
@@ -299,11 +338,7 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   save: {
-    color: '#3c87f7',
     fontWeight: '700',
     fontSize: 16,
-  },
-  error: {
-    color: '#e5484d',
   },
 });
