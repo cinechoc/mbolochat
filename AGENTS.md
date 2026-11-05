@@ -70,6 +70,7 @@ Le seul workflow CI est `.github/workflows/crypto.yml`. **Aucun CI TypeScript** 
 
 ## Pièges spécifiques
 
+- **Machine aux ressources limitées** : ne jamais lancer `expo prebuild` ni build lourd localement. Si un build est nécessaire, `npm run build:android` dans Waydroid (déjà en marche sur la machine), ou demander à l'utilisateur de lancer un build EAS de son côté.
 - `mobile/android/` et `mobile/ios/` sont **générés et ignorés par Git**. Ne jamais les éditer à la main. Après `app.json`, `plugins/` ou une dépendance native : `npx expo prebuild --platform android --no-install`, puis reconstruire l'APK. Les plugins `mobile/plugins/with*` injectent le service de notifications et `CallActionsReceiver`.
 - **Drizzle** : modifier `schema.ts` → `npm run db:generate` → relire le SQL → committer la migration et `meta/_journal.json`. Ne jamais modifier une migration déjà appliquée. Les fichiers `.down.sql` sont manuels et ne sont pas exécutés automatiquement. `npm run db:push` est un raccourci de dev, pas une migration versionnée.
 - Une modification Rust impose de reconstruire les `.so` avec `bash crypto/scripts/build-android.sh` (NDK Android requis) et de committer les deux ABI. Une modification JS seule ne l'impose pas.
