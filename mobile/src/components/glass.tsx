@@ -58,6 +58,12 @@ export interface GlassProps extends ViewProps {
   blurTarget?: RefObject<ComponentRef<typeof View> | null>;
   /** Fond opaque quand le flou est indisponible (assorti à la surface). */
   fallbackColor?: string;
+  /**
+   * Apparence forcée de la surface. Les écrans d'authentification restent
+   * sombres quel que soit le thème : sans cela, le flou Android « clear »
+   * éclaircit le champ et le texte clair devient illisible.
+   */
+  appearance?: 'light' | 'dark';
 }
 
 export function Glass({
@@ -67,10 +73,12 @@ export function Glass({
   bordered = true,
   blurTarget,
   fallbackColor,
+  appearance,
   ...rest
 }: GlassProps) {
   const { scheme } = useThemePreference();
-  const colors = GlassColors[scheme];
+  const surface = appearance ?? scheme;
+  const colors = GlassColors[surface];
 
   const glassStyle: ViewStyle = {
     borderColor: colors.border,
@@ -83,7 +91,7 @@ export function Glass({
         {...rest}
         style={[style, glassStyle]}
         glassEffectStyle={variant}
-        colorScheme={scheme}
+        colorScheme={surface}
         isInteractive={false}>
         {children}
       </NativeGlassView>
@@ -99,7 +107,7 @@ export function Glass({
     <View {...rest} style={[style, glassStyle]}>
       {canBlur ? (
         <blur.BlurView
-          tint={variant === 'clear' ? 'extraLight' : colors.tint}
+          tint={colors.tint}
           intensity={BlurIntensity}
           blurMethod="dimezisBlurViewSdk31Plus"
           blurTarget={blurTarget}

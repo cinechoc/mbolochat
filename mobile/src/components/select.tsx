@@ -31,6 +31,7 @@ export function Select({ placeholder, options, value, onChange, style, glass = f
   const selected = options.find((option) => option.value === value);
   const textColor = glass ? AuthSurface.text : undefined;
   const subtleColor = glass ? AuthSurface.subtle : undefined;
+  const placeholderColor = glass ? AuthSurface.placeholder : undefined;
 
   const trigger = (
     <Pressable
@@ -44,7 +45,7 @@ export function Select({ placeholder, options, value, onChange, style, glass = f
       <ThemedText
         themeColor={selected ? 'text' : 'textSecondary'}
         numberOfLines={1}
-        style={[styles.triggerText, { color: selected ? textColor : subtleColor }]}>
+        style={[styles.triggerText, { color: selected ? textColor : placeholderColor }]}>
         {selected?.label ?? placeholder}
       </ThemedText>
       <ChevronDown size={16} strokeWidth={2.4} color={subtleColor ?? theme.textSecondary} />
@@ -54,7 +55,11 @@ export function Select({ placeholder, options, value, onChange, style, glass = f
   return (
     <>
       {glass ? (
-        <Glass variant="clear" fallbackColor={AuthSurface.glassField} style={styles.triggerGlass}>
+        <Glass
+          appearance="dark"
+          variant="clear"
+          fallbackColor={AuthSurface.glassField}
+          style={styles.triggerGlass}>
           {trigger}
         </Glass>
       ) : (

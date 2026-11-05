@@ -27,11 +27,18 @@ export const AuthSurface = {
   glassButton: 'rgba(26, 34, 45, 0.72)',
   border: 'rgba(255, 255, 255, 0.14)',
   text: Colors.dark.text,
-  subtle: Colors.dark.textSecondary,
+  /** Texte secondaire (hints, libellés). */
+  subtle: '#A3B0C0',
+  /** Placeholders : plus clairs que les hints pour rester lisibles sur le verre sombre. */
+  placeholder: '#AEBBCB',
+  /** Liens, icônes et boutons texte posés sur la surface sombre. */
+  accent: '#6FA8FF',
+  /** Fond plein (bouton principal, option sélectionnée), avec texte blanc. */
+  accentSolid: Colors.light.accent,
 } as const;
 
-/** Bleu de marque MboloChat, seul accent des surfaces d'authentification. */
-export const accentColor = Colors.light.accent;
+/** Bleu solide des fonds accentués (bouton principal, option sélectionnée). */
+export const accentColor = AuthSurface.accentSolid;
 
 export type TextFieldProps = TextInputProps & {
   /** Surface en verre (écrans d'authentification). */
@@ -40,22 +47,24 @@ export type TextFieldProps = TextInputProps & {
   blurTarget?: RefObject<ComponentRef<typeof View> | null>;
 };
 
-export function TextField({ glass = false, blurTarget, ...props }: TextFieldProps) {
+export function TextField({
+  glass = false,
+  blurTarget,
+  style,
+  placeholderTextColor,
+  ...props
+}: TextFieldProps) {
   const theme = useTheme();
   const text = glass ? AuthSurface.text : theme.text;
-  const placeholder = glass ? AuthSurface.subtle : theme.textSecondary;
+  const placeholder =
+    placeholderTextColor ?? (glass ? AuthSurface.placeholder : theme.textSecondary);
   const input = (
     <TextInput
       placeholderTextColor={placeholder}
-      // La couleur du texte est appliquée après `props.style` : sur une surface
-      // en verre sombre, hériter la couleur du thème clair serait illisible.
-      style={[
-        styles.input,
-        glass && styles.transparent,
-        props.style,
-        { color: text },
-      ]}
       {...props}
+      // La couleur du texte est appliquée en dernier : sur une surface en verre
+      // sombre, hériter la couleur du thème clair serait illisible.
+      style={[styles.input, glass && styles.transparent, style, { color: text }]}
     />
   );
   if (!glass) {
@@ -63,10 +72,11 @@ export function TextField({ glass = false, blurTarget, ...props }: TextFieldProp
   }
   return (
     <Glass
+      appearance="dark"
       variant="clear"
       blurTarget={blurTarget}
       fallbackColor={AuthSurface.glassField}
-      style={[styles.field, props.style]}>
+      style={[styles.field, style]}>
       {input}
     </Glass>
   );
@@ -80,21 +90,32 @@ interface PasswordFieldProps extends Omit<TextInputProps, 'style'> {
   blurTarget?: RefObject<ComponentRef<typeof View> | null>;
 }
 
-export function PasswordField({ style, glass = false, blurTarget, ...props }: PasswordFieldProps) {
+export function PasswordField({
+  style,
+  glass = false,
+  blurTarget,
+  placeholderTextColor,
+  ...props
+}: PasswordFieldProps) {
   const theme = useTheme();
   const [visible, setVisible] = useState(false);
+  const placeholder =
+    placeholderTextColor ?? (glass ? AuthSurface.placeholder : theme.textSecondary);
 
   const wrapper = (
-    <View
-      style={[styles.passwordWrapper, glass && styles.transparent, style]}>
+    <View style={[styles.passwordWrapper, glass && styles.transparent]}>
       <TextInput
-        placeholderTextColor={glass ? AuthSurface.subtle : theme.textSecondary}
+        placeholderTextColor={placeholder}
         style={[styles.passwordInput, { color: glass ? AuthSurface.text : theme.text }]}
         secureTextEntry={!visible}
         {...props}
       />
-      <Pressable onPress={() => setVisible((value) => !value)} hitSlop={8}>
-        <ThemedText type="smallBold" style={{ color: accentColor }}>
+      <Pressable
+        onPress={() => setVisible((value) => !value)}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={visible ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}>
+        <ThemedText type="smallBold" style={{ color: glass ? AuthSurface.accent : theme.accent }}>
           {visible ? 'Masquer' : 'Afficher'}
         </ThemedText>
       </Pressable>
@@ -102,14 +123,15 @@ export function PasswordField({ style, glass = false, blurTarget, ...props }: Pa
   );
 
   if (!glass) {
-    return wrapper;
+    return style ? <View style={style}>{wrapper}</View> : wrapper;
   }
   return (
     <Glass
+      appearance="dark"
       variant="clear"
       blurTarget={blurTarget}
       fallbackColor={AuthSurface.glassField}
-      style={styles.field}>
+      style={[styles.field, style]}>
       {wrapper}
     </Glass>
   );
@@ -169,7 +191,7 @@ export function Button({
     return pressable;
   }
   return (
-    <Glass blurTarget={blurTarget} fallbackColor={background} style={styles.buttonGlass}>
+    <Glass appearance="dark" blurTarget={blurTarget} fallbackColor={background} style={styles.buttonGlass}>
       {pressable}
     </Glass>
   );

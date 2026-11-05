@@ -14,7 +14,7 @@ import { BlurTarget } from '@/components/blur-target';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { LogoMark } from '@/components/logo';
-import { AuthSurface, Button, PasswordField, TextField, accentColor } from '@/components/ui';
+import { AuthSurface, Button, PasswordField, TextField } from '@/components/ui';
 import { Colors, Spacing, Radii } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { ApiError, api } from '@/lib/api';
@@ -108,7 +108,7 @@ export default function ForgotPasswordScreen() {
               <ThemedView style={styles.block}>
                 <ThemedView style={styles.brandRow}>
                   <LogoMark size={40} />
-                  <ThemedText type="subtitle" style={{ color: accentColor }}>
+                  <ThemedText type="subtitle" style={{ color: AuthSurface.accent }}>
                     MboloChat
                   </ThemedText>
                 </ThemedView>
@@ -138,7 +138,7 @@ export default function ForgotPasswordScreen() {
                 onPress={() => router.replace('/login')}
                 hitSlop={8}
                 style={styles.link}>
-                <ThemedText type="link" style={{ color: accentColor }}>
+                <ThemedText type="link" style={{ color: AuthSurface.accent }}>
                   Revenir à la connexion
                 </ThemedText>
               </Pressable>
@@ -148,7 +148,9 @@ export default function ForgotPasswordScreen() {
           {step === 'reset' ? (
             <>
               <ThemedView style={styles.block}>
-                <ThemedText type="subtitle">Code de vérification</ThemedText>
+                <ThemedText type="subtitle" style={{ color: AuthSurface.text }}>
+                  Code de vérification
+                </ThemedText>
                 <ThemedText style={[styles.hint, { color: AuthSurface.subtle }]}>
                   Entre le code à 6 chiffres puis choisis un nouveau mot de passe.
                 </ThemedText>
@@ -199,7 +201,7 @@ export default function ForgotPasswordScreen() {
                 }}
                 hitSlop={8}
                 style={styles.link}>
-                <ThemedText type="link" style={{ color: accentColor }}>
+                <ThemedText type="link" style={{ color: AuthSurface.accent }}>
                   Renvoyer un code
                 </ThemedText>
               </Pressable>
@@ -209,8 +211,10 @@ export default function ForgotPasswordScreen() {
           {step === 'done' ? (
             <>
               <ThemedView style={styles.block}>
-                <Check size={44} strokeWidth={2.6} color={accentColor} />
-                <ThemedText type="subtitle">Mot de passe modifié</ThemedText>
+                <Check size={44} strokeWidth={2.6} color={AuthSurface.accent} />
+                <ThemedText type="subtitle" style={{ color: AuthSurface.text }}>
+                  Mot de passe modifié
+                </ThemedText>
                 <ThemedText style={[styles.hint, { color: AuthSurface.subtle }]}>
                   Tu peux maintenant te connecter avec ton nouveau mot de passe.
                 </ThemedText>
@@ -270,7 +274,7 @@ const styles = StyleSheet.create({
     lineHeight: 34,
     fontWeight: '800',
     letterSpacing: 6,
-    color: accentColor,
+    color: AuthSurface.accent,
   },
   codeInput: {
     textAlign: 'center',

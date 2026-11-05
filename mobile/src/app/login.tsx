@@ -15,7 +15,7 @@ import { BlurTarget } from '@/components/blur-target';
 import { LogoMark } from '@/components/logo';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { AuthSurface, Button, PasswordField, TextField, accentColor } from '@/components/ui';
+import { AuthSurface, Button, PasswordField, TextField } from '@/components/ui';
 import { Colors, Spacing } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { ApiError, api } from '@/lib/api';
@@ -95,7 +95,7 @@ export default function LoginScreen() {
             <Animated.View entering={FadeInUp.duration(520)} style={styles.brandBlock}>
               <ThemedView style={styles.brandRow}>
                 <LogoMark size={48} />
-                <ThemedText type="subtitle" style={{ color: accentColor }}>
+                <ThemedText type="subtitle" style={{ color: AuthSurface.accent }}>
                   MboloChat
                 </ThemedText>
               </ThemedView>
@@ -126,7 +126,7 @@ export default function LoginScreen() {
                 onPress={() => router.push('/forgot-password')}
                 hitSlop={8}
                 style={styles.forgot}>
-                <ThemedText type="link" style={{ color: accentColor }}>
+                <ThemedText type="link" style={{ color: AuthSurface.accent }}>
                   Mot de passe oublié ?
                 </ThemedText>
               </Pressable>
@@ -145,7 +145,7 @@ export default function LoginScreen() {
             </Animated.View>
 
             <Link href="/register" style={styles.link}>
-              <ThemedText type="link" style={{ color: accentColor }}>
+              <ThemedText type="link" style={{ color: AuthSurface.accent }}>
                 Pas encore de compte ? Créer un compte
               </ThemedText>
             </Link>

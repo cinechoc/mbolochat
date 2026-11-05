@@ -302,7 +302,7 @@ export default function RegisterScreen() {
             <Button glass title="S'inscrire" onPress={onSubmit} loading={submitting} />
 
             <Link href="/login" style={styles.link}>
-              <ThemedText type="link" style={{ color: accentColor }}>
+              <ThemedText type="link" style={{ color: AuthSurface.accent }}>
                 Déjà un compte ? Se connecter
               </ThemedText>
             </Link>
