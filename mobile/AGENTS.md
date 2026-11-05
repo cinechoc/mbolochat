@@ -1,41 +1,27 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+# AGENTS.md — mobile/
 
-## Expo has changed — do not trust your training data
+Le guide commun du dépôt est dans [`../AGENTS.md`](../AGENTS.md). Ce fichier ne liste que les spécificités du client.
 
-Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:
-
-1. Read the major version of the `expo` package in `package.json`.
-2. Fetch the matching versioned docs: `https://docs.expo.dev/versions/v<major>.0.0/`
-3. For anything else, fetch https://docs.expo.dev/llms.txt — an index of all Expo docs with corrections to common LLM misconceptions. Follow its links to the specific page you need; never answer from memory.
-
-## Commands
-
-Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
+## Commandes
 
 ```bash
-npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
-npx expo start              # start the dev server
-npx expo lint               # lint
-npx tsc --noEmit            # typecheck
-npx expo-doctor             # diagnose dependency and config issues
-npx expo install --fix      # fix incompatible package versions
+npx tsc --noEmit
+npx expo lint
+npm test                      # Vitest : src/**/*.test.ts, logique pure
+node --test tests/*.test.mjs  # contrôles assets/emoji (node:test)
+npx vitest run src/features/e2ee/policy.test.ts   # un seul test
+npm run android               # = npx expo run:android
 ```
 
-Run lint and typecheck before declaring any task done.
+## Spécificités
 
-## Navigation & Routing
-
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
-
-## Building with EAS
-
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
-
-## Rules
-
-- If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
-- Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+- Routes et écrans dans `src/app/` (expo-router, `typedRoutes` activé). Toute nouvelle route est un fichier ici.
+- Alias `@/*` → `src/*`, configuré dans `tsconfig.json` et `vitest.config.ts`.
+- `android/` et `ios/` sont générés et ignorés par Git : jamais d'édition manuelle. Après `app.json`, `plugins/` ou une dépendance native : `npx expo prebuild --platform android --no-install`, puis rebuild.
+- Expo Go ne suffit pas : modules natifs absents (`mbolo-crypto`, WebRTC/appels, SQLCipher, configuration FCM). Utiliser `npx expo run:android` ou un build EAS `development`.
+- Textes : `src/i18n/fr.ts` pour les nouveaux écrans ; certains écrans existants ont encore des chaînes inline.
+- Thème : `src/constants/theme.ts`, `useTheme`, `ThemedText`, `ThemedView`. Aucune couleur ni dimension codée en dur.
+- Messages classiques : toujours passer par `src/lib/outbox.ts` (+ `src/lib/store.ts`), jamais par un `socket.emit` direct. Le chemin E2EE (`src/features/e2ee/text.ts`) est une exception existante.
+- E2EE : bootstrap dans `src/features/e2ee`, clés via Keystore + SQLCipher, module natif `modules/mbolo-crypto` (`.so` commités). Les outils de dev ne sont embarqués que si `EXPO_PUBLIC_E2EE_DEV_TOOLS=1`.
+- `EXPO_PUBLIC_*` est visible dans le bundle : jamais de secret.
+- Les tests Vitest ne montent pas de composants React Native ; valider l'UI avec `tsc`, `expo lint` et un test sur appareil.
