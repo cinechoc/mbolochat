@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 
 import type { PanelTheme } from '../emoji/EmojiPanel';
+import { LiquidGlass } from '@/components/liquid-glass';
 import {
   CATALOG_STICKERS,
   entriesForKeys,
@@ -452,7 +453,11 @@ function PreviewModal({ preview, busy, theme, onCancel, onSave }: PreviewProps) 
               disabled={busy}
               accessibilityRole="button"
               accessibilityLabel="Annuler la création"
-              style={[styles.modalButton, { borderColor: theme.border }]}>
+              style={[
+                styles.modalButton,
+                styles.modalButtonPlain,
+                { backgroundColor: theme.panelBg, borderColor: theme.border },
+              ]}>
               <Text style={{ color: theme.text, fontWeight: '600' }}>Annuler</Text>
             </Pressable>
             <Pressable
@@ -460,12 +465,14 @@ function PreviewModal({ preview, busy, theme, onCancel, onSave }: PreviewProps) 
               disabled={busy}
               accessibilityRole="button"
               accessibilityLabel="Enregistrer le sticker"
-              style={[styles.modalButton, { backgroundColor: theme.accent, borderColor: theme.accent }]}>
-              {busy ? (
-                <ActivityIndicator size="small" color={theme.accentText} />
-              ) : (
-                <Text style={{ color: theme.accentText, fontWeight: '700' }}>Enregistrer</Text>
-              )}
+              style={styles.modalButton}>
+              <LiquidGlass radius={Radii.button} style={styles.modalButtonGlass}>
+                {busy ? (
+                  <ActivityIndicator size="small" color={theme.text} />
+                ) : (
+                  <Text style={{ color: theme.text, fontWeight: '700' }}>Enregistrer</Text>
+                )}
+              </LiquidGlass>
             </Pressable>
           </View>
         </View>
@@ -588,8 +595,17 @@ const styles = StyleSheet.create({
   modalButton: {
     flex: 1,
     height: 42,
-    borderRadius: Radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalButtonPlain: {
+    borderRadius: Radii.button,
     borderWidth: StyleSheet.hairlineWidth,
+  },
+  modalButtonGlass: {
+    flex: 1,
+    alignSelf: 'stretch',
+    borderRadius: Radii.button,
     alignItems: 'center',
     justifyContent: 'center',
   },

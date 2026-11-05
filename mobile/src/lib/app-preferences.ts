@@ -6,10 +6,26 @@ export type AppPreferences = {
   ringtone: boolean;
   /** Mode économie de données : la vidéo d'appel est désactivée. */
   callDataSaver: boolean;
+  /** FLAG_SECURE sur les écrans de conversation chiffrée : l'aperçu
+   * « applications récentes » et les captures montrent un écran neutre. */
+  hideRecentsPreview: boolean;
+  /** Médias chiffrés : télécharger la vignette automatiquement en Wi-Fi. */
+  mediaAutoDownloadWifi: boolean;
+  /** Médias chiffrés : télécharger la vignette automatiquement en données mobiles. */
+  mediaAutoDownloadCellular: boolean;
 };
 
 const STORAGE_KEY = 'mbolo.app-preferences';
-const DEFAULTS: AppPreferences = { ringtone: true, callDataSaver: false };
+const DEFAULTS: AppPreferences = {
+  ringtone: true,
+  callDataSaver: false,
+  hideRecentsPreview: true,
+  // La vignette est petite : la charger d'office en Wi-Fi est un confort, en
+  // données mobiles un choix explicite. Le fichier complet ne se charge jamais
+  // sans un toucher, quel que soit le réglage.
+  mediaAutoDownloadWifi: true,
+  mediaAutoDownloadCellular: false,
+};
 
 let state: AppPreferences = DEFAULTS;
 const listeners = new Set<() => void>();
@@ -34,6 +50,9 @@ export async function loadAppPreferences(): Promise<void> {
     state = {
       ringtone: parsed.ringtone !== false,
       callDataSaver: parsed.callDataSaver === true,
+      hideRecentsPreview: parsed.hideRecentsPreview !== false,
+      mediaAutoDownloadWifi: parsed.mediaAutoDownloadWifi !== false,
+      mediaAutoDownloadCellular: parsed.mediaAutoDownloadCellular === true,
     };
     emit();
   } catch {

@@ -1,16 +1,19 @@
 import { Redirect, Stack, useRouter } from 'expo-router';
-import { Shield } from 'lucide-react-native';
+import { Lock, Shield } from 'lucide-react-native';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Button } from '@/components/ui';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { fr } from '@/i18n/fr';
+import { isE2eeEnabled } from '@/features/e2ee/policy';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { useAppPreference } from '@/lib/app-preferences';
 
 /** Changement de mot de passe : vérifie l'ancien, déconnecte les sessions. */
 export default function SecurityScreen() {
@@ -22,6 +25,9 @@ export default function SecurityScreen() {
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
+  const [hidePreview, setHidePreview] = useAppPreference('hideRecentsPreview');
+  const [wifiDownload, setWifiDownload] = useAppPreference('mediaAutoDownloadWifi');
+  const [cellularDownload, setCellularDownload] = useAppPreference('mediaAutoDownloadCellular');
 
   if (!token) {
     return <Redirect href="/login" />;
@@ -99,22 +105,56 @@ export default function SecurityScreen() {
           autoCapitalize="none"
           style={inputStyle}
         />
-        <Pressable
+        <Button
+          title="Modifier le mot de passe"
           onPress={() => void submit()}
-          disabled={busy}
-          style={({ pressed }) => [
-            styles.submit,
-            { backgroundColor: theme.accent, opacity: busy ? 0.6 : pressed ? 0.85 : 1 },
-          ]}>
-          <ThemedText style={styles.submitLabel}>
-            {busy ? 'Modification…' : 'Modifier le mot de passe'}
-          </ThemedText>
-        </Pressable>
+          loading={busy}
+        />
         <Pressable onPress={() => router.back()} style={styles.cancel}>
           <ThemedText type="small" themeColor="textSecondary">
             {fr.common.cancel}
           </ThemedText>
         </Pressable>
+        {isE2eeEnabled() ? (
+          <View style={[styles.e2eeSection, { borderColor: theme.border }]}>
+            <View style={styles.header}>
+              <Lock size={28} color={theme.accent} />
+              <ThemedText type="sectionTitle">{fr.e2ee.securitySection}</ThemedText>
+            </View>
+            <View style={styles.switchRow}>
+              <ThemedText style={styles.switchLabel}>{fr.e2ee.hideRecentsPreview}</ThemedText>
+              <Switch
+                value={hidePreview}
+                onValueChange={setHidePreview}
+                accessibilityLabel={fr.e2ee.hideRecentsPreview}
+              />
+            </View>
+            <ThemedText type="small" themeColor="textSecondary">
+              {fr.e2ee.hideRecentsPreviewHint}
+            </ThemedText>
+            <View style={styles.switchRow}>
+              <ThemedText style={styles.switchLabel}>{fr.e2ee.mediaAutoDownloadWifi}</ThemedText>
+              <Switch
+                value={wifiDownload}
+                onValueChange={setWifiDownload}
+                accessibilityLabel={fr.e2ee.mediaAutoDownloadWifi}
+              />
+            </View>
+            <View style={styles.switchRow}>
+              <ThemedText style={styles.switchLabel}>
+                {fr.e2ee.mediaAutoDownloadCellular}
+              </ThemedText>
+              <Switch
+                value={cellularDownload}
+                onValueChange={setCellularDownload}
+                accessibilityLabel={fr.e2ee.mediaAutoDownloadCellular}
+              />
+            </View>
+            <ThemedText type="small" themeColor="textSecondary">
+              {fr.e2ee.mediaAutoDownloadHint}
+            </ThemedText>
+          </View>
+        ) : null}
       </ScrollView>
     </ThemedView>
   );
@@ -133,13 +173,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     fontSize: 16,
   },
-  submit: {
-    minHeight: 48,
+  cancel: { alignSelf: 'center', padding: Spacing.two },
+  e2eeSection: {
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radii.md,
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: Spacing.three,
+    gap: Spacing.two,
     marginTop: Spacing.two,
   },
-  submitLabel: { color: '#ffffff', fontWeight: '700', fontSize: 16 },
-  cancel: { alignSelf: 'center', padding: Spacing.two },
+  switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  switchLabel: { flex: 1, paddingRight: Spacing.two },
 });

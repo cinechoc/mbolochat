@@ -207,6 +207,59 @@ describe('Fondations E2EE (e2e)', () => {
     void bobDevice;
   });
 
+  it('ne bascule jamais un groupe en chiffrement (M2 : un à un seulement)', async () => {
+    const alice = await register('GAlice');
+    const bob = await register('GBob');
+    const carol = await register('GCarol');
+    const conversationsService = app.get(ConversationsService);
+    const group = await conversationsService.create(
+      alice.id,
+      [bob.id, carol.id],
+      'GROUP',
+      'Groupe scellé',
+    );
+
+    await registerDevice(alice.token, 40, 'galice');
+    await registerDevice(bob.token, 50, 'gbob');
+    await registerDevice(carol.token, 60, 'gcarol');
+
+    const [state] = await db
+      .select({ e2eeSince: conversations.e2eeSince })
+      .from(conversations)
+      .where(eq(conversations.id, group.id))
+      .limit(1);
+    expect(state?.e2eeSince).toBeNull();
+
+    // Le clair reste accepté dans un groupe non basculé.
+    const plain = await conversationsService.createMessage(
+      group.id,
+      alice.id,
+      'bonjour le groupe',
+    );
+    expect(plain.encryption).toBe('none');
+  });
+
+  it('bascule une conversation directe créée après l’enregistrement des appareils', async () => {
+    const alice = await register('DAlice');
+    const bob = await register('DBob');
+    await registerDevice(alice.token, 70, 'dalice');
+    await registerDevice(bob.token, 80, 'dbob');
+
+    const conversationsService = app.get(ConversationsService);
+    const conversation = await conversationsService.create(alice.id, [bob.id]);
+
+    const [state] = await db
+      .select({ e2eeSince: conversations.e2eeSince })
+      .from(conversations)
+      .where(eq(conversations.id, conversation.id))
+      .limit(1);
+    expect(state?.e2eeSince).not.toBeNull();
+
+    await expect(
+      conversationsService.createMessage(conversation.id, alice.id, 'clair interdit'),
+    ).rejects.toThrow(/clair/i);
+  });
+
   it('consomme les clés à usage unique et filtre les conversations communes', async () => {
     const alice = await register('AliceKeys');
     const bob = await register('BobKeys');

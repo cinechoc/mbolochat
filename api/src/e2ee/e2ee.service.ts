@@ -404,6 +404,8 @@ export class E2eeService {
     userId: string,
     now: Date,
   ): Promise<void> {
+    // M2 ne chiffre que le un-à-un : un groupe dont tous les membres ont un
+    // appareil ne doit pas basculer, sinon il devient inutilisable.
     const candidates = await tx
       .select({ id: conversations.id })
       .from(conversations)
@@ -411,7 +413,13 @@ export class E2eeService {
         conversationMembers,
         eq(conversationMembers.conversationId, conversations.id),
       )
-      .where(and(eq(conversationMembers.userId, userId), isNull(conversations.e2eeSince)));
+      .where(
+        and(
+          eq(conversationMembers.userId, userId),
+          eq(conversations.type, 'DIRECT'),
+          isNull(conversations.e2eeSince),
+        ),
+      );
     for (const candidate of candidates) {
       const ready = await tx.execute<{ total: number; ready: number }>(sql`
         select count(*)::int as total,

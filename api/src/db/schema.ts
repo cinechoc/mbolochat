@@ -294,6 +294,21 @@ export interface MessageAttachment {
   stickerName?: string;
 }
 
+/**
+ * Pièce jointe chiffrée de bout en bout : une **référence** vers un fichier
+ * opaque. Le serveur ne connaît que l'existence du blob et de quel droit on peut
+ * le lire ; ni URL, ni clé, ni nonce, ni empreinte, ni nature. Le contenu et sa
+ * description (type, nom, dimensions) vivent exclusivement dans l'enveloppe Olm,
+ * que le serveur ne lit jamais.
+ *
+ * Le champ `url` est délibérément absent : `MediaUrlInterceptor` ne réécrit que
+ * les chaînes « /uploads/… », donc une référence chiffrée lui échappe — voulu.
+ */
+export interface E2eeAttachmentRef {
+  /** Identifiant de l'upload chiffré, servi par `GET /uploads/:id`. */
+  uploadId: string;
+}
+
 /** Fichier importé par un utilisateur, avant (ou après) son envoi. */
 export const uploads = pgTable(
   'uploads',
@@ -313,9 +328,36 @@ export const uploads = pgTable(
     height: integer('height'),
     /** Durée d'un vocal ou d'une vidéo importée, en millisecondes. */
     durationMs: integer('duration_ms'),
+    /**
+     * true pour un fichier chiffré de bout en bout : le serveur ne sait pas le
+     * décoder, ne le sert que par `GET /uploads/:id` et à un membre de la
+     * conversation liée. Ces fichiers ne passent jamais par la route signée des
+     * médias en clair.
+     */
+    encrypted: boolean('encrypted').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('uploads_user_idx').on(table.userId)],
+);
+
+/**
+ * Lien fichier chiffré ↔ conversation. C'est une **métadonnée** (qui a le droit
+ * de télécharger), jamais le contenu : le serveur ne peut pas rattacher un
+ * ciphertext à sa conversation, alors le client le déclare à l'envoi et le
+ * serveur vérifie l'appartenance avant de l'enregistrer.
+ */
+export const uploadConversations = pgTable(
+  'upload_conversations',
+  {
+    uploadId: text('upload_id')
+      .primaryKey()
+      .references(() => uploads.id, { onDelete: 'cascade' }),
+    conversationId: text('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('upload_conversations_conversation_idx').on(table.conversationId)],
 );
 
 export const messages = pgTable(
@@ -345,6 +387,12 @@ export const messages = pgTable(
     stickerRef: text('sticker_ref'),
     /** Pièce jointe (photo, vidéo…), null pour un message texte. */
     attachment: jsonb('attachment').$type<MessageAttachment>(),
+    /**
+     * Référence d'une pièce jointe chiffrée : le ciphertext, dont la clé voyage
+     * dans `payload`. Alternative de `attachment` : un message n'a jamais les
+     * deux. Aucune URL ici, donc rien que l'intercepteur de médias puisse signer.
+     */
+    encryptedAttachment: jsonb('encrypted_attachment').$type<E2eeAttachmentRef>(),
     /**
      * Identifiant d'envoi généré par l'appareil émetteur. Une reprise après
      * une coupure renvoie le même message au lieu d'en créer un doublon.

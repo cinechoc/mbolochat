@@ -46,25 +46,25 @@ export type FileEncrypted = {
 
 declare class MboloCryptoModule extends NativeModule {
   version(): string;
-  createAccount(pickleKey: string): Promise<string>;
-  generateOneTimeKeys(accountPickle: string, pickleKey: string, count: number): Promise<string>;
+  createAccount(pickleKey: Uint8Array): Promise<string>;
+  generateOneTimeKeys(accountPickle: string, pickleKey: Uint8Array, count: number): Promise<string>;
   createOutbound(
     accountPickle: string,
-    pickleKey: string,
+    pickleKey: Uint8Array,
     identityKey: string,
     oneTimeKey: string,
     plaintextB64: string,
   ): Promise<string>;
-  encrypt(sessionPickle: string, pickleKey: string, plaintextB64: string): Promise<string>;
+  encrypt(sessionPickle: string, pickleKey: Uint8Array, plaintextB64: string): Promise<string>;
   createInbound(
     accountPickle: string,
-    pickleKey: string,
+    pickleKey: Uint8Array,
     identityKey: string,
     prekeyMessage: string,
   ): Promise<string>;
   decrypt(
     sessionPickle: string,
-    pickleKey: string,
+    pickleKey: Uint8Array,
     messageType: string,
     messageB64: string,
   ): Promise<string>;
@@ -72,8 +72,8 @@ declare class MboloCryptoModule extends NativeModule {
   decryptFile(
     inputPath: string,
     outputPath: string,
-    keyB64: string,
-    nonceB64: string,
+    key: Uint8Array,
+    nonce: Uint8Array,
     expectedSha256: string,
   ): Promise<string>;
   selfTest(workDir: string, fileMb: number): Promise<string>;
@@ -114,12 +114,12 @@ async function invoke<T>(pending: Promise<string>): Promise<T> {
 
 export const MboloCrypto = {
   version: native.version(),
-  createAccount: (pickleKey: string) => invoke<AccountCreated>(native.createAccount(pickleKey)),
-  generateOneTimeKeys: (accountPickle: string, pickleKey: string, count: number) =>
+  createAccount: (pickleKey: Uint8Array) => invoke<AccountCreated>(native.createAccount(pickleKey)),
+  generateOneTimeKeys: (accountPickle: string, pickleKey: Uint8Array, count: number) =>
     invoke<OneTimeKeysGenerated>(native.generateOneTimeKeys(accountPickle, pickleKey, count)),
   createOutbound: (
     accountPickle: string,
-    pickleKey: string,
+    pickleKey: Uint8Array,
     identityKey: string,
     oneTimeKey: string,
     plaintextB64: string,
@@ -127,30 +127,30 @@ export const MboloCrypto = {
     invoke<OutboundCreated>(
       native.createOutbound(accountPickle, pickleKey, identityKey, oneTimeKey, plaintextB64),
     ),
-  encrypt: (sessionPickle: string, pickleKey: string, plaintextB64: string) =>
+  encrypt: (sessionPickle: string, pickleKey: Uint8Array, plaintextB64: string) =>
     invoke<OlmEnvelope>(native.encrypt(sessionPickle, pickleKey, plaintextB64)),
   createInbound: (
     accountPickle: string,
-    pickleKey: string,
+    pickleKey: Uint8Array,
     identityKey: string,
     prekeyMessage: string,
   ) =>
     invoke<InboundCreated>(
       native.createInbound(accountPickle, pickleKey, identityKey, prekeyMessage),
     ),
-  decrypt: (sessionPickle: string, pickleKey: string, messageType: string, messageB64: string) =>
+  decrypt: (sessionPickle: string, pickleKey: Uint8Array, messageType: string, messageB64: string) =>
     invoke<PlaintextDecrypted>(native.decrypt(sessionPickle, pickleKey, messageType, messageB64)),
   encryptFile: (inputPath: string, outputPath: string) =>
     invoke<FileEncrypted>(native.encryptFile(inputPath, outputPath)),
   decryptFile: (
     inputPath: string,
     outputPath: string,
-    keyB64: string,
-    nonceB64: string,
+    key: Uint8Array,
+    nonce: Uint8Array,
     expectedSha256: string,
   ) =>
     invoke<{ plaintext_size: number }>(
-      native.decryptFile(inputPath, outputPath, keyB64, nonceB64, expectedSha256),
+      native.decryptFile(inputPath, outputPath, key, nonce, expectedSha256),
     ),
   selfTest: (workDir: string, fileMb: number) =>
     invoke<SelfTestReport>(native.selfTest(workDir, fileMb)),

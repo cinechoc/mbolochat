@@ -21,6 +21,26 @@ export interface E2eeDatabase {
 }
 
 /**
+ * Ajoute à une table les colonnes qui manquent, sans erreur si elles existent
+ * déjà : `ALTER TABLE ... ADD COLUMN` n'est pas idempotent, `PRAGMA table_info`
+ * l'est. C'est la façon dont une base ouverte par une version antérieure gagne
+ * les colonnes d'une version plus récente.
+ */
+async function addMissingColumns(
+  db: SQLiteDatabase,
+  table: string,
+  columns: [string, string][],
+): Promise<void> {
+  const existing = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+  const present = new Set(existing.map((column) => column.name));
+  for (const [name, type] of columns) {
+    if (!present.has(name)) {
+      await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    }
+  }
+}
+
+/**
  * Ouvre la base locale chiffrée. La clé SQLCipher est générée et protégée par
  * le Keystore ; elle ne transite ici que le temps du PRAGMA key (risque accepté
  * pour la v1, documenté dans le rapport).
@@ -28,16 +48,42 @@ export interface E2eeDatabase {
 export async function openE2eeDatabase(): Promise<E2eeDatabase> {
   const keys = await MboloCrypto.ensureKeys();
   if (keys.recovered) {
-    await deleteDatabaseAsync(DATABASE_NAME).catch(() => undefined);
+    // Identité recréée : les clés qui ouvraient les médias temporaires ont
+    // disparu, ces fichiers sont désormais illisibles et ne doivent pas rester.
+    // Import paresseux : la base ne doit pas dépendre du système de fichiers.
+    const { sweepSecureMedia } = await import('./mediaStore');
+    sweepSecureMedia();
+    await deleteDatabaseAsync(DATABASE_NAME);
   }
   const { key } = await MboloCrypto.sqlCipherKey();
   let sqlKey = key;
+  let db: SQLiteDatabase | null = null;
   try {
-    const db = await openDatabaseAsync(DATABASE_NAME);
-    await db.execAsync(`PRAGMA key = "x'${sqlKey}'"`);
-    const version = await db.getFirstAsync<{ cipher_version: string }>('PRAGMA cipher_version');
-    if (!version?.cipher_version) {
-      await db.closeAsync();
+    let version = null as { cipher_version: string } | null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        db = await openDatabaseAsync(DATABASE_NAME);
+        await db.execAsync(`PRAGMA key = "x'${sqlKey}'"`);
+        version = await db.getFirstAsync<{ cipher_version: string }>('PRAGMA cipher_version');
+        if (!version?.cipher_version) {
+          throw new Error('SQLCipher indisponible dans cette build');
+        }
+        // Le premier vrai accès au fichier : c'est là qu'un fichier illisible
+        // se révèle, il doit tomber dans le reessai ci-dessous.
+        await db.getFirstAsync<{ c: number }>('SELECT count(*) AS c FROM sqlite_master');
+        break;
+      } catch (cause) {
+        // Fichier illisible avec cette clé (suppression de récupération qui a
+        // échoué, corruption) : on repart d'une base propre plutôt que de
+        // laisser l'app bloquée sur un fichier indéchiffrable.
+        if (attempt === 1 || !String(cause).includes('file is not a database')) {
+          throw cause;
+        }
+        await db?.closeAsync().catch(() => undefined);
+        await deleteDatabaseAsync(DATABASE_NAME);
+      }
+    }
+    if (!db || !version) {
       throw new Error('SQLCipher indisponible dans cette build');
     }
     await db.execAsync(`
@@ -50,18 +96,11 @@ export async function openE2eeDatabase(): Promise<E2eeDatabase> {
         created_at TEXT NOT NULL
       );
     `);
-    const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(e2ee_account)');
-    const existing = new Set(columns.map((column) => column.name));
-    const additions: [string, string][] = [
+    await addMissingColumns(db, 'e2ee_account', [
       ['fallback_key', 'TEXT'],
       ['fallback_signature', 'TEXT'],
       ['fallback_key_id', 'TEXT'],
-    ];
-    for (const [name, type] of additions) {
-      if (!existing.has(name)) {
-        await db.execAsync(`ALTER TABLE e2ee_account ADD COLUMN ${name} ${type}`);
-      }
-    }
+    ]);
     await db.execAsync(`
       CREATE TABLE IF NOT EXISTS e2ee_sessions (
         peer_user_id TEXT PRIMARY KEY,
@@ -94,6 +133,10 @@ export async function openE2eeDatabase(): Promise<E2eeDatabase> {
         body TEXT NOT NULL
       );
     `);
+    // Colonnes ajoutées après coup : `media_meta` porte la référence du média
+    // chiffré (clé du fichier, nonce, empreinte) — elle ne quitte jamais cette
+    // base SQLCipher, contrairement au corps du message qui peut être vide.
+    await addMissingColumns(db, 'e2ee_messages', [['media_meta', 'TEXT']]);
     return { db, recovered: keys.recovered, cipherVersion: version.cipher_version };
   } finally {
     sqlKey = '';
@@ -218,6 +261,12 @@ export interface StoredE2eeMessage {
   created_at: string;
   client_id: string | null;
   mine: number;
+  /**
+   * Référence JSON du média chiffré (blob + vignette, clés comprises), ou
+   * `null` pour un message texte. Stockée dans la base SQLCipher : c'est la
+   * seule copie des clés, elle ne doit jamais atterrir dans `mbolochat.db`.
+   */
+  media_meta: string | null;
 }
 
 export async function saveLocalMessage(
@@ -226,8 +275,8 @@ export async function saveLocalMessage(
 ): Promise<void> {
   await db.runAsync(
     `INSERT INTO e2ee_messages
-       (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine, media_meta)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET body = excluded.body`,
     message.id,
     message.conversation_id,
@@ -237,7 +286,41 @@ export async function saveLocalMessage(
     message.created_at,
     message.client_id,
     message.mine,
+    message.media_meta ?? null,
   );
+}
+
+/** Ligne provisoire (avant accusé serveur) : id = clientId, renommée après ack. */
+export async function renameLocalMessage(
+  db: SQLiteDatabase,
+  clientId: string,
+  serverId: string,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE e2ee_messages SET id = ?, client_id = ? WHERE id = ?',
+    serverId,
+    clientId,
+    clientId,
+  );
+}
+
+export async function deleteLocalMessage(db: SQLiteDatabase, id: string): Promise<void> {
+  await db.runAsync('DELETE FROM e2ee_messages WHERE id = ?', id);
+}
+
+/** Identifiants déjà présents pour ignorer le re-déchiffrement de l'historique. */
+export async function knownMessageKeys(
+  db: SQLiteDatabase,
+  conversationId: string,
+): Promise<{ ids: Set<string>; clientIds: Set<string> }> {
+  const rows = await db.getAllAsync<{ id: string; client_id: string | null }>(
+    'SELECT id, client_id FROM e2ee_messages WHERE conversation_id = ?',
+    conversationId,
+  );
+  return {
+    ids: new Set(rows.map((row) => row.id)),
+    clientIds: new Set(rows.map((row) => row.client_id).filter(Boolean) as string[]),
+  };
 }
 
 export async function listLocalMessages(
@@ -258,10 +341,10 @@ export async function searchLocalMessages(
   conversationId: string,
   query: string,
 ): Promise<StoredE2eeMessage[]> {
-  const term = `%${query.replace(/[%_]/g, (character) => `\${character}`)}%`;
+  const term = `%${query.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
   return db.getAllAsync<StoredE2eeMessage>(
     `SELECT * FROM e2ee_messages
-     WHERE conversation_id = ? AND body LIKE ? ESCAPE '\'
+     WHERE conversation_id = ? AND body LIKE ? ESCAPE '\\'
      ORDER BY created_at DESC LIMIT 50`,
     conversationId,
     term,

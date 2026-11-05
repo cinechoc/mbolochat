@@ -18,9 +18,12 @@ mod jni;
 pub use error::CryptoError;
 pub use filecrypto::{decrypt_file, encrypt_file};
 pub use messaging::{
-    create_account, create_inbound_and_decrypt, create_outbound_and_encrypt, decrypt, encrypt,
-    generate_fallback_key_signed, generate_one_time_keys, generate_one_time_keys_signed,
-    verify_prekey,
+    create_account, create_account_with_key, create_inbound_and_decrypt,
+    create_inbound_and_decrypt_with_key, create_outbound_and_encrypt,
+    create_outbound_and_encrypt_with_key, decrypt, decrypt_with_key, encrypt, encrypt_with_key,
+    generate_fallback_key_signed, generate_fallback_key_signed_with_key, generate_one_time_keys,
+    generate_one_time_keys_signed, generate_one_time_keys_signed_with_key,
+    generate_one_time_keys_with_key, verify_prekey,
 };
 pub use models::{
     AccountCreated, FallbackKeySigned, FileEncrypted, InboundCreated, OlmEnvelope, OneTimeKey,

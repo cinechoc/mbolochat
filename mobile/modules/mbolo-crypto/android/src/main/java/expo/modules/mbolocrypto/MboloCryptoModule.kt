@@ -20,17 +20,19 @@ class MboloCryptoModule : Module() {
       native.nativeVersion()
     }
 
-    AsyncFunction("createAccount") { pickleKey: String ->
+    // Fonctions brutes (écran spike, gated dev) : la clé de pickle arrive en
+    // Uint8Array depuis JS et part en ByteArray vers le noyau Rust.
+    AsyncFunction("createAccount") { pickleKey: ByteArray ->
       native.nativeCreateAccount(pickleKey)
     }
 
-    AsyncFunction("generateOneTimeKeys") { accountPickle: String, pickleKey: String, count: Int ->
+    AsyncFunction("generateOneTimeKeys") { accountPickle: String, pickleKey: ByteArray, count: Int ->
       native.nativeGenerateOneTimeKeys(accountPickle, pickleKey, count)
     }
 
     AsyncFunction("createOutbound") {
       accountPickle: String,
-      pickleKey: String,
+      pickleKey: ByteArray,
       identityKey: String,
       oneTimeKey: String,
       plaintextB64: String,
@@ -38,13 +40,13 @@ class MboloCryptoModule : Module() {
       native.nativeCreateOutbound(accountPickle, pickleKey, identityKey, oneTimeKey, plaintextB64)
     }
 
-    AsyncFunction("encrypt") { sessionPickle: String, pickleKey: String, plaintextB64: String ->
+    AsyncFunction("encrypt") { sessionPickle: String, pickleKey: ByteArray, plaintextB64: String ->
       native.nativeEncrypt(sessionPickle, pickleKey, plaintextB64)
     }
 
     AsyncFunction("createInbound") {
       accountPickle: String,
-      pickleKey: String,
+      pickleKey: ByteArray,
       identityKey: String,
       prekeyMessage: String,
       ->
@@ -53,7 +55,7 @@ class MboloCryptoModule : Module() {
 
     AsyncFunction("decrypt") {
       sessionPickle: String,
-      pickleKey: String,
+      pickleKey: ByteArray,
       messageType: String,
       messageB64: String,
       ->
@@ -67,11 +69,11 @@ class MboloCryptoModule : Module() {
     AsyncFunction("decryptFile") {
       inputPath: String,
       outputPath: String,
-      keyB64: String,
-      nonceB64: String,
+      key: ByteArray,
+      nonce: ByteArray,
       expectedSha256: String,
       ->
-      native.nativeDecryptFile(inputPath, outputPath, keyB64, nonceB64, expectedSha256)
+      native.nativeDecryptFile(inputPath, outputPath, key, nonce, expectedSha256)
     }
 
     AsyncFunction("selfTest") { workDir: String, fileMb: Int ->

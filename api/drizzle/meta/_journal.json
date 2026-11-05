@@ -225,6 +225,13 @@
       "when": 1793879628439,
       "tag": "0031_gender_custom",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793880000000,
+      "tag": "0032_e2ee_media",
+      "breakpoints": true
     }
   ]
 }

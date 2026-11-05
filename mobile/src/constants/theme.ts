@@ -25,6 +25,9 @@ export const Colors = {
     onAccent: '#FFFFFF',
     danger: '#D92D20',
     error: '#D92D20',
+    buttonGlass: 'rgba(255,255,255,0.38)',
+    buttonGlassBorder: 'rgba(11,15,20,0.14)',
+    buttonGlassHighlight: 'rgba(255,255,255,0.90)',
   },
   dark: {
     text: '#F2F5F8',
@@ -39,6 +42,9 @@ export const Colors = {
     onAccent: '#FFFFFF',
     danger: '#FF5A5F',
     error: '#FF5A5F',
+    buttonGlass: 'rgba(255,255,255,0.10)',
+    buttonGlassBorder: 'rgba(255,255,255,0.20)',
+    buttonGlassHighlight: 'rgba(255,255,255,0.26)',
   },
 } as const;
 
@@ -91,11 +97,13 @@ export const Gutter = Spacing.three;
 
 /**
  * Échelle unique de rayons : des coins nets et sobres, façon WhatsApp/Messenger.
- * `full` est réservé aux cercles (avatars, pastilles, boutons d'appel).
+ * `button` est le plus sobre (CTA) ; `full` est réservé aux cercles (avatars,
+ * pastilles, boutons d'appel).
  */
 export const Radii = {
   xs: 4,
   sm: 8,
+  button: 8,
   md: 12,
   lg: 16,
   sheet: 16,

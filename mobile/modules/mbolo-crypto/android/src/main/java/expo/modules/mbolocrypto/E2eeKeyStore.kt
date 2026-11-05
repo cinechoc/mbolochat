@@ -134,8 +134,8 @@ class E2eeKeyStore(private val context: Context) {
   fun createAccountJson(native: MboloCryptoNative): String =
     try {
       val material = ensureMaterial()
-      val key = Base64.encodeToString(material.pickleKey, Base64.NO_WRAP)
-      val result = native.nativeCreateAccount(key)
+      // La clé part en octets bruts : aucune copie String du secret côté JVM.
+      val result = native.nativeCreateAccount(material.pickleKey)
       zero(material)
       result
     } catch (_: Throwable) {
@@ -204,11 +204,15 @@ class E2eeKeyStore(private val context: Context) {
     }
   }
 
-  private fun withKey(block: (String) -> String): String =
+  /**
+   * Exécute `block` avec la clé de pickle en octets bruts. Le tableau est
+   * zeroïsé dès le retour de l'appel natif : la copie Rust vit dans un
+   * `Zeroizing` et aucune String du secret n'est créée côté JVM.
+   */
+  private fun withKey(block: (ByteArray) -> String): String =
     try {
       val material = ensureMaterial()
-      val key = Base64.encodeToString(material.pickleKey, Base64.NO_WRAP)
-      val result = block(key)
+      val result = block(material.pickleKey)
       zero(material)
       result
     } catch (_: Throwable) {

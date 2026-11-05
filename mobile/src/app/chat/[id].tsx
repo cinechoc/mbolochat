@@ -2749,6 +2749,29 @@ export default function ChatScreen() {
     return <Redirect href="/login" />;
   }
 
+  // Garde commune à tous les points d'entrée (notification, profil, recherche,
+  // nouveau chat) : une conversation chiffrée ne s'ouvre jamais dans l'écran
+  // en clair, qui stockerait brouillons et file d'envoi hors SQLCipher.
+  if (
+    isE2eeEnabled() &&
+    conversation?.type === 'DIRECT' &&
+    conversation.e2eeSince
+  ) {
+    const peer = conversation.members.find((member) => member.id !== user.id);
+    return (
+      <Redirect
+        href={{
+          pathname: '/e2ee-chat/[id]',
+          params: {
+            id: conversation.id,
+            peerId: peer?.id ?? '',
+            name: conversationTitle(conversation, user.id),
+          },
+        }}
+      />
+    );
+  }
+
   return (
     <ThemedView
       style={[

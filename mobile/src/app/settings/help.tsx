@@ -31,7 +31,7 @@ const FAQ: { question: string; answer: string }[] = [
   {
     question: 'Mes messages sont-ils chiffrés ?',
     answer:
-      'Les échanges transitent par le serveur de MboloChat (HTTPS + jetons JWT). Le chiffrement de bout en bout arrive dans une prochaine version.',
+      'Les échanges transitent par le serveur de MboloChat (HTTPS + jetons JWT). Le chiffrement de bout en bout est en cours de déploiement : dans une conversation chiffrée, seuls ton appareil et celui du destinataire peuvent lire les messages, photos et notes vocales — le serveur ne voit que du chiffré.',
   },
 ];
 

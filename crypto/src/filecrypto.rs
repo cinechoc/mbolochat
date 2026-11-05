@@ -112,7 +112,7 @@ pub fn decrypt_file(
     nonce_b64: &str,
     expected_sha256_hex: Option<&str>,
 ) -> Result<u64, CryptoError> {
-    let key_bytes = b64::decode(file_key_b64)?;
+    let key_bytes = Zeroizing::new(b64::decode(file_key_b64)?);
     if key_bytes.len() != KEY_SIZE {
         return Err(CryptoError::InvalidInput);
     }

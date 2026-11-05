@@ -4,6 +4,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ChoiceSheet, type ChoiceOption } from '@/components/choice-sheet';
+import { Button } from '@/components/ui';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Radii, Spacing } from '@/constants/theme';
@@ -124,20 +125,14 @@ export default function BirthdateScreen() {
           {card('Mois', month ? MONTHS[month - 1] : '—', () => setPicker('month'))}
           {card('Année', year ? String(year) : '—', () => setPicker('year'))}
         </View>
-        <Pressable
-          onPress={() => void submit()}
-          disabled={!day || !month || !year || saving}
-          style={({ pressed }) => [
-            styles.submit,
-            {
-              backgroundColor: theme.accent,
-              opacity: !day || !month || !year || saving ? 0.5 : pressed ? 0.85 : 1,
-            },
-          ]}>
-          <ThemedText style={styles.submitLabel}>
-            {saving ? 'Enregistrement…' : fr.profile.birthdateOnce}
-          </ThemedText>
-        </Pressable>
+        <View style={styles.submitWrap}>
+          <Button
+            title={fr.profile.birthdateOnce}
+            onPress={() => void submit()}
+            loading={saving}
+            disabled={!day || !month || !year}
+          />
+        </View>
       </ScrollView>
 
       <ChoiceSheet
@@ -173,12 +168,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   value: { fontSize: 17, fontWeight: '600' },
-  submit: {
-    minHeight: 48,
-    borderRadius: Radii.md,
-    alignItems: 'center',
-    justifyContent: 'center',
+  submitWrap: {
     marginTop: Spacing.two,
   },
-  submitLabel: { color: '#ffffff', fontWeight: '700', fontSize: 16 },
 });
