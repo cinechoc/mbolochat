@@ -14,6 +14,7 @@ import {
   KeyboardEvent,
   PanResponder,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -24,7 +25,11 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Svg, { Line, Path } from 'react-native-svg';
-import { EmojiStickerPanel, type PanelTheme } from '../emoji/EmojiStickerPanel';
+import {
+  EmojiStickerPanel,
+  type ExpressionSection,
+  type PanelTheme,
+} from '../emoji/EmojiStickerPanel';
 import type { RecentGif } from '../media/GifPanel';
 import type { PersonalSticker } from '../stickers/stickerLibrary';
 import { useEmojiFavorites } from '../emoji/useEmojiFavorites';
@@ -32,6 +37,7 @@ import { useRecentEmoji } from '../emoji/useRecentEmoji';
 import { deleteBackward, insertAt } from '../emoji/emojiUtils';
 import { useVoiceRecorder, type VoiceNote } from '../voice-notes/useVoiceRecorder';
 import { RecordingTimeline } from './RecordingTimeline';
+import { attachPanelCap, keyboardPanelHeight } from './panelSize';
 import { Radii, Type, type ThemePalette, type ThemeScheme } from '@/constants/theme';
 import { Glass } from '@/components/glass';
 import { useTheme } from '@/hooks/use-theme';
@@ -98,10 +104,13 @@ type Props = {
   mentionCandidates?: { id: string; username: string; displayName: string }[];
   /** Cible du flou Android (la conversation) pour les surfaces de verre. */
   blurTarget?: RefObject<ComponentRef<typeof View> | null>;
+  /**
+   * Onglets du panneau d'expressions. Une conversation chiffrée qui n'envoie
+   * pas encore de sticker/GIF n'affiche que les emojis.
+   */
+  sections?: ExpressionSection[];
 };
 
-const DEFAULT_PANEL_HEIGHT = 290;
-const MIN_PANEL_HEIGHT = 240;
 /** Le panneau se réduit quand le clavier de recherche est ouvert, pour laisser voir la conversation. */
 const SEARCH_PANEL_HEIGHT = 220;
 /** La barre d'onglets principale prend 48 px : la recherche garde une grille lisible. */
@@ -132,6 +141,7 @@ export function ChatComposer({
   initialText = '',
   mentionCandidates,
   blurTarget,
+  sections,
 }: Props) {
   const theme = useTheme();
   const { scheme } = useThemePreference();
@@ -381,7 +391,10 @@ export function ChatComposer({
   /* ------------------------------ Rendu ------------------------------ */
 
   const hasText = text.trim().length > 0;
-  const panelHeight = Math.max(MIN_PANEL_HEIGHT, lastKeyboardHeight || DEFAULT_PANEL_HEIGHT);
+  // Emojis et stickers prennent la place du clavier ; le panneau « + » s'en
+  // sert seulement de plafond (il épouse son contenu, voir panelSize.ts).
+  const panelHeight = keyboardPanelHeight(lastKeyboardHeight);
+  const attachCap = attachPanelCap(lastKeyboardHeight, bottomInset);
   const searchMaxHeight =
     availableHeight && availableHeight > 0
       ? availableHeight - COMPOSER_BAR_HEIGHT - SEARCH_CONVERSATION_RESERVE
@@ -505,7 +518,15 @@ export function ChatComposer({
           <IconButton
             name={panel === 'emoji' ? 'keyboard-outline' : 'emoticon-happy-outline'}
             color={t.icon}
-            label={panel === 'emoji' ? 'Clavier' : 'Emojis, stickers et GIF'}
+            label={
+              panel === 'emoji'
+                ? 'Clavier'
+                : sections && !sections.includes('stickers') && !sections.includes('gif')
+                  ? // Une conversation qui n'envoie pas encore de sticker/GIF ne
+                    // l'annonce pas dans le libellé d'accessibilité.
+                    'Emojis'
+                  : 'Emojis, stickers et GIF'
+            }
             onPress={() => togglePanel('emoji')}
           />
         )}
@@ -539,6 +560,7 @@ export function ChatComposer({
             favorites={favorites}
             onPickEmoji={handlePickEmoji}
             onBackspace={handleBackspace}
+            sections={sections}
             onSendSticker={onSendSticker}
             onSendPersonalSticker={onSendPersonalSticker}
             gifItems={recentGifs}
@@ -551,7 +573,16 @@ export function ChatComposer({
       )}
 
       {panel === 'plus' && (
-        <View style={{ height: panelHeight + bottomInset, backgroundColor: t.panelBg }}>{plusPanel}</View>
+        // `maxHeight` et non `height` : le panneau se dimensionne sur ses
+        // tuiles et ne dépasse le plafond qu'en défilant.
+        <View style={{ maxHeight: attachCap, backgroundColor: t.panelBg }}>
+          <ScrollView
+            bounces={false}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled">
+            {plusPanel}
+          </ScrollView>
+        </View>
       )}
 
       {showBottomInset ? <View style={{ height: bottomInset }} /> : null}

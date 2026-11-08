@@ -1,8 +1,7 @@
 import { useThemePreference } from '@/lib/theme-preference';
 import { Colors } from './theme';
 
-/** Écart au-delà duquel on réaffiche une heure entre deux messages. */
-export const CHAT_TIME_GAP_MS = 5 * 60 * 1000;
+export { CHAT_TIME_GAP_MS } from './chat-timing';
 
 export interface ChatPalette {
   screen: string;

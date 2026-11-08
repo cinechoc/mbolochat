@@ -18,7 +18,6 @@ export const fr = {
   },
   e2eeChat: {
     title: 'Discussion',
-    placeholder: 'Message',
     send: 'Envoyer',
     search: 'Rechercher',
     searchPlaceholder: 'Rechercher dans cette discussion',
@@ -36,6 +35,31 @@ export const fr = {
     mediaSendFailed: 'L’envoi du média a échoué.',
     sendingMedia: 'Envoi en cours…',
     messageOptions: 'Options du message',
+    receiptDelivered: 'Reçu',
+    receiptRead: 'Ouvert',
+    unreadableMessage: 'Message non pris en charge. Mets ton application à jour.',
+    peerMissing: 'Correspondant introuvable pour cette conversation chiffrée.',
+    meetsInEncryptedScreen:
+      'Cette conversation est chiffrée : écris depuis l’écran de discussion chiffrée.',
+    e2eeScreenTitle: 'Conversation chiffrée',
+    encryptedSubtitle: 'Chiffré de bout en bout',
+    reply: 'Répondre',
+    copy: 'Copier',
+    copyFailed: 'Copie indisponible sur cet appareil.',
+    encryptedNotice: 'Ces messages sont chiffrés sur ton appareil.',
+    viewProfile: 'Voir le profil',
+    callVoiceUnavailable: 'Appel vocal bientôt disponible dans cette conversation chiffrée',
+    callVideoUnavailable: 'Appel vidéo bientôt disponible dans cette conversation chiffrée',
+    callsUnavailableTitle: 'Appels pas encore chiffrés',
+    callsUnavailableBody:
+      'Cette conversation est chiffrée de bout en bout, mais les appels ne le sont pas encore. Ils seront activés quand ils le seront : aucun appel non chiffré n’est lancé depuis cet écran.',
+    me: 'Moi',
+    emptyGreeting: 'Dis bonjour !',
+    emptyHint: 'Ce message sera chiffré de bout en bout.',
+    emptySuggestions: ['Salut 👋', 'Comment ça va ?'],
+    initUnavailableTitle: 'Chiffrement indisponible',
+    initUnavailableBody:
+      'La base chiffrée de cet appareil n’a pas pu être ouverte. Tes messages ne sont pas perdus : réessaie. N’efface pas les données de l’application.',
   },
   e2eeMedia: {
     openLabel: 'Ouvrir le média',
@@ -49,6 +73,20 @@ export const fr = {
     micBody: 'Autorise le micro dans les réglages pour envoyer une note vocale.',
   },
   e2ee: {
+    initFailedTitle: 'Chiffrement indisponible',
+    initFailedBody:
+      'L’initialisation du chiffrement a échoué. Tes messages ne sont pas perdus : réessaie dans un instant.',
+    initStorageTitle: 'Base chiffrée inaccessible',
+    initStorageBody:
+      'La base chiffrée de cet appareil n’a pas pu être ouverte. Tes messages existants sont conservés : réessaie, et n’efface surtout pas les données de l’application.',
+    initCryptoTitle: 'Clés indisponibles',
+    initCryptoBody:
+      'Les clés protégées de cet appareil n’ont pas pu être chargées. Réessaie ; si cela persiste, vérifie que le trousseau du téléphone est déverrouillé.',
+    initNetworkTitle: 'Publication des clés impossible',
+    initNetworkBody:
+      'La connexion a échoué : tes messages existants restent lisibles, mais tes contacts ne peuvent pas encore ouvrir de nouvelle session chiffrée. Vérifie ta connexion et réessaie.',
+    initLater: 'Plus tard',
+    retry: 'Réessayer',
     keysLostTitle: 'Clés de chiffrement perdues',
     keysLostBody:
       'Les clés de cet appareil étaient illisibles. De nouvelles clés ont été générées ; l’historique chiffré de cet appareil ne peut pas être récupéré.',

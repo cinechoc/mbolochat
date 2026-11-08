@@ -24,6 +24,11 @@ type Props = {
   onSendSticker: (ref: string) => void;
   onSendPersonalSticker: (sticker: PersonalSticker) => void;
   gifItems: RecentGif[];
+  /**
+   * Onglets proposés. Par défaut les trois ; une surface qui ne sait pas
+   * encore envoyer de sticker ou de GIF n'affiche pas un onglet inopérant.
+   */
+  sections?: ExpressionSection[];
   onSendGif: (gif: RecentGif) => void;
   theme: PanelTheme;
   onToggleFavorite?: (emoji: string) => void;
@@ -48,11 +53,12 @@ export function EmojiStickerPanel({
   onSendPersonalSticker,
   gifItems,
   onSendGif,
+  sections = ['emoji', 'stickers', 'gif'],
   theme,
   onToggleFavorite,
   onSearchFocusChange,
 }: Props) {
-  const [section, setSection] = useState<ExpressionSection>('emoji');
+  const [section, setSection] = useState<ExpressionSection>(sections[0] ?? 'emoji');
   const contentHeight = Math.max(80, height - TAB_H);
 
   const changeSection = useCallback(
@@ -80,20 +86,24 @@ export function EmojiStickerPanel({
           theme={theme}
           onPress={() => changeSection('emoji')}
         />
-        <SectionTab
-          label="Stickers"
-          icon="sticker-emoji"
-          active={section === 'stickers'}
-          theme={theme}
-          onPress={() => changeSection('stickers')}
-        />
-        <SectionTab
-          label="GIF"
-          icon="file-gif-box"
-          active={section === 'gif'}
-          theme={theme}
-          onPress={() => changeSection('gif')}
-        />
+        {sections.includes('stickers') ? (
+          <SectionTab
+            label="Stickers"
+            icon="sticker-emoji"
+            active={section === 'stickers'}
+            theme={theme}
+            onPress={() => changeSection('stickers')}
+          />
+        ) : null}
+        {sections.includes('gif') ? (
+          <SectionTab
+            label="GIF"
+            icon="file-gif-box"
+            active={section === 'gif'}
+            theme={theme}
+            onPress={() => changeSection('gif')}
+          />
+        ) : null}
       </View>
 
       {section === 'emoji' ? (
@@ -107,7 +117,7 @@ export function EmojiStickerPanel({
           onToggleFavorite={onToggleFavorite}
           onSearchFocusChange={onSearchFocusChange}
         />
-      ) : section === 'stickers' ? (
+      ) : section === 'stickers' && sections.includes('stickers') ? (
         <StickerPanel
           height={contentHeight}
           theme={theme}

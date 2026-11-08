@@ -1,5 +1,7 @@
 import { fromByteArray, toByteArray } from 'base64-js';
 
+import { isValidStickerRef } from '../stickers/stickerRefRules';
+
 /**
  * Encodage du texte clair qui entre dans l'enveloppe Olm.
  *
@@ -7,10 +9,13 @@ import { fromByteArray, toByteArray } from 'base64-js';
  * base64 par une voie qui préserve les octets UTF-8 (pas `btoa`, qui casse dès
  * qu'un caractère dépasse un octet), et `decodeText` fait l'inverse.
  *
- * Deux versions coexistent dans l'enveloppe :
+ * Trois versions coexistent dans l'enveloppe :
  * - `v:1` texte : `{v:1, text}` — le format historique de M2, à ne jamais casser ;
  * - `v:2` média : `{v:2, kind:'media', media, thumb?, caption?}` — la référence du
- *   ciphertext et sa clé, décrites ci-dessous.
+ *   ciphertext et sa clé, décrites ci-dessous ;
+ * - `v:3` sticker de catalogue : `{v:3, kind:'sticker', stickerRef, replyTo?}` —
+ *   une **référence** stable (`pack/id`), jamais un fichier, une URL ou un binaire.
+ *   La résolution vers une image appartient à la couche d'affichage.
  */
 
 /** Référence d'un blob chiffré telle qu'elle voyage dans l'enveloppe Olm. */
@@ -49,9 +54,15 @@ export interface EncryptedMedia {
 
 export type ParsedPayload =
   | { kind: 'text'; text: string; replyTo?: string }
-  | { kind: 'media'; media: EncryptedMedia; caption: string; replyTo?: string };
+  | { kind: 'media'; media: EncryptedMedia; caption: string; replyTo?: string }
+  | { kind: 'sticker'; stickerRef: string; replyTo?: string };
 
-export type PayloadError = 'invalid_payload' | 'unsupported_version';
+/**
+ * Motifs d'un contenu **authentifié mais illisible**. Liste fermée : elle sert
+ * aussi de valeur persistée (`e2ee_messages.unreadable_reason`), donc jamais de
+ * message d'exception ni de fragment du payload.
+ */
+export type PayloadError = 'invalid_payload' | 'invalid_encoding' | 'unsupported_version';
 
 export class InvalidPayloadError extends Error {
   constructor(readonly reason: PayloadError) {
@@ -94,6 +105,27 @@ export function buildTextV1(text: string, replyTo?: string): string {
 export function buildMediaV2(media: EncryptedMedia, caption = '', replyTo?: string): string {
   return encodeText(
     JSON.stringify(replyTo ? { v: 2, kind: 'media', media, caption, replyTo } : { v: 2, kind: 'media', media, caption }),
+  );
+}
+
+/**
+ * Sérialise le contenu `v:3` d'un sticker de catalogue.
+ *
+ * Seuls trois champs existent : la version, la nature et la **référence**. Rien
+ * d'autre n'est jamais écrit — ni URL, ni chemin, ni donnée binaire — et
+ * `replyTo` n'apparaît que s'il est fourni, comme pour `v:1`.
+ *
+ * Une référence mal formée est refusée à la construction : envoyer une valeur
+ * que le parser rejetterait produirait un message indéchiffrable chez le pair.
+ */
+export function buildStickerV3(stickerRef: string, replyTo?: string): string {
+  if (!isValidStickerRef(stickerRef)) {
+    throw new InvalidPayloadError('invalid_payload');
+  }
+  return encodeText(
+    JSON.stringify(
+      replyTo ? { v: 3, kind: 'sticker', stickerRef, replyTo } : { v: 3, kind: 'sticker', stickerRef },
+    ),
   );
 }
 
@@ -147,9 +179,18 @@ export function decodeMediaMeta(raw: string | null | undefined): EncryptedMedia 
  * ne doit jamais être interprété à moitié.
  */
 export function parsePayload(plaintextB64: string): ParsedPayload {
+  let json: string;
+  try {
+    json = decodeText(plaintextB64);
+  } catch {
+    // base64 tronqué ou séquence UTF-8 impossible : le contenu a bien été
+    // déchiffré et authentifié, mais ne peut pas être lu. Motif distinct, pour
+    // ne pas le confondre avec un JSON valide mais hors contrat.
+    throw new InvalidPayloadError('invalid_encoding');
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(decodeText(plaintextB64));
+    parsed = JSON.parse(json);
   } catch {
     throw new InvalidPayloadError('invalid_payload');
   }
@@ -172,6 +213,26 @@ export function parsePayload(plaintextB64: string): ParsedPayload {
     return replyTo
       ? { kind: 'media', media: envelope.media, caption, replyTo }
       : { kind: 'media', media: envelope.media, caption };
+  }
+  if (envelope.v === 3) {
+    // Nouveau format : rien à préserver, donc validation stricte. Un `replyTo`
+    // qui n'est pas une chaîne est refusé plutôt que silencieusement ignoré.
+    if (envelope.kind !== 'sticker') {
+      throw new InvalidPayloadError('invalid_payload');
+    }
+    if (envelope.replyTo !== undefined && typeof envelope.replyTo !== 'string') {
+      throw new InvalidPayloadError('invalid_payload');
+    }
+    // Une référence bien formée mais absente du catalogue local reste valide :
+    // c'est l'affichage qui décidera du repli. Les champs supplémentaires
+    // (`url`, `data`, `bytes`, `path`…) sont ignorés : ils ne sont jamais lus.
+    if (typeof envelope.stickerRef !== 'string' || !isValidStickerRef(envelope.stickerRef)) {
+      throw new InvalidPayloadError('invalid_payload');
+    }
+    const cited = typeof envelope.replyTo === 'string' ? envelope.replyTo : undefined;
+    return cited
+      ? { kind: 'sticker', stickerRef: envelope.stickerRef, replyTo: cited }
+      : { kind: 'sticker', stickerRef: envelope.stickerRef };
   }
   throw new InvalidPayloadError('unsupported_version');
 }

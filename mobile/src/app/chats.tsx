@@ -31,10 +31,13 @@ import { ThemedView } from '@/components/themed-view';
 import { TextField, accentColor } from '@/components/ui';
 import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { fr } from '@/i18n/fr';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useCalls } from '@/features/calls/CallProvider';
 import { cache } from '@/lib/cache';
+import { chatRouteFor } from '@/features/e2ee/routing';
+import { isE2eeEnabled } from '@/features/e2ee/policy';
 import { groupUnreadCount } from '@/lib/conversationFilters';
 import {
   conversationSectionLabel,
@@ -528,9 +531,25 @@ export default function ChatsScreen() {
         setOpenRowId(null);
         return;
       }
-      router.push({ pathname: '/chat/[id]', params: { id: conversation.id } });
+      // Le serveur est la seule autorité : `e2eeSince` décide de l'écran.
+      // Une conversation chiffrée sans correspondant identifiable est refusée
+      // plutôt que renvoyée vers l'écran en clair.
+      const route = chatRouteFor({
+        conversation,
+        currentUserId: user?.id,
+        e2eeEnabled: isE2eeEnabled(),
+      });
+      if (route.kind === 'blocked') {
+        setError(fr.e2eeChat.peerMissing);
+        return;
+      }
+      if (route.kind === 'e2ee') {
+        router.push({ pathname: '/e2ee-chat/[id]', params: route.params });
+        return;
+      }
+      router.push({ pathname: '/chat/[id]', params: route.params });
     },
-    [router, openRowId],
+    [router, openRowId, user?.id],
   );
 
   const openConversationActions = useCallback((conversation: ConversationSummary) => {

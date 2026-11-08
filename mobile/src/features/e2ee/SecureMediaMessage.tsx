@@ -1,12 +1,23 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { useChatColors } from '@/constants/chat-theme';
 import { Radii, Spacing } from '@/constants/theme';
-import { formatMediaDuration, mediaDisplaySize } from '@/features/media/mediaLayout';
+import {
+  formatFileSize,
+  formatMediaDuration,
+  mediaDisplaySize,
+} from '@/features/media/mediaLayout';
 import { DocumentMessageBubble } from '@/features/media/MediaMessage';
 import { useAppPreference } from '@/lib/app-preferences';
 import { fr } from '@/i18n/fr';
@@ -131,6 +142,12 @@ export function SecureMediaMessage({ token, media, mine, caption, onOpen, onLong
 
   const size = mediaDisplaySize({ width: media.width, height: media.height }, windowWidth);
   const duration = formatMediaDuration(media.duration);
+  // Métadonnées réelles uniquement : une dimension ou un poids absent n'est
+  // jamais remplacé par une valeur plausible.
+  const metadata = [
+    media.width && media.height ? `${media.width} × ${media.height}` : null,
+    media.blob.size > 0 ? formatFileSize(media.blob.size) : null,
+  ].filter((part): part is string => Boolean(part));
 
   return (
     <>
@@ -162,12 +179,18 @@ export function SecureMediaMessage({ token, media, mine, caption, onOpen, onLong
         ) : null}
         {state === 'loading' ? (
           <View style={[StyleSheet.absoluteFill, styles.overlay]}>
+            <ActivityIndicator color="#ffffff" />
             <ThemedText type="small" style={styles.overlayText}>
               {fr.e2eeMedia.opening}
             </ThemedText>
           </View>
         ) : null}
       </Pressable>
+      {metadata.length > 0 ? (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.metadata}>
+          {metadata.join(' · ')}
+        </ThemedText>
+      ) : null}
       {captionBlock}
       {state === 'ready' ? (
         <Pressable onPress={close} accessibilityRole="button" style={styles.closeRow}>
@@ -196,6 +219,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.35)',
   },
+  metadata: { paddingTop: 2, textAlign: 'right' },
   overlayText: { color: '#ffffff' },
   playBadge: {
     position: 'absolute',

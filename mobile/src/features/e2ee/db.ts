@@ -270,6 +270,19 @@ export interface StoredE2eeMessage {
   media_meta: string | null;
   /** Id du message cité par cette réponse, ou `null`. */
   quote_id: string | null;
+  /**
+   * Référence d'un sticker de catalogue (« pack/id »), ou `null`. Comme
+   * `media_meta`, elle ne vit que dans cette base chiffrée : le serveur ne la
+   * reçoit jamais, et l'affichage seul la résout vers une image embarquée.
+   */
+  sticker_ref?: string | null;
+  /**
+   * Motif d'un message **authentifié mais illisible** (`unsupported_version`,
+   * `invalid_payload`, `invalid_encoding`), ou `null`/absent pour un message
+   * lisible. Liste fermée : on n'y met jamais le contenu ni le message d'une
+   * exception, qui pourraient porter des données du payload.
+   */
+  unreadable_reason?: string | null;
   /** Chemin durable du ciphertext local du média, avant ou après envoi. */
   local_cipher_uri?: string | null;
   /** Identifiant serveur du blob média une fois téléversé. */
@@ -297,9 +310,15 @@ export async function saveLocalMessageWith(
 ): Promise<void> {
   await writer.runAsync(
     `INSERT INTO e2ee_messages
-       (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine, media_meta, quote_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET body = excluded.body`,
+       (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
+        media_meta, quote_id, sticker_ref, unreadable_reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       body = excluded.body,
+       sticker_ref = COALESCE(excluded.sticker_ref, e2ee_messages.sticker_ref),
+       unreadable_reason = COALESCE(
+         excluded.unreadable_reason, e2ee_messages.unreadable_reason
+       )`,
     message.id,
     message.conversation_id,
     message.sender_id,
@@ -310,6 +329,8 @@ export async function saveLocalMessageWith(
     message.mine,
     message.media_meta ?? null,
     message.quote_id ?? null,
+    message.sticker_ref ?? null,
+    message.unreadable_reason ?? null,
   );
 }
 

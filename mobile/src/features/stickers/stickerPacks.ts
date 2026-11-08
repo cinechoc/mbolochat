@@ -4,6 +4,7 @@ import { PANTHER_2D_SOURCES } from './panther2dAssets.generated';
 import { PANTHER_2D_STICKERS } from './panther2dCatalog.generated';
 import { PANTHER_SOURCES } from './pantherAssets.generated';
 import { PANTHER_STICKERS } from './pantherCatalog.generated';
+import { isValidStickerRef } from './stickerRefRules';
 
 /**
  * Un sticker est identifié par une RÉFÉRENCE « idPack/idSticker » (ex. "mbolo-panther-2d/bonjour").
@@ -107,16 +108,17 @@ const LEGACY_MBOLO_PACK: StickerPack = {
 /** Packs proposés dans le sélecteur. */
 export const STICKER_PACKS: StickerPack[] = [PANTHER_2D_PACK];
 
-const REF_PATTERN = /^[a-z0-9_-]{1,40}\/[a-z0-9_-]{1,60}$/;
-
 export function stickerRef(packId: string, stickerId: string): string {
   return `${packId}/${stickerId}`;
 }
 
-/** Vrai si la chaîne a la forme d'une référence de sticker (la même règle doit être appliquée par le backend). */
-export function isValidStickerRef(ref: string): boolean {
-  return REF_PATTERN.test(ref);
-}
+/**
+ * Vrai si la chaîne a la forme d'une référence de sticker.
+ *
+ * La règle vit dans `stickerRefRules.ts` : c'est la **même** définition que
+ * celle utilisée par le payload E2EE `v:3` et par le backend, jamais une copie.
+ */
+export { isValidStickerRef };
 
 const STICKER_INDEX = new Map<string, Sticker>(
   STICKER_PACKS.flatMap((pack) =>

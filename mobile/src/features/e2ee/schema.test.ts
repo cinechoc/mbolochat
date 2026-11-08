@@ -587,3 +587,214 @@ describe('migrateE2eeSchema — v3 : identité des enveloppes de l’outbox', ()
     ).toEqual({ c: 2 });
   });
 });
+
+describe('migrateE2eeSchema — v5 : référence des stickers reçus', () => {
+  /** Base figée à la v4, avec compte, sessions et deux messages réels. */
+  async function v4Database() {
+    const db = adapter(legacyDatabase());
+    // Montée bornée : la base reste dans l'état d'une installation d'avant v5.
+    expect(await migrateE2eeSchema(db, 4)).toBe(4);
+    await db.runAsync(
+      `INSERT INTO e2ee_messages
+         (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
+          media_meta, quote_id)
+       VALUES ('m-media', 'conv-1', 'peer-1', 'Alice', 'ma photo',
+               '2026-01-02T00:00:00Z', NULL, 0, '{"type":"IMAGE","mime":"image/jpeg"}',
+               'msg-1')`,
+    );
+    return db;
+  }
+
+  const snapshot = async (db: E2eeSchemaDb) => ({
+    messages: await db.getAllAsync<Record<string, unknown>>(
+      `SELECT id, body, media_meta, quote_id FROM e2ee_messages ORDER BY id`,
+    ),
+    sessions: await db.getAllAsync<Record<string, unknown>>(
+      `SELECT peer_user_id, peer_device_id, session_pickle FROM e2ee_sessions
+       ORDER BY peer_user_id, peer_device_id`,
+    ),
+    account: await db.getFirstAsync<Record<string, unknown>>(
+      'SELECT account_pickle, identity_key FROM e2ee_account',
+    ),
+  });
+
+  it('ajoute sticker_ref nullable sans toucher aux messages ni aux sessions', async () => {
+    const db = await v4Database();
+    const before = await snapshot(db);
+
+    expect(await migrateE2eeSchema(db)).toBe(E2EE_SCHEMA_VERSION);
+
+    const columns = await db.getAllAsync<{ name: string; notnull: number }>(
+      'PRAGMA table_info(e2ee_messages)',
+    );
+    const sticker = columns.find((column) => column.name === 'sticker_ref');
+    expect(sticker).toBeDefined();
+    // Nullable : aucun message existant n'est réécrit ni complété.
+    expect(sticker?.notnull).toBe(0);
+
+    // Les données sont identiques, y compris le média et sa citation.
+    expect(await snapshot(db)).toEqual(before);
+    expect(
+      await db.getAllAsync<Record<string, unknown>>(
+        'SELECT id FROM e2ee_messages WHERE sticker_ref IS NOT NULL',
+      ),
+    ).toEqual([]);
+  });
+
+  it('un second passage ne rejoue rien et garde la version courante', async () => {
+    const db = await v4Database();
+    await migrateE2eeSchema(db);
+    const before = await snapshot(db);
+    const columnsBefore = await db.getAllAsync<{ name: string }>(
+      'PRAGMA table_info(e2ee_messages)',
+    );
+
+    expect(await migrateE2eeSchema(db)).toBe(E2EE_SCHEMA_VERSION);
+    expect(await snapshot(db)).toEqual(before);
+    expect(await db.getAllAsync<{ name: string }>('PRAGMA table_info(e2ee_messages)')).toEqual(
+      columnsBefore,
+    );
+    expect(
+      await db.getFirstAsync<{ value: string }>(
+        "SELECT value FROM e2ee_schema_meta WHERE key = 'schema_version'",
+      ),
+    ).toEqual({ value: String(E2EE_SCHEMA_VERSION) });
+  });
+
+  it('accepte une référence de sticker sur une nouvelle ligne, NULL ailleurs', async () => {
+    const db = await v4Database();
+    await migrateE2eeSchema(db);
+
+    await db.runAsync(
+      `INSERT INTO e2ee_messages
+         (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
+          media_meta, quote_id, sticker_ref)
+       VALUES ('m-sticker', 'conv-1', 'peer-1', 'Alice', '', '2026-01-03T00:00:00Z', NULL, 0,
+               NULL, NULL, 'mbolo-panther-2d/amour')`,
+    );
+
+    expect(
+      await db.getAllAsync<Record<string, unknown>>(
+        'SELECT id, body, media_meta, quote_id, sticker_ref FROM e2ee_messages ORDER BY id',
+      ),
+    ).toEqual([
+      { id: 'm-media', body: 'ma photo', media_meta: '{"type":"IMAGE","mime":"image/jpeg"}', quote_id: 'msg-1', sticker_ref: null },
+      { id: 'm-sticker', body: '', media_meta: null, quote_id: null, sticker_ref: 'mbolo-panther-2d/amour' },
+      { id: 'msg-1', body: 'bonjour', media_meta: null, quote_id: null, sticker_ref: null },
+    ]);
+  });
+});
+
+describe('migrateE2eeSchema — v6 : motif des messages illisibles', () => {
+  /** Base figée à la v5, avec compte, sessions, stickers et média. */
+  async function v5Database() {
+    const db = adapter(legacyDatabase());
+    expect(await migrateE2eeSchema(db, 5)).toBe(5);
+    await db.runAsync(
+      `INSERT INTO e2ee_messages
+         (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
+          media_meta, quote_id, sticker_ref)
+       VALUES ('m-sticker', 'conv-1', 'peer-1', 'Alice', '', '2026-01-03T00:00:00Z', NULL, 0,
+               NULL, NULL, 'mbolo-panther-2d/amour')`,
+    );
+    return db;
+  }
+
+  const snapshot = async (db: E2eeSchemaDb) => ({
+    messages: await db.getAllAsync<Record<string, unknown>>(
+      `SELECT id, body, media_meta, quote_id, sticker_ref FROM e2ee_messages ORDER BY id`,
+    ),
+    sessions: await db.getAllAsync<Record<string, unknown>>(
+      `SELECT peer_user_id, peer_device_id, session_pickle FROM e2ee_sessions
+       ORDER BY peer_user_id, peer_device_id`,
+    ),
+    account: await db.getFirstAsync<Record<string, unknown>>(
+      'SELECT account_pickle, identity_key FROM e2ee_account',
+    ),
+  });
+
+  it('ajoute unreadable_reason nullable sans toucher aux données existantes', async () => {
+    const db = await v5Database();
+    const before = await snapshot(db);
+
+    expect(await migrateE2eeSchema(db)).toBe(E2EE_SCHEMA_VERSION);
+
+    const columns = await db.getAllAsync<{ name: string; notnull: number; dflt_value: unknown }>(
+      'PRAGMA table_info(e2ee_messages)',
+    );
+    const reason = columns.find((column) => column.name === 'unreadable_reason');
+    expect(reason).toBeDefined();
+    // Nullable et sans valeur par défaut : les messages historiques restent
+    // « lisibles » sans être réécrits.
+    expect(reason?.notnull).toBe(0);
+    expect(reason?.dflt_value).toBeNull();
+
+    expect(await snapshot(db)).toEqual(before);
+    expect(
+      await db.getAllAsync<Record<string, unknown>>(
+        'SELECT id FROM e2ee_messages WHERE unreadable_reason IS NOT NULL',
+      ),
+    ).toEqual([]);
+  });
+
+  it('conserve stickers, citation et média, et accepte NULL pour un message lisible', async () => {
+    const db = await v5Database();
+    await migrateE2eeSchema(db);
+
+    expect(
+      await db.getAllAsync<Record<string, unknown>>(
+        `SELECT id, sticker_ref, quote_id, unreadable_reason FROM e2ee_messages ORDER BY id`,
+      ),
+    ).toEqual([
+      { id: 'm-sticker', sticker_ref: 'mbolo-panther-2d/amour', quote_id: null, unreadable_reason: null },
+      { id: 'msg-1', sticker_ref: null, quote_id: null, unreadable_reason: null },
+    ]);
+  });
+
+  it('accepte un motif sur une nouvelle ligne et une réouverture sans erreur', async () => {
+    const db = await v5Database();
+    await migrateE2eeSchema(db);
+    await db.runAsync(
+      `INSERT INTO e2ee_messages
+         (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
+          media_meta, quote_id, sticker_ref, unreadable_reason)
+       VALUES ('m-unreadable', 'conv-1', 'peer-1', 'Alice', '', '2026-01-04T00:00:00Z', NULL, 0,
+               NULL, NULL, NULL, 'unsupported_version')`,
+    );
+
+    // Réouverture : la version est déjà la bonne, rien n'est rejoué.
+    expect(await migrateE2eeSchema(db)).toBe(E2EE_SCHEMA_VERSION);
+    expect(
+      await db.getFirstAsync<Record<string, unknown>>(
+        `SELECT body, media_meta, quote_id, sticker_ref, unreadable_reason
+           FROM e2ee_messages WHERE id = 'm-unreadable'`,
+      ),
+    ).toEqual({
+      body: '',
+      media_meta: null,
+      quote_id: null,
+      sticker_ref: null,
+      unreadable_reason: 'unsupported_version',
+    });
+  });
+
+  it('un échec de la v6 ne laisse ni colonne ni version avancée', async () => {
+    const db = adapter(legacyDatabase());
+    expect(await migrateE2eeSchema(db, 5)).toBe(5);
+    // `stampVersion` échoue après l'ajout de colonne : la transaction annule tout.
+    await db.runAsync(
+      `CREATE TRIGGER boom BEFORE UPDATE ON e2ee_schema_meta
+       BEGIN SELECT RAISE(ABORT, 'boom'); END;`,
+    );
+
+    await expect(migrateE2eeSchema(db)).rejects.toThrow('boom');
+
+    const columns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(e2ee_messages)');
+    expect(columns.some((column) => column.name === 'unreadable_reason')).toBe(false);
+    expect(
+      await db.getFirstAsync<{ value: string }>(
+        "SELECT value FROM e2ee_schema_meta WHERE key = 'schema_version'",
+      ),
+    ).toEqual({ value: '5' });
+  });
+});

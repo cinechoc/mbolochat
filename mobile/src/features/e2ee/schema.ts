@@ -22,7 +22,7 @@ export type E2eeSchemaDb = Pick<
 >;
 
 /** Version de schéma attendue par ce code. */
-export const E2EE_SCHEMA_VERSION = 4;
+export const E2EE_SCHEMA_VERSION = 6;
 
 const META_TABLE = 'e2ee_schema_meta';
 
@@ -400,6 +400,8 @@ const STEPS: { version: number; run: (db: E2eeSchemaDb) => Promise<void> }[] = [
   { version: 2, run: migrateToV2 },
   { version: 3, run: migrateToV3 },
   { version: 4, run: migrateToV4 },
+  { version: 5, run: migrateToV5 },
+  { version: 6, run: migrateToV6 },
 ];
 
 async function readVersion(db: E2eeSchemaDb): Promise<number> {
@@ -445,6 +447,45 @@ async function migrateToV4(db: E2eeSchemaDb): Promise<void> {
   await db.withTransactionAsync(async () => {
     await db.execAsync(MEDIA_PREP_DDL);
     await stampVersion(db, 4);
+  });
+}
+
+/**
+ * Version 5 : référence d'un sticker de catalogue reçu.
+ *
+ * Ajout pur d'une colonne **nullable** : les messages existants gardent `NULL`
+ * et ne sont pas réécrits. Une base v4 monte en v5 sans perte ; une base v5
+ * reste lisible par du code qui ignorerait la colonne (il afficherait un corps
+ * vide, comme avant). Retour arrière = ignorer la colonne, puis
+ * `ALTER TABLE e2ee_messages DROP COLUMN sticker_ref`.
+ *
+ * La référence ne quitte jamais cette base : rien n'est enregistré côté serveur.
+ */
+async function migrateToV5(db: E2eeSchemaDb): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await addMissingColumns(db, 'e2ee_messages', [['sticker_ref', 'TEXT']]);
+    await stampVersion(db, 5);
+  });
+}
+
+/**
+ * Version 6 : motif d'un message authentifié mais illisible.
+ *
+ * Un payload dont le déchiffrement Olm a réussi peut échouer au parsing (version
+ * future, contrat inconnu, encodage invalide). Persister la seule avancée de
+ * session rendait le message invisible et surtout désynchronisait le ratchet :
+ * le message suivant devenait indéchiffrable. La colonne retient donc, dans la
+ * même transaction, un **motif normalisé** (`unsupported_version`,
+ * `invalid_payload`, `invalid_encoding`) — jamais le contenu, jamais le message
+ * d'erreur d'origine.
+ *
+ * Ajout pur d'une colonne **nullable** : les messages existants gardent `NULL`,
+ * donc « lisible ». Retour arrière = ignorer la colonne.
+ */
+async function migrateToV6(db: E2eeSchemaDb): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await addMissingColumns(db, 'e2ee_messages', [['unreadable_reason', 'TEXT']]);
+    await stampVersion(db, 6);
   });
 }
 

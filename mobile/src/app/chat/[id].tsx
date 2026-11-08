@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';import * as ImagePicker from 'expo-image-picker';
-import { Redirect, Stack, useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
+import { Redirect, useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import {
   Check,
   CheckCheck,
@@ -14,7 +14,6 @@ import {
   Trash,
   Trash2,
   Video,
-  X,
   type LucideIcon,
 } from 'lucide-react-native';
 import {
@@ -46,14 +45,17 @@ import { Avatar } from '@/components/avatar';
 import { QuoteBlock } from '@/components/quote-block';
 import { SwipeableBubble } from '@/components/swipeable-bubble';
 import { BlurTarget } from '@/components/blur-target';
-import { Glass } from '@/components/glass';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { CHAT_TIME_GAP_MS, useChatColors } from '@/constants/chat-theme';
 import { Spacing, Radii } from '@/constants/theme';
-import { PresenceSubtitle } from '@/features/presence/PresenceSubtitle';
 import { VoiceMessageBubble, voiceBubbleWidth } from '@/features/voice-notes/VoiceMessageBubble';
 import { ChatComposer, type ComposerTheme } from '@/features/composer/ChatComposer';
+import { ChatBubble } from '@/features/chat/ui/chat-bubble';
+import { ChatEmptyState } from '@/features/chat/ui/chat-empty-state';
+import { ChatHeaderScreen } from '@/features/chat/ui/chat-header';
+import { ChatReplyBar } from '@/features/chat/ui/chat-reply-bar';
+import { ChatDateSeparator, ChatTimeSeparator } from '@/features/chat/ui/chat-rows';
 import { useCalls } from '@/features/calls/CallProvider';
 import { SingleEmojiMessage } from '@/features/emoji/AnimatedEmoji';
 import { EmojiText, MessageText } from '@/features/emoji/EmojiText';
@@ -103,11 +105,14 @@ import { stopVoicePlayback } from '@/features/voice-notes/voicePlayback';
 import type { VoiceNote } from '@/features/voice-notes/useVoiceRecorder';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
+import { fr } from '@/i18n/fr';
 import { useTextScale } from '@/lib/text-scale';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { isE2eeEnabled } from '@/features/e2ee/policy';
+import { chatRouteFor } from '@/features/e2ee/routing';
 import { cache } from '@/lib/cache';
+import { copyToClipboard } from '@/lib/clipboard';
 import { conversationTitle, formatClock, formatDateLabel, tickState, type TickState } from '@/lib/format';
 import {
   discard,
@@ -181,25 +186,6 @@ const PLAYED_VOICES_KEY = 'mbolochat.played-voices';
 
 /** Horodatage en millisecondes, pour ordonner réellement les messages. */
 const atMs = (value: string): number => new Date(value).getTime();
-
-/**
- * Copie dans le presse-papiers. Le module est natif : un build plus ancien que
- * cette version le renvoie absent, et son simple import ferait tomber l'écran.
- * On le sonde donc avant de le charger, et on le dit si il manque.
- */
-async function copyToClipboard(text: string): Promise<boolean> {
-  try {
-    const { requireOptionalNativeModule } = await import('expo-modules-core');
-    if (!requireOptionalNativeModule('ExpoClipboard')) {
-      return false;
-    }
-    const Clipboard = await import('expo-clipboard');
-    await Clipboard.setStringAsync(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Fusionne des messages sans doublon et dans l'ordre chronologique.
@@ -471,55 +457,6 @@ function ReactionChips({
         );
       })}
     </View>
-  );
-}
-
-function ChatHeaderTitle({
-  title,
-  subtitle,
-  presenceUserId,
-  avatar,
-  onPress,
-}: {
-  title: string;
-  subtitle: string;
-  presenceUserId?: string;
-  avatar?: React.ReactNode;
-  onPress?: () => void;
-}) {
-  const chat = useChatColors();
-  const content = (
-    <View style={styles.headerTitleBody}>
-      {avatar}
-      <View style={styles.headerTitleText}>
-        <ThemedText numberOfLines={1} style={[styles.headerName, { color: chat.headerText }]}>
-          {title}
-        </ThemedText>
-        {presenceUserId ? (
-          <PresenceSubtitle
-            userId={presenceUserId}
-            onlineColor={chat.send}
-            offlineColor={chat.headerSubtitle}
-          />
-        ) : subtitle ? (
-          <ThemedText
-            numberOfLines={1}
-            style={[styles.headerSubtitle, { color: chat.headerSubtitle }]}>
-            {subtitle}
-          </ThemedText>
-        ) : null}
-      </View>
-    </View>
-  );
-
-  if (!onPress) {
-    return content;
-  }
-
-  return (
-    <Pressable onPress={onPress} hitSlop={8}>
-      {content}
-    </Pressable>
   );
 }
 
@@ -1266,105 +1203,54 @@ export default function ChatScreen() {
     [calls, conversation],
   );
 
-  const headerOptions = useMemo(
-    () => ({
-      headerTitleAlign: 'center' as const,
-      headerShadowVisible: false,
-      headerTintColor: chat.headerText,
-      // Fond verre : le contenu défile dessous, le flou le masque sans le cacher.
-      headerBackground: () => (
-        <Glass
-          blurTarget={blurTargetRef}
-          fallbackColor={chat.screen}
-          style={styles.headerBackground}
-        />
-      ),
-      headerTitle: () => (
-        <ChatHeaderTitle
-          title={title}
-          subtitle={subtitle}
-          presenceUserId={
-            conversation?.type === 'DIRECT' && other ? other.id : undefined
-          }
-          avatar={
-            conversation?.type === 'GROUP' ? (
-              <Avatar
-                name={title}
-                uri={conversation.avatarUrl}
-                emoji={conversation.emoji}
-                color={conversation.color}
-                variant="group"
-                size={34}
-              />
-            ) : undefined
-          }
-          onPress={
-            conversation?.type === 'GROUP'
-              ? openConversationSettings
-              : conversation?.type === 'DIRECT' && other
-                ? openOtherProfile
-                : undefined
-          }
-        />
-      ),
-      headerRight: () =>
-        conversation?.type === 'GROUP' ? (
-          <View style={styles.headerCallActions}>
-            <Pressable
-              onPress={() => onGroupCallPress('video')}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Appel vidéo de groupe"
-              style={({ pressed }) => pressed && styles.pressedHeaderAction}>
-              <Video size={26} color={chat.headerText} />
-            </Pressable>
-            <Pressable
-              onPress={() => onGroupCallPress('audio')}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Appel vocal de groupe"
-              style={({ pressed }) => pressed && styles.pressedHeaderAction}>
-              {/* Combiné retourné (sens « raccroché »), comme en un à un. */}
-              <View style={styles.phoneFlipped}>
-                <Phone size={22} color={chat.headerText} />
-              </View>
-            </Pressable>
-          </View>
-        ) : conversation?.type === 'DIRECT' ? (
-          <View style={styles.headerCallActions}>
-            <Pressable
-              onPress={() => onCallPress('video')}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Appel vidéo"
-              style={({ pressed }) => pressed && styles.pressedHeaderAction}>
-              <Video size={26} color={chat.headerText} />
-            </Pressable>
-            <Pressable
-              onPress={() => onCallPress('voice')}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Appel vocal"
-              style={({ pressed }) => pressed && styles.pressedHeaderAction}>
-              {/* Combiné retourné (sens « raccroché »), comme WhatsApp. */}
-              <View style={styles.phoneFlipped}>
-                <Phone size={22} color={chat.headerText} />
-              </View>
-            </Pressable>
-          </View>
-        ) : null,
-    }),
-    [
-      conversation,
-      other,
-      title,
-      subtitle,
-      openOtherProfile,
-      openConversationSettings,
-      onCallPress,
-      onGroupCallPress,
-      chat,
-    ],
+  const headerRight = useMemo(
+    () =>
+      conversation?.type === 'GROUP' ? (
+        <View style={styles.headerCallActions}>
+          <Pressable
+            onPress={() => onGroupCallPress('video')}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Appel vidéo de groupe"
+            style={({ pressed }) => pressed && styles.pressedHeaderAction}>
+            <Video size={26} color={chat.headerText} />
+          </Pressable>
+          <Pressable
+            onPress={() => onGroupCallPress('audio')}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Appel vocal de groupe"
+            style={({ pressed }) => pressed && styles.pressedHeaderAction}>
+            {/* Combiné retourné (sens « raccroché »), comme en un à un. */}
+            <View style={styles.phoneFlipped}>
+              <Phone size={22} color={chat.headerText} />
+            </View>
+          </Pressable>
+        </View>
+      ) : conversation?.type === 'DIRECT' ? (
+        <View style={styles.headerCallActions}>
+          <Pressable
+            onPress={() => onCallPress('video')}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Appel vidéo"
+            style={({ pressed }) => pressed && styles.pressedHeaderAction}>
+            <Video size={26} color={chat.headerText} />
+          </Pressable>
+          <Pressable
+            onPress={() => onCallPress('voice')}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Appel vocal"
+            style={({ pressed }) => pressed && styles.pressedHeaderAction}>
+            {/* Combiné retourné (sens « raccroché »), comme WhatsApp. */}
+            <View style={styles.phoneFlipped}>
+              <Phone size={22} color={chat.headerText} />
+            </View>
+          </Pressable>
+        </View>
+      ) : null,
+    [conversation, onCallPress, onGroupCallPress, chat.headerText],
   );
 
   const keyExtractor = useCallback((item: ListRow) => item.key, []);
@@ -1684,22 +1570,10 @@ export default function ChatScreen() {
   const renderItem = useCallback(
     ({ item }: { item: ListRow }) => {
       if (item.type === 'date') {
-        return (
-          <View style={styles.dateRow}>
-            <ThemedView style={[styles.datePill, { backgroundColor: theme.backgroundElement }]}>
-              <ThemedText type="small" style={[styles.dateText, chatStyles.dateText]}>
-                {item.label}
-              </ThemedText>
-            </ThemedView>
-          </View>
-        );
+        return <ChatDateSeparator label={item.label} />;
       }
       if (item.type === 'time') {
-        return (
-          <View style={styles.timeRow}>
-            <ThemedText style={[styles.timeText, chatStyles.secondaryText]}>{item.label}</ThemedText>
-          </View>
-        );
+        return <ChatTimeSeparator label={item.label} />;
       }
       if (item.type === 'unread') {
         return (
@@ -2340,20 +2214,7 @@ export default function ChatScreen() {
       }
 
       const bubble = (
-        <View
-          style={[
-            styles.bubble,
-            mine ? chatStyles.bubbleMine : chatStyles.bubbleTheirs,
-            mine ? styles.bubbleMineEdge : styles.bubbleTheirsEdge,
-          ]}>
-          <View
-            pointerEvents="none"
-            style={[
-              styles.tail,
-              mine ? styles.tailRight : styles.tailLeft,
-              mine ? chatStyles.bubbleMine : chatStyles.bubbleTheirs,
-            ]}
-          />
+        <ChatBubble mine={mine}>
           {message.replyTo ? (
             <QuoteBlock
               quote={message.replyTo}
@@ -2391,7 +2252,7 @@ export default function ChatScreen() {
               {stuck.error ?? "Le message n'est pas parti."} · retenter
             </ThemedText>
           ) : null}
-        </View>
+        </ChatBubble>
       );
       return row(
         <SwipeableBubble
@@ -2407,7 +2268,6 @@ export default function ChatScreen() {
     },
     [
       user,
-      theme,
       textScale.factor,
       isGroup,
       tickById,
@@ -2599,6 +2459,12 @@ export default function ChatScreen() {
       if (!content) {
         return;
       }
+      if (e2eeConversation) {
+        // Ceinture et bretelles : l'écran redirige déjà vers le chiffré, mais
+        // aucun chemin ne doit pouvoir émettre du clair ici.
+        setError(fr.e2eeChat.meetsInEncryptedScreen);
+        return;
+      }
       setError(null);
       await enqueue({ conversationId: id, content, replyTo: replyTo?.id ?? null });
       if (!e2eeConversation) {
@@ -2617,6 +2483,10 @@ export default function ChatScreen() {
       if (!token || !id) {
         return;
       }
+      if (e2eeConversation) {
+        setError(fr.e2eeChat.meetsInEncryptedScreen);
+        return;
+      }
       const now = Date.now();
       if (now - lastStickerSendAt.current < 600) {
         return;
@@ -2633,7 +2503,7 @@ export default function ChatScreen() {
       setReplyTo(null);
       void drain(token);
     },
-    [token, id, replyTo],
+    [token, id, replyTo, e2eeConversation],
   );
 
   /**
@@ -2710,6 +2580,37 @@ export default function ChatScreen() {
     return <Redirect href="/login" />;
   }
 
+  // Une conversation chiffrée va sur son écran, sans repli : notifications,
+  // liens internes et deep links passent tous par ici, donc aucun d'eux ne peut
+  // atterrir sur l'écran en clair.
+  if (conversation) {
+    const route = chatRouteFor({
+      conversation,
+      currentUserId: user.id,
+      e2eeEnabled: isE2eeEnabled(),
+    });
+    if (route.kind === 'blocked') {
+      return (
+        <ThemedView style={styles.container}>
+          <View style={styles.redirectNotice}>
+            <ThemedText type="sectionTitle">{fr.e2eeChat.peerMissing}</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {fr.e2eeChat.e2eeScreenTitle}
+            </ThemedText>
+            <Pressable accessibilityRole="button" onPress={() => router.replace('/chats')}>
+              <ThemedText type="smallBold" themeColor="textSecondary">
+                {fr.common.close}
+              </ThemedText>
+            </Pressable>
+          </View>
+        </ThemedView>
+      );
+    }
+    if (route.kind === 'e2ee') {
+      return <Redirect href={{ pathname: '/e2ee-chat/[id]', params: route.params }} />;
+    }
+  }
+
   return (
     <ThemedView
       style={[
@@ -2719,7 +2620,32 @@ export default function ChatScreen() {
         // donc nous-mêmes le contenu au-dessus du clavier.
         keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
       ]}>
-      <Stack.Screen options={headerOptions} />
+      <ChatHeaderScreen
+        title={title}
+        subtitle={subtitle}
+        presenceUserId={conversation?.type === 'DIRECT' && other ? other.id : undefined}
+        avatar={
+          conversation?.type === 'GROUP' ? (
+            <Avatar
+              name={title}
+              uri={conversation.avatarUrl}
+              emoji={conversation.emoji}
+              color={conversation.color}
+              variant="group"
+              size={34}
+            />
+          ) : undefined
+        }
+        onPressTitle={
+          conversation?.type === 'GROUP'
+            ? openConversationSettings
+            : conversation?.type === 'DIRECT' && other
+              ? openOtherProfile
+              : undefined
+        }
+        right={headerRight}
+        blurTarget={blurTargetRef}
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
@@ -2759,48 +2685,34 @@ export default function ChatScreen() {
           <View
             pointerEvents="box-none"
             style={[styles.emptyOverlay, { bottom: (composerHeight || 92) + Spacing.two }]}>
-            <Avatar
-              name={title}
-              uri={isGroup ? conversation?.avatarUrl : other?.avatarUrl}
-              emoji={isGroup ? conversation?.emoji : null}
-              color={isGroup ? conversation?.color : null}
-              variant={isGroup ? 'group' : 'user'}
-              gender={isGroup ? null : other?.gender}
-              size={72}
+            <ChatEmptyState
+              avatar={
+                <Avatar
+                  name={title}
+                  uri={isGroup ? conversation?.avatarUrl : other?.avatarUrl}
+                  emoji={isGroup ? conversation?.emoji : null}
+                  color={isGroup ? conversation?.color : null}
+                  variant={isGroup ? 'group' : 'user'}
+                  gender={isGroup ? null : other?.gender}
+                  size={72}
+                />
+              }
+              title={isGroup ? 'Dis bonjour à ton nouveau groupe' : 'Dis bonjour !'}
+              text={
+                isGroup
+                  ? 'Un petit message pour lancer la discussion.'
+                  : 'Écris le premier message.'
+              }
+              suggestions={
+                isGroup
+                  ? ['Salut tout le monde 👋', 'Bienvenue dans le groupe 🎉', 'On commence ?']
+                  : ['Salut 👋', 'Comment ça va ?']
+              }
+              onSuggestion={(suggestion) => {
+                void sendText(suggestion);
+                resetComposer();
+              }}
             />
-            <ThemedText type="sectionTitle" style={styles.emptyTitle}>
-              {isGroup ? 'Dis bonjour à ton nouveau groupe' : 'Dis bonjour !'}
-            </ThemedText>
-            <ThemedText type="caption" themeColor="textSecondary" style={styles.emptyText}>
-              {isGroup
-                ? 'Un petit message pour lancer la discussion.'
-                : 'Écris le premier message.'}
-            </ThemedText>
-            <View style={styles.suggestions}>
-              {(isGroup
-                ? ['Salut tout le monde 👋', 'Bienvenue dans le groupe 🎉', 'On commence ?']
-                : ['Salut 👋', 'Comment ça va ?']
-              ).map((suggestion) => (
-                <Pressable
-                  key={suggestion}
-                  onPress={() => {
-                    void sendText(suggestion);
-                    resetComposer();
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Envoyer « ${suggestion} »`}
-                  style={({ pressed }) => [
-                    styles.suggestion,
-                    {
-                      backgroundColor: theme.backgroundElement,
-                      borderColor: theme.border,
-                    },
-                    pressed && { opacity: 0.7 },
-                  ]}>
-                  <ThemedText type="caption">{suggestion}</ThemedText>
-                </Pressable>
-              ))}
-            </View>
           </View>
         ) : null}
 
@@ -2853,20 +2765,11 @@ export default function ChatScreen() {
         ) : null}
 
         {replyTo ? (
-          <View
-            onLayout={(event) => setReplyBarHeight(event.nativeEvent.layout.height)}
-            style={[styles.replyBar, chatStyles.replyBar]}>
-            <View style={styles.replyBarBody}>
-              <QuoteBlock quote={quoteOfMessage(replyTo)} mine={false} />
-            </View>
-            <Pressable
-              onPress={() => setReplyTo(null)}
-              hitSlop={8}
-              style={styles.replyClose}
-              accessibilityRole="button"
-              accessibilityLabel="Annuler la réponse">
-              <X size={20} color={theme.accent} />
-            </Pressable>
+          <View onLayout={(event) => setReplyBarHeight(event.nativeEvent.layout.height)}>
+            <ChatReplyBar
+              quote={quoteOfMessage(replyTo)}
+              onCancel={() => setReplyTo(null)}
+            />
           </View>
         ) : null}
 
@@ -3447,4 +3350,5 @@ const styles = StyleSheet.create({
   tickPending: {
     opacity: 0.75,
   },
+  redirectNotice: { flex: 1, justifyContent: 'center', gap: 12, padding: 24 },
 });

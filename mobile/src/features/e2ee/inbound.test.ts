@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import type { Message } from '@/lib/types';
 import { persistIncoming } from './atomic';
 import type { E2eeAccountRow } from './db';
+import * as socketModule from '@/lib/socket';
 import { migrateE2eeSchema } from './schema';
 import { decryptEnvelope, decryptIncoming } from './text';
 import { withAccountLock, withOlmLock } from './locks';
@@ -134,6 +135,18 @@ const decrypted = (pickle: string, text = 'bonjour') => ({
   session_id: 'sid',
   message_type: 'normal',
   plaintext_b64: plaintext(text),
+});
+
+/** Charge utile sticker v3, telle qu'elle sort du déchiffrement. */
+const stickerPlain = (stickerRef: string, replyTo?: string) =>
+  Buffer.from(
+    JSON.stringify({ v: 3, kind: 'sticker', stickerRef, ...(replyTo ? { replyTo } : {}) }),
+    'utf8',
+  ).toString('base64');
+
+const decryptedSticker = (pickle: string, stickerRef: string, replyTo?: string) => ({
+  ...decrypted(pickle),
+  plaintext_b64: stickerPlain(stickerRef, replyTo),
 });
 
 function read(fixture: Fixture, sql: string, ...params: unknown[]) {
@@ -681,5 +694,475 @@ describe('déchiffrement entrant — pickle global du compte', () => {
 
     await expect(decrypt(fixture, prekey('m1', 'peer-1'))).rejects.toThrow('SessionCreation');
     await expect(decrypt(fixture, prekey('m2', 'peer-2'))).resolves.toMatchObject({ text: 'ok' });
+  });
+});
+
+describe('déchiffrement entrant — stickers v3', () => {
+  const KNOWN = 'mbolo-panther-2d/amour';
+
+  it('persiste un sticker connu : corps vide, référence, pas de média', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt.mockResolvedValue(decryptedSticker('S1', KNOWN) as never);
+
+    const result = await decrypt(fixture, incoming({ id: 'm1' }));
+
+    expect(result.stickerRef).toBe(KNOWN);
+    expect(result.text).toBe('');
+    expect(result.media).toBeUndefined();
+    expect(result.stored.sticker_ref).toBe(KNOWN);
+    expect(read(fixture, 'SELECT id, body, media_meta, quote_id, sticker_ref FROM e2ee_messages'))
+      .toEqual([
+        {
+          id: 'm1',
+          body: '',
+          media_meta: null,
+          quote_id: null,
+          sticker_ref: KNOWN,
+        },
+      ]);
+    // La session a bien avancé dans la même écriture.
+    expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([
+      { session_pickle: 'S1' },
+    ]);
+  });
+
+  it('accepte et persiste une référence valide absente du catalogue local', async () => {
+    const fixture = await seeded();
+    const future = 'mbolo-panther-3d/inconnu-a-ce-jour';
+    cryptoMock.secureDecrypt.mockResolvedValue(decryptedSticker('S1', future) as never);
+
+    const result = await decrypt(fixture, incoming({ id: 'm2' }));
+
+    // Le parser valide la forme, pas l'existence : l'affichage décide du repli.
+    expect(result.stickerRef).toBe(future);
+    expect(read(fixture, 'SELECT body, sticker_ref FROM e2ee_messages')).toEqual([
+      { body: '', sticker_ref: future },
+    ]);
+  });
+
+  it('refuse une référence mal formée en message illisible, sans casser le ratchet', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt.mockResolvedValue(
+      decryptedSticker('S1', 'https://exemple.test/sticker.png') as never,
+    );
+
+    const result = await decrypt(fixture, incoming({ id: 'm3' }));
+
+    // La charge utile est authentifiée mais hors contrat : elle devient un
+    // message illisible plutôt qu'une erreur qui laisserait la session en
+    // arrière (protection P0). La référence invalide n'est jamais conservée.
+    expect(result.unreadableReason).toBe('invalid_payload');
+    expect(read(fixture, 'SELECT sticker_ref, unreadable_reason FROM e2ee_messages')).toEqual([
+      { sticker_ref: null, unreadable_reason: 'invalid_payload' },
+    ]);
+    expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([
+      { session_pickle: 'S1' },
+    ]);
+  });
+
+  it('conserve replyTo quand le sticker cite un message', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt.mockResolvedValue(
+      decryptedSticker('S1', KNOWN, 'msg-cite') as never,
+    );
+
+    const result = await decrypt(fixture, incoming({ id: 'm4' }));
+
+    expect(result.stickerRef).toBe(KNOWN);
+    expect(read(fixture, 'SELECT quote_id, body FROM e2ee_messages')).toEqual([
+      { quote_id: 'msg-cite', body: '' },
+    ]);
+  });
+
+  it('ne duplique pas un sticker reçu deux fois et ne reconsomme pas le ratchet', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt.mockResolvedValue(decryptedSticker('S1', KNOWN) as never);
+
+    const first = await decrypt(fixture, incoming({ id: 'm5' }));
+    const again = await decrypt(fixture, incoming({ id: 'm5' }));
+
+    expect(first.stickerRef).toBe(KNOWN);
+    // Le rejeu retrouve la référence déjà stockée.
+    expect(again.stickerRef).toBe(KNOWN);
+    expect(again.keyChanged).toBe(false);
+    expect(cryptoMock.secureDecrypt).toHaveBeenCalledTimes(1);
+    expect(read(fixture, 'SELECT sticker_ref FROM e2ee_messages')).toEqual([{ sticker_ref: KNOWN }]);
+    expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([
+      { session_pickle: 'S1' },
+    ]);
+  });
+
+  it('annule message et session quand l écriture du message échoue, puis réussit au retry', async () => {
+    const fixture = await seeded();
+    await fixture.handle.execAsync(
+      `CREATE TRIGGER boom BEFORE INSERT ON e2ee_messages
+       BEGIN SELECT RAISE(ABORT, 'boom'); END;`,
+    );
+    cryptoMock.secureDecrypt.mockResolvedValue(decryptedSticker('S1', KNOWN) as never);
+
+    await expect(decrypt(fixture, incoming({ id: 'm6' }))).rejects.toThrow('boom');
+    expect(read(fixture, 'SELECT id FROM e2ee_messages')).toEqual([]);
+    expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([
+      { session_pickle: 'S0' },
+    ]);
+
+    // Le pair renvoie le message : la nouvelle tentative part du même état S0 et
+    // persiste cette fois la référence, sans doublon.
+    await fixture.handle.execAsync('DROP TRIGGER boom');
+    cryptoMock.secureDecrypt.mockResolvedValue(decryptedSticker('S1', KNOWN) as never);
+    const retried = await decrypt(fixture, incoming({ id: 'm6' }));
+
+    expect(retried.stored.sticker_ref).toBe(KNOWN);
+    expect(read(fixture, 'SELECT id, sticker_ref FROM e2ee_messages')).toEqual([
+      { id: 'm6', sticker_ref: KNOWN },
+    ]);
+    expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([
+      { session_pickle: 'S1' },
+    ]);
+  });
+
+  it('annule la ligne de sticker quand l écriture de session échoue', async () => {
+    const fixture = await seeded();
+    await fixture.handle.execAsync(
+      `CREATE TRIGGER boom BEFORE UPDATE ON e2ee_sessions
+       BEGIN SELECT RAISE(ABORT, 'boom'); END;`,
+    );
+    cryptoMock.secureDecrypt.mockResolvedValue(decryptedSticker('S1', KNOWN) as never);
+
+    await expect(decrypt(fixture, incoming({ id: 'm7' }))).rejects.toThrow('boom');
+    // Aucune demi-persistance : le sticker ne survit pas sans la session.
+    expect(read(fixture, 'SELECT id FROM e2ee_messages')).toEqual([]);
+    expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([
+      { session_pickle: 'S0' },
+    ]);
+  });
+
+  it('annule tout quand le pickle de compte d un sticker prekey échoue', async () => {
+    const fixture = await seeded([]);
+    cryptoMock.secureCreateInbound.mockResolvedValue({
+      account_pickle: 'account-2',
+      session_pickle: 'S1',
+      plaintext_b64: stickerPlain(KNOWN),
+    } as never);
+    await fixture.handle.execAsync(
+      `CREATE TRIGGER boom BEFORE INSERT ON e2ee_account
+       BEGIN SELECT RAISE(ABORT, 'boom'); END;`,
+    );
+
+    await expect(
+      decrypt(fixture, incoming({ id: 'm8', payloadType: 'prekey' })),
+    ).rejects.toThrow('boom');
+    expect(read(fixture, 'SELECT account_pickle FROM e2ee_account')).toEqual([]);
+    expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([]);
+    expect(read(fixture, 'SELECT id FROM e2ee_messages')).toEqual([]);
+  });
+
+  it('garde la référence dans la seule base chiffrée, sans appel réseau', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt.mockResolvedValue(decryptedSticker('S1', KNOWN) as never);
+
+    await decrypt(fixture, incoming({ id: 'm9' }));
+
+    // Aucun aller-retour : la session locale suffit, rien n'est demandé au serveur.
+    expect(apiMock.getE2eeKeyBundle).not.toHaveBeenCalled();
+    expect(vi.mocked(socketModule.ensureSocket)).not.toHaveBeenCalled();
+
+    // La référence n'existe que dans `e2ee_messages` (SQLCipher). Aucun autre
+    // stockage local ne la reçoit.
+    const dump = [
+      ...read(fixture, 'SELECT * FROM e2ee_drafts'),
+      ...read(fixture, 'SELECT * FROM e2ee_outbox'),
+      ...read(fixture, 'SELECT * FROM e2ee_media_prep'),
+      ...read(fixture, 'SELECT peer_user_id, session_pickle FROM e2ee_sessions'),
+      ...read(fixture, 'SELECT account_pickle FROM e2ee_account'),
+      ...read(fixture, 'SELECT peer_user_id, signing_key FROM e2ee_peer_keys'),
+    ];
+    expect(JSON.stringify(dump)).not.toContain(KNOWN);
+    expect(read(fixture, 'SELECT sticker_ref FROM e2ee_messages')).toEqual([
+      { sticker_ref: KNOWN },
+    ]);
+  });
+});
+
+/**
+ * Lot A — protection P0 : un contenu **authentifié mais illisible** (le
+ * déchiffrement Olm a réussi, le parsing échoue) doit être persisté comme
+ * message illisible **dans la même transaction** que l'état de session avancé.
+ *
+ * Le risque visé n'est pas le message perdu mais la conversation : sans cette
+ * écriture, la session restait en arrière pendant que l'expéditeur avançait son
+ * ratchet, et tous les messages suivants devenaient indéchiffrables.
+ */
+describe('message authentifié mais illisible — le ratchet avance quand même', () => {
+  /** Base64 de la charge utile telle qu'elle sortirait du déchiffrement. */
+  const plainOf = (value: unknown) =>
+    Buffer.from(typeof value === 'string' ? value : JSON.stringify(value), 'utf8').toString(
+      'base64',
+    );
+
+  const unreadableOf = (pickle: string, payload: string) => ({
+    ...decrypted(pickle),
+    plaintext_b64: payload,
+  });
+
+  const messageRow = (fixture: Fixture, id: string) =>
+    read(
+      fixture,
+      `SELECT body, media_meta, quote_id, sticker_ref, unreadable_reason
+         FROM e2ee_messages WHERE id = ?`,
+      id,
+    );
+
+  const sessionPickle = (fixture: Fixture) =>
+    read(fixture, 'SELECT session_pickle FROM e2ee_sessions ORDER BY peer_device_id');
+
+  /**
+   * Faux ratchet : un pickle n'est accepté qu'une fois. Rejouer un état déjà
+   * consommé échoue comme le ferait Olm (`wrong_ratchet_state`), ce qui rend le
+   * test décisif : il échoue si la session n'a pas vraiment été persistée.
+   */
+  function ratchetMock(plaintextByPayload: (payload: string) => string) {
+    const state = { current: 'S0' };
+    cryptoMock.secureDecrypt.mockImplementation(async (pickle: string, _type, payload) => {
+      if (pickle !== state.current) throw new Error('wrong_ratchet_state');
+      state.current = `${pickle}+1`;
+      return {
+        session_pickle: state.current,
+        session_id: 'sid',
+        message_type: 'normal',
+        plaintext_b64: plaintextByPayload(String(payload)),
+      } as never;
+    });
+    return state;
+  }
+
+  it('persiste un placeholder pour une version future et avance la session', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt.mockResolvedValue(
+      unreadableOf('S1', plainOf({ v: 5, kind: 'sticker', stickerRef: 'pack/id' })) as never,
+    );
+
+    const result = await decrypt(fixture, incoming({ id: 'm1' }));
+
+    expect(result.unreadableReason).toBe('unsupported_version');
+    expect(result.text).toBe('');
+    expect(result.media).toBeUndefined();
+    expect(result.stickerRef).toBeUndefined();
+    // Rien du payload n'est conservé : le message est un marqueur, pas un contenu.
+    expect(messageRow(fixture, 'm1')).toEqual([
+      {
+        body: '',
+        media_meta: null,
+        quote_id: null,
+        sticker_ref: null,
+        unreadable_reason: 'unsupported_version',
+      },
+    ]);
+    // Le point capital : la session a bien avancé.
+    expect(sessionPickle(fixture)).toEqual([{ session_pickle: 'S1' }]);
+  });
+
+  it('classe un JSON invalide en invalid_payload', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt.mockResolvedValue(unreadableOf('S1', plainOf('{pas du json')) as never);
+
+    const result = await decrypt(fixture, incoming({ id: 'm1' }));
+
+    expect(result.unreadableReason).toBe('invalid_payload');
+    expect(messageRow(fixture, 'm1')[0]).toMatchObject({ unreadable_reason: 'invalid_payload' });
+    expect(sessionPickle(fixture)).toEqual([{ session_pickle: 'S1' }]);
+  });
+
+  it('classe un contrat v1 sans texte en invalid_payload', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt.mockResolvedValue(unreadableOf('S1', plainOf({ v: 1 })) as never);
+
+    const result = await decrypt(fixture, incoming({ id: 'm1' }));
+
+    expect(result.unreadableReason).toBe('invalid_payload');
+    expect(sessionPickle(fixture)).toEqual([{ session_pickle: 'S1' }]);
+  });
+
+  it('classe un encodage illisible en invalid_encoding', async () => {
+    const fixture = await seeded();
+    // Octets qui ne forment pas de l'UTF-8 valide : le JSON est inatteignable.
+    cryptoMock.secureDecrypt.mockResolvedValue(
+      unreadableOf('S1', Buffer.from([0xff, 0xfe, 0xfd]).toString('base64')) as never,
+    );
+
+    const result = await decrypt(fixture, incoming({ id: 'm1' }));
+
+    expect(result.unreadableReason).toBe('invalid_encoding');
+    expect(messageRow(fixture, 'm1')[0]).toMatchObject({ unreadable_reason: 'invalid_encoding' });
+    expect(sessionPickle(fixture)).toEqual([{ session_pickle: 'S1' }]);
+  });
+
+  it('ne transforme jamais un échec cryptographique en placeholder', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt.mockRejectedValue(new Error('bad mac'));
+
+    await expect(decrypt(fixture, incoming({ id: 'm1' }))).rejects.toThrow('bad mac');
+
+    // Un MAC invalide ne prouve rien sur le contenu : aucune ligne, aucune avancée.
+    expect(read(fixture, 'SELECT id FROM e2ee_messages')).toEqual([]);
+    expect(sessionPickle(fixture)).toEqual([{ session_pickle: 'S0' }]);
+  });
+
+  it('test décisif : le message suivant reste déchiffrable après un contenu illisible', async () => {
+    const fixture = await seeded();
+    const state = ratchetMock((payload) =>
+      payload === 'ILLISIBLE' ? plainOf({ v: 4, kind: 'sticker' }) : plainOf({ v: 1, text: 'bonjour' }),
+    );
+
+    const first = await decrypt(fixture, incoming({ id: 'm1', payload: 'ILLISIBLE' }));
+    expect(first.unreadableReason).toBe('unsupported_version');
+    expect(state.current).toBe('S0+1');
+    expect(sessionPickle(fixture)).toEqual([{ session_pickle: 'S0+1' }]);
+
+    // Deuxième message de la **même** session : il ne peut être ouvert que
+    // depuis l'état persisté par le premier (le faux ratchet refuse S0).
+    const second = await decrypt(fixture, incoming({ id: 'm2', payload: 'VALIDE' }));
+    expect(second.text).toBe('bonjour');
+    expect(state.current).toBe('S0+1+1');
+    expect(sessionPickle(fixture)).toEqual([{ session_pickle: 'S0+1+1' }]);
+    expect(read(fixture, 'SELECT id FROM e2ee_messages ORDER BY id')).toEqual([
+      { id: 'm1' },
+      { id: 'm2' },
+    ]);
+  });
+
+  it('un échec de déchiffrement n’avance pas le ratchet (contraste du test décisif)', async () => {
+    const fixture = await seeded();
+    const state = ratchetMock((payload) => plainOf({ v: 1, text: payload }));
+    // Le premier message échoue avant tout déchiffrement réussi.
+    cryptoMock.secureDecrypt.mockRejectedValueOnce(new Error('bad mac'));
+
+    await expect(decrypt(fixture, incoming({ id: 'm1', payload: 'X' }))).rejects.toThrow('bad mac');
+    expect(sessionPickle(fixture)).toEqual([{ session_pickle: 'S0' }]);
+
+    // Reprise normale : le ratchet n'a pas bougé, le message passe depuis S0.
+    const retried = await decrypt(fixture, incoming({ id: 'm1', payload: 'X' }));
+    expect(retried.text).toBe('X');
+    expect(state.current).toBe('S0+1');
+  });
+
+  it('reconnaît le doublon d’un message illisible sans rejouer le ratchet', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt.mockResolvedValue(unreadableOf('S1', plainOf({ v: 9 })) as never);
+
+    await decrypt(fixture, incoming({ id: 'm1' }));
+    const again = await decrypt(fixture, incoming({ id: 'm1' }));
+
+    // Un seul déchiffrement, une seule ligne, une seule avancée.
+    expect(cryptoMock.secureDecrypt).toHaveBeenCalledTimes(1);
+    expect(read(fixture, 'SELECT id FROM e2ee_messages')).toEqual([{ id: 'm1' }]);
+    expect(sessionPickle(fixture)).toEqual([{ session_pickle: 'S1' }]);
+    expect(again.unreadableReason).toBe('unsupported_version');
+    expect(again.text).toBe('');
+  });
+
+  it('annule placeholder et session quand l’écriture du message échoue', async () => {
+    const fixture = await seeded();
+    await fixture.handle.execAsync(
+      `CREATE TRIGGER boom BEFORE INSERT ON e2ee_messages
+       BEGIN SELECT RAISE(ABORT, 'boom'); END;`,
+    );
+    cryptoMock.secureDecrypt.mockResolvedValue(unreadableOf('S1', plainOf({ v: 7 })) as never);
+
+    await expect(decrypt(fixture, incoming({ id: 'm1' }))).rejects.toThrow('boom');
+
+    expect(read(fixture, 'SELECT id FROM e2ee_messages')).toEqual([]);
+    expect(sessionPickle(fixture)).toEqual([{ session_pickle: 'S0' }]);
+  });
+
+  it('annule le placeholder quand l’écriture de session échoue', async () => {
+    const fixture = await seeded();
+    await fixture.handle.execAsync(
+      `CREATE TRIGGER boom BEFORE UPDATE ON e2ee_sessions
+       BEGIN SELECT RAISE(ABORT, 'boom'); END;`,
+    );
+    cryptoMock.secureDecrypt.mockResolvedValue(unreadableOf('S1', plainOf({ v: 7 })) as never);
+
+    await expect(decrypt(fixture, incoming({ id: 'm1' }))).rejects.toThrow('boom');
+
+    expect(read(fixture, 'SELECT id FROM e2ee_messages')).toEqual([]);
+    expect(sessionPickle(fixture)).toEqual([{ session_pickle: 'S0' }]);
+  });
+
+  it('annule tout quand la prekey d’un message illisible échoue sur le compte', async () => {
+    const fixture = await seeded([]);
+    cryptoMock.secureCreateInbound.mockResolvedValue({
+      account_pickle: 'account-2',
+      session_pickle: 'S1',
+      plaintext_b64: plainOf({ v: 6 }),
+    } as never);
+    await fixture.handle.execAsync(
+      `CREATE TRIGGER boom BEFORE INSERT ON e2ee_account
+       BEGIN SELECT RAISE(ABORT, 'boom'); END;`,
+    );
+
+    await expect(
+      decrypt(fixture, incoming({ id: 'm1', payloadType: 'prekey' })),
+    ).rejects.toThrow('boom');
+
+    expect(read(fixture, 'SELECT account_pickle FROM e2ee_account')).toEqual([]);
+    expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([]);
+    expect(read(fixture, 'SELECT id FROM e2ee_messages')).toEqual([]);
+  });
+
+  it('annule tout quand l’épinglage de clé échoue sur un message illisible', async () => {
+    const fixture = await seeded([]);
+    // Clé connue différente du bundle : la clé du pair doit être réépinglée.
+    await fixture.handle.runAsync(
+      `INSERT INTO e2ee_peer_keys (peer_user_id, peer_device_id, signing_key, verified, updated_at)
+       VALUES ('peer-1', 'dev-1', 'ancienne-cle', 1, '2026-01-01T00:00:00Z')`,
+    );
+    await fixture.handle.execAsync(
+      `CREATE TRIGGER boom BEFORE UPDATE ON e2ee_peer_keys
+       BEGIN SELECT RAISE(ABORT, 'boom'); END;`,
+    );
+    cryptoMock.secureCreateInbound.mockResolvedValue({
+      account_pickle: 'account-2',
+      session_pickle: 'S1',
+      plaintext_b64: plainOf({ v: 6 }),
+    } as never);
+
+    await expect(
+      decrypt(fixture, incoming({ id: 'm1', payloadType: 'prekey' })),
+    ).rejects.toThrow('boom');
+
+    expect(read(fixture, 'SELECT account_pickle FROM e2ee_account')).toEqual([]);
+    expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([]);
+    expect(read(fixture, 'SELECT id FROM e2ee_messages')).toEqual([]);
+    expect(read(fixture, 'SELECT signing_key FROM e2ee_peer_keys')).toEqual([
+      { signing_key: 'ancienne-cle' },
+    ]);
+  });
+
+  it('n’expose ni le payload ni la clé : seul un motif normalisé est stocké', async () => {
+    const fixture = await seeded();
+    const marqueur = 'SECRET-DU-PAYLOAD-42';
+    cryptoMock.secureDecrypt.mockResolvedValue(
+      unreadableOf('S1', plainOf({ v: 5, text: marqueur })) as never,
+    );
+
+    await decrypt(fixture, incoming({ id: 'm1' }));
+
+    const dump = [
+      ...read(fixture, 'SELECT * FROM e2ee_messages'),
+      ...read(fixture, 'SELECT * FROM e2ee_drafts'),
+      ...read(fixture, 'SELECT * FROM e2ee_outbox'),
+      ...read(fixture, 'SELECT * FROM e2ee_media_prep'),
+      ...read(fixture, 'SELECT peer_user_id, session_pickle FROM e2ee_sessions'),
+      ...read(fixture, 'SELECT account_pickle FROM e2ee_account'),
+      ...read(fixture, 'SELECT peer_user_id, signing_key FROM e2ee_peer_keys'),
+    ];
+    expect(JSON.stringify(dump)).not.toContain(marqueur);
+    // Motif dans la liste fermée, jamais un message d'exception.
+    expect(['unsupported_version', 'invalid_payload', 'invalid_encoding']).toContain(
+      messageRow(fixture, 'm1')[0]?.unreadable_reason,
+    );
+    expect(apiMock.getE2eeKeyBundle).not.toHaveBeenCalled();
+    expect(vi.mocked(socketModule.ensureSocket)).not.toHaveBeenCalled();
   });
 });

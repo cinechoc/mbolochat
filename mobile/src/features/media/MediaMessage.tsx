@@ -12,6 +12,7 @@ import { useChatColors } from '@/constants/chat-theme';
 import { Spacing, Radii } from '@/constants/theme';
 
 import {
+  documentTypeLabel,
   documentVisual,
   formatFileSize,
   formatMediaDuration,
@@ -226,6 +227,9 @@ export const DocumentMessageBubble = memo(function DocumentMessageBubble({
 }: DocumentBubbleProps) {
   const chat = useChatColors();
   const visual = documentVisual(name, mime);
+  // Catégorie réelle du fichier (« PDF », « Document Word »…) : jamais un
+  // format que l'application ne sait pas nommer.
+  const typeLabel = documentTypeLabel(name, mime);
   const foreground = mine ? chat.mineText : chat.theirText;
   const bytesVisible =
     sending &&
@@ -277,8 +281,8 @@ export const DocumentMessageBubble = memo(function DocumentMessageBubble({
         </Text>
         <Text style={[styles.documentSize, { color: chat.secondaryText }]}>
           {bytesVisible
-            ? `${formatFileSize(uploadedBytes)} sur ${formatFileSize(totalBytes)}`
-            : formatFileSize(size)}
+            ? `${typeLabel} · ${formatFileSize(uploadedBytes)} sur ${formatFileSize(totalBytes)}`
+            : [typeLabel, formatFileSize(size)].filter(Boolean).join(' · ')}
         </Text>
       </View>
     </Pressable>

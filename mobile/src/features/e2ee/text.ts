@@ -21,8 +21,11 @@ import {
   buildTextV1,
   decodeMediaMeta,
   encodeMediaMeta,
+  InvalidPayloadError,
   parsePayload,
   type EncryptedMedia,
+  type ParsedPayload,
+  type PayloadError,
 } from './payload';
 import {
   loadPersistedEnvelope,
@@ -588,6 +591,65 @@ export async function decryptEnvelope(input: InboundInput): Promise<DecryptedEnv
 }
 
 /**
+ * Persiste un message **authentifié mais illisible** dans la même transaction
+ * que l'état Olm avancé.
+ *
+ * Le point critique : la session a déjà avancé chez l'expéditeur. Jeter cette
+ * avancée laissait `e2ee_sessions` en arrière et rendait indéchiffrables **tous**
+ * les messages suivants du même pair. On écrit donc la session — et le compte
+ * s'il a bougé, et la clé épinglée — avec un message au corps vide portant un
+ * motif normalisé. Aucun contenu n'est conservé : ni le clair déchiffré, ni le
+ * message de l'exception, ni un fragment du payload.
+ */
+async function finalizeUnreadable(
+  db: SQLiteDatabase,
+  message: Message,
+  opened: OpenedInbound,
+  reason: PayloadError,
+): Promise<{
+  text: string;
+  media?: EncryptedMedia;
+  stickerRef?: string;
+  unreadableReason: PayloadError;
+  account: E2eeAccountRow;
+  stored: StoredE2eeMessage;
+  keyChanged: boolean;
+}> {
+  const stored: StoredE2eeMessage = {
+    id: message.id,
+    conversation_id: message.conversationId,
+    sender_id: message.sender.id,
+    sender_name: message.sender.displayName,
+    body: '',
+    created_at: message.createdAt,
+    client_id: message.clientId,
+    mine: 0,
+    media_meta: null,
+    quote_id: null,
+    sticker_ref: null,
+    unreadable_reason: reason,
+  };
+  await persistIncoming({
+    db,
+    session: opened.session,
+    // `null` sur une session existante : le compte n'a pas bougé et l'écrire
+    // écraserait l'avancée faite par un autre pair.
+    account: opened.accountChanged ? opened.account : null,
+    message: stored,
+    pinPeerKey: opened.keyChanged || !opened.knownKey,
+  });
+  return {
+    text: '',
+    media: undefined,
+    stickerRef: undefined,
+    unreadableReason: reason,
+    account: opened.account,
+    stored,
+    keyChanged: opened.keyChanged,
+  };
+}
+
+/**
  * Déchiffre un message entrant et persiste le résultat.
  *
  * Le déchiffrement, le contrôle de doublon et l'écriture se font sous le même
@@ -604,6 +666,14 @@ export async function decryptIncoming(input: {
 }): Promise<{
   text: string;
   media?: EncryptedMedia;
+  /** Référence du sticker reçu (`v:3`), déjà validée par le parser. */
+  stickerRef?: string;
+  /**
+   * Motif d'un contenu authentifié mais illisible (`unsupported_version`,
+   * `invalid_payload`, `invalid_encoding`). Le message est alors persisté avec
+   * un corps vide et ce motif : le ratchet, lui, a bien avancé.
+   */
+  unreadableReason?: PayloadError;
   account: E2eeAccountRow;
   stored: StoredE2eeMessage;
   keyChanged: boolean;
@@ -617,6 +687,8 @@ export async function decryptIncoming(input: {
     return {
       text: existing.body,
       media: existing.media_meta ? decodeMediaMeta(existing.media_meta) ?? undefined : undefined,
+      stickerRef: existing.sticker_ref ?? undefined,
+      unreadableReason: (existing.unreadable_reason as PayloadError | null) ?? undefined,
       account: input.account,
       stored: existing,
       keyChanged: false,
@@ -631,9 +703,23 @@ export async function decryptIncoming(input: {
       message,
     },
     async (opened) => {
-      const parsed = parsePayload(opened.plaintextB64);
+      let parsed: ParsedPayload;
+      try {
+        parsed = parsePayload(opened.plaintextB64);
+      } catch (error) {
+        // Seul un contenu **authentifié mais illisible** prend ce chemin : le
+        // déchiffrement Olm a réussi, c'est l'interprétation qui échoue. Une
+        // erreur cryptographique (MAC, session absente, clé) n'est pas un
+        // `InvalidPayloadError` et garde donc son traitement d'origine : rien
+        // n'est persisté, le message n'est pas transformé en placeholder.
+        if (!(error instanceof InvalidPayloadError)) throw error;
+        return finalizeUnreadable(input.db, message, opened, error.reason);
+      }
       // Le corps affiché est le texte, ou la légende qui accompagne un média.
-      const body = parsed.kind === 'text' ? parsed.text : parsed.caption;
+      // Un sticker n'a pas de corps : sa référence suffit à l'affichage, et le
+      // stocker à part évite une bulle de texte vide.
+      const body =
+        parsed.kind === 'text' ? parsed.text : parsed.kind === 'media' ? parsed.caption : '';
       const stored: StoredE2eeMessage = {
         id: message.id,
         conversation_id: message.conversationId,
@@ -647,6 +733,9 @@ export async function decryptIncoming(input: {
         // nulle part ailleurs, qu'elles sont conservées pour une lecture ultérieure.
         media_meta: parsed.kind === 'media' ? encodeMediaMeta(parsed.media) : null,
         quote_id: parsed.replyTo ?? null,
+        // Référence validée par `parsePayload` : forme `pack/id` uniquement.
+        // Rien d'autre n'en est tiré — ni URL, ni chemin, ni binaire.
+        sticker_ref: parsed.kind === 'sticker' ? parsed.stickerRef : null,
       };
       await persistIncoming({
         db: input.db,
@@ -659,8 +748,9 @@ export async function decryptIncoming(input: {
         pinPeerKey: opened.keyChanged || !opened.knownKey,
       });
       return {
-        text: parsed.kind === 'text' ? parsed.text : parsed.caption,
+        text: body,
         media: parsed.kind === 'media' ? parsed.media : undefined,
+        stickerRef: parsed.kind === 'sticker' ? parsed.stickerRef : undefined,
         account: opened.account,
         stored,
         keyChanged: opened.keyChanged,
