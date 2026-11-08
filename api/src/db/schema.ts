@@ -341,6 +341,113 @@ export const uploads = pgTable(
 );
 
 /**
+ * Clé d'**idempotence** d'un téléversement de média chiffré.
+ *
+ * Le client fournit une clé stable (dérivée de l'identité durable de sa
+ * préparation média) ; rejouer la même requête après un timeout, une coupure ou
+ * un redémarrage doit rendre le **même** `uploadId` sans créer un second blob.
+ *
+ * La clé primaire est `(user_id, key)` : deux comptes ne peuvent pas se marcher
+ * dessus, et une clé n'est jamais réutilisable hors de son propriétaire. La
+ * ligne porte aussi le contexte autorisé (`conversation_id`) et l'empreinte du
+ * ciphertext **calculée par le serveur** : une même clé avec un autre contenu
+ * est un conflit, jamais un remplacement silencieux.
+ *
+ * `stored_url` est le chemin alloué **avant** l'écriture du fichier : une reprise
+ * réécrit exactement le même chemin, donc un arrêt entre l'écriture et la
+ * validation SQL ne laisse pas d'orphelin.
+ */
+export const uploadIdempotency = pgTable(
+  'upload_idempotency',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Clé fournie par le client, opaque et stable pour une même opération. */
+    key: text('key').notNull(),
+    /** Conversation déclarée au premier envoi : le contexte ne peut pas changer. */
+    conversationId: text('conversation_id').notNull(),
+    /** Empreinte SHA-256 du ciphertext, calculée à partir des octets reçus. */
+    contentSha256: text('content_sha256').notNull(),
+    size: integer('size').notNull(),
+    /** Chemin relatif réservé avant écriture (« /uploads/2026/11/<uuid>.bin »). */
+    storedUrl: text('stored_url').notNull(),
+    /** Nature du clair d'origine : rend la réponse de rejeu identique à l'originale. */
+    kind: text('kind').notNull(),
+    /**
+     * Jeton de **fencing** : régénéré à chaque reprise. Une tentative ne peut
+     * valider ou nettoyer que si la ligne porte encore *son* jeton ; une
+     * tentative périmée devient inoffensive, quel que soit son retard.
+     */
+    attemptToken: text('attempt_token').notNull(),
+    /** `pending` tant que le blob et la ligne ne sont pas validés ensemble. */
+    state: text('state').notNull().default('pending'),
+    uploadId: text('upload_id').references(() => uploads.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.key] }),
+    uniqueIndex('upload_idempotency_upload_idx').on(table.uploadId),
+    index('upload_idempotency_state_idx').on(table.state, table.updatedAt),
+  ],
+);
+
+/**
+ * Journal durable des **effets secondaires** d'un message : ce qui doit être
+ * diffusé une fois, et une seule, même si la requête d'envoi est répétée ou si
+ * le serveur tombe entre l'écriture du message et la diffusion.
+ *
+ * Trois natures de ligne, distinguées par `kind` :
+ * - `socket` : l'événement `message:new` (une ligne par message) ;
+ * - `push_fanout` : le calcul des destinataires de notification (une ligne) ;
+ * - `push` : une notification **par destinataire**, matérialisée par le fan-out.
+ *
+ * L'unicité `(message_id, kind, user_id)` est l'arbitre : la réémission d'un
+ * message déjà enregistré ne crée aucune ligne, donc aucun nouvel envoi.
+ * Les lignes sont écrites dans la **même transaction** que le message.
+ */
+export const messageEvents = pgTable(
+  'message_events',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    messageId: text('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    conversationId: text('conversation_id').notNull(),
+    kind: text('kind').notNull(),
+    /** Destinataire d'un push. Chaîne vide pour les lignes portées par le message. */
+    userId: text('user_id').notNull().default(''),
+    /** `pending` tant que l'effet n'est pas réputé produit. */
+    status: text('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    /**
+     * Bail du worker qui traite la ligne. Une ligne dont le bail est expiré
+     * peut être reprise : c'est la reprise après redémarrage.
+     */
+    lockedUntil: timestamp('locked_until', { withTimezone: true }),
+    /**
+     * Jeton de **fencing** : régénéré à chaque prise de bail. Une tentative ne
+     * peut clore, reporter ou libérer que si la ligne porte encore *son* jeton.
+     * Un worker dont le bail a expiré devient donc inoffensif, même s'il
+     * termine son envoi après coup.
+     */
+    claimToken: text('claim_token'),
+    /** Report d'une tentative en échec (fournisseur indisponible…). */
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('message_events_dedupe_idx').on(table.messageId, table.kind, table.userId),
+    index('message_events_pending_idx').on(table.status, table.nextAttemptAt),
+  ],
+);
+
+/**
  * Lien fichier chiffré ↔ conversation. C'est une **métadonnée** (qui a le droit
  * de télécharger), jamais le contenu : le serveur ne peut pas rattacher un
  * ciphertext à sa conversation, alors le client le déclare à l'envoi et le
@@ -602,4 +709,5 @@ export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type RefreshToken = typeof refreshTokens.$inferSelect;
 export type PushToken = typeof pushTokens.$inferSelect;
 export type Upload = typeof uploads.$inferSelect;
+export type MessageEvent = typeof messageEvents.$inferSelect;
 export type GeoCityCache = typeof geoCityCache.$inferSelect;

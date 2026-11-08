@@ -1,6 +1,7 @@
 import { deleteDatabaseAsync, openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
+import { migrateE2eeSchema } from './schema';
 
 const DATABASE_NAME = 'mbolo-e2ee.db';
 
@@ -18,26 +19,6 @@ export interface E2eeDatabase {
   db: SQLiteDatabase;
   recovered: boolean;
   cipherVersion: string;
-}
-
-/**
- * Ajoute à une table les colonnes qui manquent, sans erreur si elles existent
- * déjà : `ALTER TABLE ... ADD COLUMN` n'est pas idempotent, `PRAGMA table_info`
- * l'est. C'est la façon dont une base ouverte par une version antérieure gagne
- * les colonnes d'une version plus récente.
- */
-async function addMissingColumns(
-  db: SQLiteDatabase,
-  table: string,
-  columns: [string, string][],
-): Promise<void> {
-  const existing = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
-  const present = new Set(existing.map((column) => column.name));
-  for (const [name, type] of columns) {
-    if (!present.has(name)) {
-      await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
-    }
-  }
 }
 
 /**
@@ -86,57 +67,9 @@ export async function openE2eeDatabase(): Promise<E2eeDatabase> {
     if (!db || !version) {
       throw new Error('SQLCipher indisponible dans cette build');
     }
-    await db.execAsync(`
-      CREATE TABLE IF NOT EXISTS e2ee_account (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        account_pickle TEXT NOT NULL,
-        device_id TEXT,
-        identity_key TEXT NOT NULL,
-        signing_key TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-    `);
-    await addMissingColumns(db, 'e2ee_account', [
-      ['fallback_key', 'TEXT'],
-      ['fallback_signature', 'TEXT'],
-      ['fallback_key_id', 'TEXT'],
-    ]);
-    await db.execAsync(`
-      CREATE TABLE IF NOT EXISTS e2ee_sessions (
-        peer_user_id TEXT PRIMARY KEY,
-        peer_device_id TEXT,
-        session_pickle TEXT NOT NULL,
-        peer_identity_key TEXT NOT NULL,
-        peer_signing_key TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS e2ee_peer_keys (
-        peer_user_id TEXT PRIMARY KEY,
-        signing_key TEXT NOT NULL,
-        verified INTEGER NOT NULL DEFAULT 0,
-        updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS e2ee_messages (
-        id TEXT PRIMARY KEY,
-        conversation_id TEXT NOT NULL,
-        sender_id TEXT NOT NULL,
-        sender_name TEXT NOT NULL,
-        body TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        client_id TEXT,
-        mine INTEGER NOT NULL DEFAULT 0
-      );
-      CREATE INDEX IF NOT EXISTS e2ee_messages_conv_idx
-        ON e2ee_messages (conversation_id, created_at);
-      CREATE TABLE IF NOT EXISTS e2ee_drafts (
-        conversation_id TEXT PRIMARY KEY,
-        body TEXT NOT NULL
-      );
-    `);
-    // Colonnes ajoutées après coup : `media_meta` porte la référence du média
-    // chiffré (clé du fichier, nonce, empreinte) — elle ne quitte jamais cette
-    // base SQLCipher, contrairement au corps du message qui peut être vide.
-    await addMissingColumns(db, 'e2ee_messages', [['media_meta', 'TEXT']]);
+    // Schéma versionné : création des tables historiques puis migrations
+    // unitaires. Un second passage sur une base à jour n'écrit rien.
+    await migrateE2eeSchema(db);
     return { db, recovered: keys.recovered, cipherVersion: version.cipher_version };
   } finally {
     sqlKey = '';
@@ -155,7 +88,18 @@ export async function saveE2eeAccount(
   db: SQLiteDatabase,
   account: E2eeAccountRow,
 ): Promise<void> {
-  await db.runAsync(
+  await saveE2eeAccountWith(db, account);
+}
+
+/**
+ * Écrit le compte (prekey consommée incluse). Variante transactionnelle : le
+ * chemin entrant fait avancer le compte et la session dans la même écriture.
+ */
+export async function saveE2eeAccountWith(
+  writer: SqlWriter,
+  account: E2eeAccountRow,
+): Promise<void> {
+  await writer.runAsync(
     `INSERT INTO e2ee_account
        (id, account_pickle, device_id, identity_key, signing_key,
         fallback_key, fallback_signature, fallback_key_id, created_at)
@@ -191,29 +135,64 @@ export interface E2eeSessionRow {
 export async function loadSession(
   db: SQLiteDatabase,
   peerId: string,
+  peerDeviceId?: string | null,
 ): Promise<E2eeSessionRow | null> {
+  // Clé primaire composite (pair, appareil) : sans appareil explicite on prend
+  // la session la plus récente, ce qui préserve les appelants existants.
+  if (peerDeviceId) {
+    return db.getFirstAsync<E2eeSessionRow>(
+      'SELECT * FROM e2ee_sessions WHERE peer_user_id = ? AND peer_device_id = ?',
+      peerId,
+      peerDeviceId,
+    );
+  }
   return db.getFirstAsync<E2eeSessionRow>(
-    'SELECT * FROM e2ee_sessions WHERE peer_user_id = ?',
+    `SELECT * FROM e2ee_sessions WHERE peer_user_id = ?
+     ORDER BY updated_at DESC LIMIT 1`,
     peerId,
   );
+}
+
+/** Un appareil inconnu est stocké en chaîne vide : la paire reste unique et
+ * n'est jamais `NULL`, qu'SQLite autorise pourtant dans une clé primaire. */
+function sessionDevice(peerDeviceId: string | null | undefined): string {
+  return peerDeviceId ?? '';
 }
 
 export async function saveSession(
   db: SQLiteDatabase,
   session: E2eeSessionRow,
 ): Promise<void> {
-  await db.runAsync(
+  await saveSessionWith(db, session);
+}
+
+/**
+ * Handle minimal d'écriture : la base, ou bien la transaction exclusive
+ * (`Transaction`) qui n'expose que `runAsync`. La même requête exacte sert donc
+ * aux deux chemins, sans dupliquer le SQL de session.
+ */
+export type SqlWriter = Pick<SQLiteDatabase, 'runAsync'>;
+
+/**
+ * Écrit S1. Appelé hors transaction exclusive pour les chemins qui n'écrivent
+ * pas d'enveloppe, et **avec le handle `tx`** depuis `persistSessionAndEnvelope`
+ * pour que S1 et E soient dans la même transaction.
+ */
+export async function saveSessionWith(
+  writer: SqlWriter,
+  session: E2eeSessionRow,
+): Promise<void> {
+  await writer.runAsync(
     `INSERT INTO e2ee_sessions
        (peer_user_id, peer_device_id, session_pickle, peer_identity_key, peer_signing_key, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(peer_user_id) DO UPDATE SET
-       peer_device_id = excluded.peer_device_id,
+     ON CONFLICT(peer_user_id, peer_device_id) DO UPDATE SET
        session_pickle = excluded.session_pickle,
        peer_identity_key = excluded.peer_identity_key,
        peer_signing_key = excluded.peer_signing_key,
        updated_at = excluded.updated_at`,
     session.peer_user_id,
-    session.peer_device_id,
+    sessionDevice(session.peer_device_id),
     session.session_pickle,
     session.peer_identity_key,
     session.peer_signing_key,
@@ -224,9 +203,19 @@ export async function saveSession(
 export async function loadPeerSigningKey(
   db: SQLiteDatabase,
   peerId: string,
+  peerDeviceId?: string | null,
 ): Promise<string | null> {
+  if (peerDeviceId) {
+    const row = await db.getFirstAsync<{ signing_key: string }>(
+      'SELECT signing_key FROM e2ee_peer_keys WHERE peer_user_id = ? AND peer_device_id = ?',
+      peerId,
+      peerDeviceId,
+    );
+    return row?.signing_key ?? null;
+  }
   const row = await db.getFirstAsync<{ signing_key: string }>(
-    'SELECT signing_key FROM e2ee_peer_keys WHERE peer_user_id = ?',
+    `SELECT signing_key FROM e2ee_peer_keys WHERE peer_user_id = ?
+     ORDER BY updated_at DESC LIMIT 1`,
     peerId,
   );
   return row?.signing_key ?? null;
@@ -237,15 +226,27 @@ export async function savePeerSigningKey(
   peerId: string,
   signingKey: string,
   verified: boolean,
+  peerDeviceId?: string | null,
 ): Promise<void> {
-  await db.runAsync(
-    `INSERT INTO e2ee_peer_keys (peer_user_id, signing_key, verified, updated_at)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(peer_user_id) DO UPDATE SET
+  await savePeerSigningKeyWith(db, peerId, signingKey, verified, peerDeviceId);
+}
+
+export async function savePeerSigningKeyWith(
+  writer: SqlWriter,
+  peerId: string,
+  signingKey: string,
+  verified: boolean,
+  peerDeviceId?: string | null,
+): Promise<void> {
+  await writer.runAsync(
+    `INSERT INTO e2ee_peer_keys (peer_user_id, peer_device_id, signing_key, verified, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(peer_user_id, peer_device_id) DO UPDATE SET
        signing_key = excluded.signing_key,
        verified = excluded.verified,
        updated_at = excluded.updated_at`,
     peerId,
+    sessionDevice(peerDeviceId),
     signingKey,
     verified ? 1 : 0,
     new Date().toISOString(),
@@ -267,16 +268,37 @@ export interface StoredE2eeMessage {
    * seule copie des clés, elle ne doit jamais atterrir dans `mbolochat.db`.
    */
   media_meta: string | null;
+  /** Id du message cité par cette réponse, ou `null`. */
+  quote_id: string | null;
+  /** Chemin durable du ciphertext local du média, avant ou après envoi. */
+  local_cipher_uri?: string | null;
+  /** Identifiant serveur du blob média une fois téléversé. */
+  upload_id?: string | null;
+  /** Chemin durable du ciphertext local de la vignette. */
+  local_thumb_cipher_uri?: string | null;
+  /** Identifiant serveur du blob de vignette, indépendant de `upload_id`. */
+  thumb_upload_id?: string | null;
 }
 
 export async function saveLocalMessage(
   db: SQLiteDatabase,
   message: StoredE2eeMessage,
 ): Promise<void> {
-  await db.runAsync(
+  await saveLocalMessageWith(db, message);
+}
+
+/**
+ * Écrit un message déchiffré. Variante transactionnelle utilisée par le chemin
+ * entrant, pour que le message et l'état de session atterrissent ensemble.
+ */
+export async function saveLocalMessageWith(
+  writer: SqlWriter,
+  message: StoredE2eeMessage,
+): Promise<void> {
+  await writer.runAsync(
     `INSERT INTO e2ee_messages
-       (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine, media_meta)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine, media_meta, quote_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET body = excluded.body`,
     message.id,
     message.conversation_id,
@@ -287,6 +309,7 @@ export async function saveLocalMessage(
     message.client_id,
     message.mine,
     message.media_meta ?? null,
+    message.quote_id ?? null,
   );
 }
 
@@ -308,6 +331,115 @@ export async function deleteLocalMessage(db: SQLiteDatabase, id: string): Promis
   await db.runAsync('DELETE FROM e2ee_messages WHERE id = ?', id);
 }
 
+/** Champs du cycle média durable que l'on peut mettre à jour séparément. */
+export interface LocalMediaUpdate {
+  mediaMeta?: string | null;
+  localCipherUri?: string | null;
+  uploadId?: string | null;
+  localThumbCipherUri?: string | null;
+  thumbUploadId?: string | null;
+}
+
+const MEDIA_UPDATE_COLUMNS: [keyof LocalMediaUpdate, string][] = [
+  ['mediaMeta', 'media_meta'],
+  ['localCipherUri', 'local_cipher_uri'],
+  ['uploadId', 'upload_id'],
+  ['localThumbCipherUri', 'local_thumb_cipher_uri'],
+  ['thumbUploadId', 'thumb_upload_id'],
+];
+
+/**
+ * Écrit les références du média chiffré sur un message déjà stocké.
+ *
+ * Une seule requête, et seulement les colonnes réellement fournies : le média et
+ * sa vignette avancent indépendamment (décision 5), donc une mise à jour de la
+ * vignette ne doit jamais effacer l'id de blob du média, et inversement. Un
+ * appel sans champ n'écrit rien et renvoie 0.
+ *
+ * Retourne le nombre de lignes modifiées, ce qui permet à l'appelant de
+ * constater qu'un message provisoire a disparu entre-temps.
+ */
+export async function updateLocalMessageMedia(
+  db: SQLiteDatabase,
+  id: string,
+  update: LocalMediaUpdate,
+): Promise<number> {
+  const assignments: string[] = [];
+  const values: (string | null)[] = [];
+  for (const [key, column] of MEDIA_UPDATE_COLUMNS) {
+    if (!(key in update)) continue;
+    assignments.push(`${column} = ?`);
+    values.push(update[key] ?? null);
+  }
+  if (assignments.length === 0) {
+    return 0;
+  }
+  const result = await db.runAsync(
+    `UPDATE e2ee_messages SET ${assignments.join(', ')} WHERE id = ?`,
+    ...values,
+    id,
+  );
+  return result.changes;
+}
+
+/** Références média d'un message, telles que persistées dans SQLCipher. */
+export interface LocalMediaRefs {
+  local_cipher_uri: string | null;
+  upload_id: string | null;
+  local_thumb_cipher_uri: string | null;
+  thumb_upload_id: string | null;
+}
+
+/**
+ * Relit les références média d'un message. Le ciphertext durable et son
+ * identifiant d'upload sont deux états distincts (décision 5) : l'appelant doit
+ * pouvoir voir qu'un fichier est là sans que le blob soit encore téléversé.
+ */
+export async function loadMessageMediaRefs(
+  db: SQLiteDatabase,
+  id: string,
+): Promise<LocalMediaRefs | null> {
+  return db.getFirstAsync<LocalMediaRefs>(
+    `SELECT local_cipher_uri, upload_id, local_thumb_cipher_uri, thumb_upload_id
+     FROM e2ee_messages WHERE id = ?`,
+    id,
+  );
+}
+
+/**
+ * Un média durable est-il encore référencé par un message, ou par un envoi qui
+ * n'est pas abouti ?
+ *
+ * Sert de garde avant toute suppression : un fichier encore référencé ne doit
+ * jamais disparaître, même après un envoi réussi. `directory` est fourni par
+ * l'appelant pour que le nom du dossier durable reste défini à un seul endroit
+ * (pas de cycle d'import entre la base et le stockage).
+ */
+export async function isDurableMediaReferenced(
+  db: SQLiteDatabase,
+  mediaId: string,
+  directory: string,
+): Promise<boolean> {
+  const needle = `/${directory}/${mediaId}/`;
+  const row = await db.getFirstAsync<{ messages: number; pending: number; preparing: number }>(
+    `SELECT
+       (SELECT COUNT(*) FROM e2ee_messages
+          WHERE INSTR(local_cipher_uri, ?) > 0
+             OR INSTR(local_thumb_cipher_uri, ?) > 0) AS messages,
+       (SELECT COUNT(*) FROM e2ee_outbox
+          WHERE client_id = ? AND state IN ('pending', 'sending', 'failed')) AS pending,
+       (SELECT COUNT(*) FROM e2ee_media_prep
+          WHERE client_id = ? AND state != 'abandoned') AS preparing`,
+    needle,
+    needle,
+    mediaId,
+    mediaId,
+  );
+  return Boolean(
+    row && (row.messages > 0 || row.pending > 0 || row.preparing > 0),
+  );
+}
+
 /** Identifiants déjà présents pour ignorer le re-déchiffrement de l'historique. */
 export async function knownMessageKeys(
   db: SQLiteDatabase,
@@ -321,6 +453,15 @@ export async function knownMessageKeys(
     ids: new Set(rows.map((row) => row.id)),
     clientIds: new Set(rows.map((row) => row.client_id).filter(Boolean) as string[]),
   };
+}
+
+/** Un message déjà stocké, par identifiant serveur. Sert au contrôle de doublon
+ * du chemin entrant : un message déjà écrit ne se déchiffre pas deux fois. */
+export async function loadLocalMessage(
+  db: SQLiteDatabase,
+  id: string,
+): Promise<StoredE2eeMessage | null> {
+  return db.getFirstAsync<StoredE2eeMessage>('SELECT * FROM e2ee_messages WHERE id = ?', id);
 }
 
 export async function listLocalMessages(

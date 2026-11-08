@@ -35,6 +35,7 @@ export const fr = {
     mediaUnreadable: 'Ce fichier n’a pas pu être préparé.',
     mediaSendFailed: 'L’envoi du média a échoué.',
     sendingMedia: 'Envoi en cours…',
+    messageOptions: 'Options du message',
   },
   e2eeMedia: {
     openLabel: 'Ouvrir le média',

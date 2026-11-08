@@ -232,6 +232,34 @@
       "when": 1793880000000,
       "tag": "0032_e2ee_media",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794119858165,
+      "tag": "0033_upload_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794120500000,
+      "tag": "0034_upload_claim_fencing",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794121603855,
+      "tag": "0035_message_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794123735825,
+      "tag": "0036_message_events_fencing",
+      "breakpoints": true
     }
   ]
 }

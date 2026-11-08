@@ -297,6 +297,11 @@ export const api = {
       conversationId?: string;
       /** Nature du clair d'origine (IMAGE, VIDEO…), pour l'affichage. */
       kind?: string;
+      /**
+       * Clé d'idempotence : rejouer le même envoi après un timeout rend le même
+       * identifiant, sans créer de second blob côté serveur.
+       */
+      idempotencyKey?: string;
     },
     onProgress?: (fraction: number, uploadedBytes: number, totalBytes: number) => void,
   ): Promise<UploadResult> {
@@ -322,6 +327,9 @@ export const api = {
         const xhr = new XMLHttpRequest();
         xhr.open('POST', `${API_URL}/uploads`);
         xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
+        if (asset.idempotencyKey) {
+          xhr.setRequestHeader('Idempotency-Key', asset.idempotencyKey);
+        }
         xhr.timeout = 120_000;
         if (onProgress && xhr.upload) {
           xhr.upload.onprogress = (event) => {
@@ -343,7 +351,10 @@ export const api = {
       const send = (tokenToUse: string) =>
         fetch(`${API_URL}/uploads`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${tokenToUse}` },
+          headers: {
+            Authorization: `Bearer ${tokenToUse}`,
+            ...(asset.idempotencyKey ? { 'Idempotency-Key': asset.idempotencyKey } : {}),
+          },
           body: buildForm(),
         });
       let response = await send(accessToken);

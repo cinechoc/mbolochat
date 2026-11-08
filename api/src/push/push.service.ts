@@ -213,167 +213,17 @@ export class PushService {
     private readonly presence: PresenceService,
   ) {}
 
+  /**
+   * Legacy : notification immédiate, sans journal. Conservée pour les appelants
+   * qui ne passent pas par `message_events` ; le gateway, lui, écrit le journal
+   * puis délègue destinataire par destinataire.
+   */
   async notifyNewMessage(message: MessageDto, activeUserIds: string[] = []): Promise<void> {
     try {
-      const [conversation] = await this.db
-        .select({
-          type: conversations.type,
-          name: conversations.name,
-          avatarUrl: conversations.avatarUrl,
-          emoji: conversations.emoji,
-        })
-        .from(conversations)
-        .where(eq(conversations.id, message.conversationId))
-        .limit(1);
-      if (!conversation) {
-        return;
+      const recipients = await this.recipientIdsFor(message, activeUserIds);
+      for (const userId of recipients) {
+        await this.notifyForUser(message, userId);
       }
-
-      const members = await this.db
-        .select({
-          userId: conversationMembers.userId,
-          mutedAt: conversationMembers.mutedAt,
-          username: users.username,
-          notificationsEnabled: users.notificationsEnabled,
-          notificationSound: users.notificationSound,
-          notificationPreview: users.notificationPreview,
-          notifyMessages: users.notifyMessages,
-          notifyGroups: users.notifyGroups,
-          notifyMentions: users.notifyMentions,
-          notifyReactions: users.notifyReactions,
-          quietHoursEnabled: users.quietHoursEnabled,
-          quietStartMinute: users.quietStartMinute,
-          quietEndMinute: users.quietEndMinute,
-          quietUtcOffsetMinutes: users.quietUtcOffsetMinutes,
-        })
-        .from(conversationMembers)
-        .innerJoin(users, eq(users.id, conversationMembers.userId))
-        .where(eq(conversationMembers.conversationId, message.conversationId));
-
-      const isGroup = conversation.type === 'GROUP';
-      const active = new Set(activeUserIds);
-      const now = new Date();
-      const candidates = members
-        .filter((member) => {
-          if (
-            member.userId === message.sender.id ||
-            !member.notificationsEnabled ||
-            member.mutedAt !== null ||
-            // App au premier plan (même sur un autre écran) : pas de push.
-            this.presence.isOnline(member.userId) ||
-            active.has(member.userId)
-          ) {
-            return false;
-          }
-          const mention = isGroup && mentionsUser(message.content ?? '', member.username);
-          if (
-            !messageNotificationAllowed({
-              isGroup,
-              mention,
-              notifyMessages: member.notifyMessages,
-              notifyGroups: member.notifyGroups,
-              notifyMentions: member.notifyMentions,
-            })
-          ) {
-            return false;
-          }
-          return !quietHoursActive(
-            member.quietHoursEnabled,
-            member.quietStartMinute,
-            member.quietEndMinute,
-            member.quietUtcOffsetMinutes,
-            now,
-          );
-        })
-        .map((member) => member.userId);
-      if (candidates.length === 0) {
-        return;
-      }
-
-      // Un blocage, dans un sens ou dans l'autre, coupe aussi les alertes.
-      const blockRows = await this.db
-        .select({ blockerId: blocks.blockerId, blockedId: blocks.blockedId })
-        .from(blocks)
-        .where(or(eq(blocks.blockerId, message.sender.id), eq(blocks.blockedId, message.sender.id)));
-      const blocked = new Set<string>();
-      for (const row of blockRows) {
-        blocked.add(row.blockerId === message.sender.id ? row.blockedId : row.blockerId);
-      }
-
-      const recipients = candidates.filter((userId) => !blocked.has(userId));
-      if (recipients.length === 0) {
-        return;
-      }
-
-      const tokens = await this.db
-        .select({ userId: pushTokens.userId, token: pushTokens.token, baseUrl: pushTokens.baseUrl })
-        .from(pushTokens)
-        .where(inArray(pushTokens.userId, recipients));
-      if (tokens.length === 0) {
-        return;
-      }
-
-      // Compteur par conversation : même règle que les pastilles de l'app.
-      const unreadRows = await this.db.execute<{ userId: string; cnt: number }>(sql`
-        select cm.user_id as "userId", count(m.id)::int as "cnt"
-        from conversation_members cm
-        left join messages m on m.conversation_id = cm.conversation_id
-          and m.sender_id <> cm.user_id
-          and m.type not in ('call', 'system')
-          and (cm.last_read_at is null or m.created_at > cm.last_read_at)
-          and not exists (
-            select 1 from message_hides mh
-            where mh.message_id = m.id and mh.user_id = cm.user_id
-          )
-        where cm.conversation_id = ${message.conversationId}
-          and cm.user_id in (${sql.join(recipients.map((id) => sql`${id}`), sql`, `)})
-        group by cm.user_id
-      `);
-      const unreadByUser = new Map(unreadRows.rows.map((row) => [row.userId, Number(row.cnt)]));
-      const prefsByUser = new Map(members.map((member) => [member.userId, member]));
-
-      const summary = notificationSummary(message, conversation, true);
-      const encrypted = summary.encrypted;
-      const title = summary.title;
-
-      // L'avatar part en URL absolue dans la notification : il doit être signé
-      // ici aussi, la notification ne passe pas par la réponse HTTP.
-      const avatarPath = this.media.signOrNull(message.sender.avatarUrl);
-      const groupAvatarPath = isGroup
-        ? this.media.signOrNull(conversation.avatarUrl)
-        : null;
-      const groupName = isGroup && !encrypted ? title : '';
-
-      const payload: ExpoPushMessage[] = tokens.map(({ userId, token, baseUrl }) => {
-        const prefs = prefsByUser.get(userId);
-        const { text, body } = notificationSummary(
-          message,
-          conversation,
-          prefs?.notificationPreview ?? true,
-        );
-        const avatar = avatarPath ? absoluteMediaUrl(avatarPath, baseUrl) : null;
-        const groupAvatar = groupAvatarPath ? absoluteMediaUrl(groupAvatarPath, baseUrl) : null;
-        return {
-          to: token,
-          priority: 'high',
-          data: {
-            type: 'message',
-            title,
-            message: body,
-            conversationId: message.conversationId,
-            messageId: message.id,
-            senderName: encrypted ? '' : message.sender.displayName,
-            avatarUrl: encrypted ? '' : (avatar ?? ''),
-            groupName: encrypted ? '' : groupName,
-            groupAvatarUrl: encrypted ? '' : (groupAvatar ?? ''),
-            groupEmoji: encrypted ? '' : isGroup ? (conversation.emoji ?? '') : '',
-            unreadCount: String(Math.max(1, unreadByUser.get(userId) ?? 1)),
-            silent: prefs?.notificationSound === false ? '1' : '0',
-          },
-        };
-      });
-
-      await this.send(payload);
     } catch (error) {
       // Une notification manquée ne doit jamais faire échouer l'envoi du message.
       this.logger.warn(
@@ -382,6 +232,247 @@ export class PushService {
         }`,
       );
     }
+  }
+
+  /**
+   * Qui doit être notifié **maintenant** pour ce message : membres non bloqués,
+   * non expéditeur, notifications actives, conversation non coupée, hors heures
+   * calmes, hors présence en ligne, et ayant au moins un jeton push.
+   *
+   * C'est la seule liste matérialisée dans le journal : un destinataire écarté
+   * ici ne reçoit jamais de ligne, donc jamais de notification, même si
+   * l'événement est rejoué après un redémarrage.
+   */
+  async recipientIdsFor(message: MessageDto, activeUserIds: string[] = []): Promise<string[]> {
+    const [conversation] = await this.db
+      .select({
+        type: conversations.type,
+        name: conversations.name,
+        avatarUrl: conversations.avatarUrl,
+        emoji: conversations.emoji,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, message.conversationId))
+      .limit(1);
+    if (!conversation) {
+      return [];
+    }
+
+    const members = await this.memberRowsFor(message.conversationId);
+    const isGroup = conversation.type === 'GROUP';
+    const active = new Set(activeUserIds);
+    const now = new Date();
+    const candidates = members
+      .filter((member) => {
+        if (
+          member.userId === message.sender.id ||
+          !member.notificationsEnabled ||
+          member.mutedAt !== null ||
+          // App au premier plan (même sur un autre écran) : pas de push.
+          this.presence.isOnline(member.userId) ||
+          active.has(member.userId)
+        ) {
+          return false;
+        }
+        const mention = isGroup && mentionsUser(message.content ?? '', member.username);
+        if (
+          !messageNotificationAllowed({
+            isGroup,
+            mention,
+            notifyMessages: member.notifyMessages,
+            notifyGroups: member.notifyGroups,
+            notifyMentions: member.notifyMentions,
+          })
+        ) {
+          return false;
+        }
+        return !quietHoursActive(
+          member.quietHoursEnabled,
+          member.quietStartMinute,
+          member.quietEndMinute,
+          member.quietUtcOffsetMinutes,
+          now,
+        );
+      })
+      .map((member) => member.userId);
+    if (candidates.length === 0) {
+      return [];
+    }
+
+    // Un blocage, dans un sens ou dans l'autre, coupe aussi les alertes.
+    const blockRows = await this.db
+      .select({ blockerId: blocks.blockerId, blockedId: blocks.blockedId })
+      .from(blocks)
+      .where(or(eq(blocks.blockerId, message.sender.id), eq(blocks.blockedId, message.sender.id)));
+    const blocked = new Set<string>();
+    for (const row of blockRows) {
+      blocked.add(row.blockerId === message.sender.id ? row.blockedId : row.blockerId);
+    }
+
+    const recipients = candidates.filter((userId) => !blocked.has(userId));
+    if (recipients.length === 0) {
+      return [];
+    }
+
+    // Sans jeton, il n'y a rien à envoyer : le destinataire n'entre pas dans le
+    // journal du tout (sinon la ligne resterait en attente pour toujours).
+    const tokens = await this.db
+      .select({ userId: pushTokens.userId })
+      .from(pushTokens)
+      .where(inArray(pushTokens.userId, recipients));
+    const withTokens = new Set(tokens.map((row) => row.userId));
+    return recipients.filter((userId) => withTokens.has(userId));
+  }
+
+  /**
+   * Une notification pour **un** destinataire. Retourne `false` quand il n'y a
+   * rien à envoyer (membre retiré, notifications coupées, sourdine, aucun
+   * jeton) : l'appelant le journalise sans le compter comme un échec. Lève en
+   * cas d'échec du fournisseur, pour que la ligne soit réessayée.
+   */
+  async notifyForUser(message: MessageDto, userId: string): Promise<boolean> {
+    const context = await this.deliveryContextFor(message, userId);
+    if (!context) {
+      return false;
+    }
+    const { conversation, prefs, tokens } = context;
+    const unread = await this.unreadCountFor(message.conversationId, userId);
+    const isGroup = conversation.type === 'GROUP';
+    const summary = notificationSummary(message, conversation, true);
+    const encrypted = summary.encrypted;
+    const title = summary.title;
+
+    // L'avatar part en URL absolue dans la notification : il doit être signé
+    // ici aussi, la notification ne passe pas par la réponse HTTP.
+    const avatarPath = this.media.signOrNull(message.sender.avatarUrl);
+    const groupAvatarPath = isGroup ? this.media.signOrNull(conversation.avatarUrl) : null;
+    const groupName = isGroup && !encrypted ? title : '';
+
+    const payload: ExpoPushMessage[] = tokens.map(({ token, baseUrl }) => {
+      const { body } = notificationSummary(
+        message,
+        conversation,
+        prefs.notificationPreview ?? true,
+      );
+      const avatar = avatarPath ? absoluteMediaUrl(avatarPath, baseUrl) : null;
+      const groupAvatar = groupAvatarPath ? absoluteMediaUrl(groupAvatarPath, baseUrl) : null;
+      return {
+        to: token,
+        priority: 'high',
+        data: {
+          type: 'message',
+          title,
+          message: body,
+          conversationId: message.conversationId,
+          messageId: message.id,
+          senderName: encrypted ? '' : message.sender.displayName,
+          avatarUrl: encrypted ? '' : (avatar ?? ''),
+          groupName: encrypted ? '' : groupName,
+          groupAvatarUrl: encrypted ? '' : (groupAvatar ?? ''),
+          groupEmoji: encrypted ? '' : isGroup ? (conversation.emoji ?? '') : '',
+          unreadCount: String(Math.max(1, unread)),
+          silent: prefs.notificationSound === false ? '1' : '0',
+        },
+      };
+    });
+
+    await this.send(payload);
+    return true;
+  }
+
+  /** Membres d'une conversation avec leurs préférences (une seule requête). */
+  private async memberRowsFor(conversationId: string, userId?: string) {
+    return this.db
+      .select({
+        userId: conversationMembers.userId,
+        mutedAt: conversationMembers.mutedAt,
+        username: users.username,
+        notificationsEnabled: users.notificationsEnabled,
+        notificationSound: users.notificationSound,
+        notificationPreview: users.notificationPreview,
+        notifyMessages: users.notifyMessages,
+        notifyGroups: users.notifyGroups,
+        notifyMentions: users.notifyMentions,
+        notifyReactions: users.notifyReactions,
+        quietHoursEnabled: users.quietHoursEnabled,
+        quietStartMinute: users.quietStartMinute,
+        quietEndMinute: users.quietEndMinute,
+        quietUtcOffsetMinutes: users.quietUtcOffsetMinutes,
+      })
+      .from(conversationMembers)
+      .innerJoin(users, eq(users.id, conversationMembers.userId))
+      .where(
+        userId
+          ? and(
+              eq(conversationMembers.conversationId, conversationId),
+              eq(conversationMembers.userId, userId),
+            )
+          : eq(conversationMembers.conversationId, conversationId),
+      );
+  }
+
+  /**
+   * Contexte d'envoi, ou `null` si la notification ne doit pas partir :
+   * conversation disparue, membre retiré, notifications coupées, sourdine, ou
+   * aucun jeton. Ce sont les préférences **actuelles** : l'audience gelée ne
+   * fige pas les préférences.
+   */
+  private async deliveryContextFor(message: MessageDto, userId: string) {
+    const [conversation] = await this.db
+      .select({
+        type: conversations.type,
+        name: conversations.name,
+        avatarUrl: conversations.avatarUrl,
+        emoji: conversations.emoji,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, message.conversationId))
+      .limit(1);
+    if (!conversation) {
+      return null;
+    }
+
+    const [prefs] = (await this.memberRowsFor(message.conversationId, userId)).filter(
+      (member) => member.userId === userId,
+    );
+    if (!prefs || !prefs.notificationsEnabled || prefs.mutedAt !== null) {
+      return null;
+    }
+
+    const tokens = await this.db
+      .select({ token: pushTokens.token, baseUrl: pushTokens.baseUrl })
+      .from(pushTokens)
+      .where(eq(pushTokens.userId, userId));
+    if (tokens.length === 0) {
+      return null;
+    }
+
+    return { conversation, prefs, tokens };
+  }
+
+  /** Ce destinataire recevrait-il une notification maintenant ? (sans envoyer) */
+  async canNotify(message: MessageDto, userId: string): Promise<boolean> {
+    return (await this.deliveryContextFor(message, userId)) !== null;
+  }
+
+  /** Compteur de non-lus d'un membre : même règle que les pastilles de l'app. */
+  private async unreadCountFor(conversationId: string, userId: string): Promise<number> {
+    const rows = await this.db.execute<{ cnt: number }>(sql`
+      select count(m.id)::int as "cnt"
+      from conversation_members cm
+      left join messages m on m.conversation_id = cm.conversation_id
+        and m.sender_id <> cm.user_id
+        and m.type not in ('call', 'system')
+        and (cm.last_read_at is null or m.created_at > cm.last_read_at)
+        and not exists (
+          select 1 from message_hides mh
+          where mh.message_id = m.id and mh.user_id = cm.user_id
+        )
+      where cm.conversation_id = ${conversationId}
+        and cm.user_id = ${userId}
+      group by cm.user_id
+    `);
+    return Number(rows.rows[0]?.cnt ?? 0);
   }
 
   /**

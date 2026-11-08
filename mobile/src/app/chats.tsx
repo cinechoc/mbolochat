@@ -31,7 +31,6 @@ import { ThemedView } from '@/components/themed-view';
 import { TextField, accentColor } from '@/components/ui';
 import { Spacing, Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { isE2eeEnabled } from '@/features/e2ee/policy';
 import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useCalls } from '@/features/calls/CallProvider';
@@ -529,21 +528,9 @@ export default function ChatsScreen() {
         setOpenRowId(null);
         return;
       }
-      if (isE2eeEnabled() && conversation.e2eeSince) {
-        const peer = conversation.members.find((member) => member.id !== user?.id);
-        router.push({
-          pathname: '/e2ee-chat/[id]',
-          params: {
-            id: conversation.id,
-            peerId: peer?.id ?? '',
-            name: conversationTitle(conversation, user?.id ?? ''),
-          },
-        });
-        return;
-      }
       router.push({ pathname: '/chat/[id]', params: { id: conversation.id } });
     },
-    [router, openRowId, user?.id],
+    [router, openRowId],
   );
 
   const openConversationActions = useCallback((conversation: ConversationSummary) => {
@@ -664,10 +651,8 @@ export default function ChatsScreen() {
     [ready, query, filter],
   );
 
-  if (!token || !user) {
-    return <Redirect href="/login" />;
-  }
-
+  // Déclarés avant le early return d'authentification : sauter ces hooks au
+  // re-render de déconnexion ferait planter React (hook count mismatch).
   const blockTargetUser = blockTarget?.members.find((member) => member.id !== user?.id) ?? null;
 
   const confirmBlock = useCallback(async () => {
@@ -702,6 +687,10 @@ export default function ChatsScreen() {
     },
     [token],
   );
+
+  if (!token || !user) {
+    return <Redirect href="/login" />;
+  }
 
   const sheetOther =
     actionTarget?.type === 'DIRECT'

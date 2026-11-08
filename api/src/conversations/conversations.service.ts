@@ -26,6 +26,7 @@ import {
   isPantherReaction,
   type ReactionSummary,
 } from '../chat/reactions.js';
+import { MessageEventsService } from '../message-events/message-events.service.js';
 import { ConversationEventsService } from './conversation-events.service.js';
 import { MAX_GROUP_MEMBERS } from './group-limits.js';
 
@@ -375,6 +376,7 @@ export class ConversationsService {
     private readonly usersService: UsersService,
     private readonly uploadsService: UploadsService,
     private readonly events: ConversationEventsService,
+    private readonly messageEvents: MessageEventsService,
   ) {}
 
   async listMemberIds(conversationId: string): Promise<string[]> {
@@ -1198,10 +1200,24 @@ export class ConversationsService {
     actorId: string,
     content: string,
   ): Promise<MessageDto> {
-    const [stored] = await this.db
-      .insert(messages)
-      .values({ conversationId, senderId: actorId, content, type: 'system' })
-      .returning();
+    // Même journal que les messages clients : la diffusion d'un message
+    // système survit à un redémarrage. Pas de push (aucun destinataire à
+    // alerter pour une création de groupe).
+    const [stored] = await this.db.transaction(async (tx) => {
+      const rows = await tx
+        .insert(messages)
+        .values({ conversationId, senderId: actorId, content, type: 'system' })
+        .returning();
+      const inserted = rows[0];
+      if (inserted) {
+        await this.messageEvents.enqueue(tx, {
+          messageId: inserted.id,
+          conversationId,
+          audience: null,
+        });
+      }
+      return rows;
+    });
     const sender = await this.usersService.getByIdOrThrow(actorId);
     const message: MessageDto = {
       id: stored.id,
@@ -1229,6 +1245,8 @@ export class ConversationsService {
       },
     };
     this.events.publish({ kind: 'message', conversationId, actorId, message });
+    // Dépôt hors du chemin d'envoi d'un client : on réveille le worker.
+    this.messageEvents.wake();
     return message;
   }
 
@@ -1896,25 +1914,47 @@ export class ConversationsService {
       }
     }
 
-    const [message] = await this.db
-      .insert(messages)
-      .values({
-        conversationId,
-        senderId,
-        type: messageType,
-        stickerRef: messageType === 'sticker' ? stickerRef : null,
-        content: encryption === 'v1' ? '' : content,
-        encryption,
-        payload: encryption === 'v1' ? (payload ?? null) : null,
-        payloadType: encryption === 'v1' ? (payloadType ?? null) : null,
-        senderDeviceId: encryption === 'v1' ? (senderDeviceId ?? null) : null,
-        attachment,
-        encryptedAttachment: encryption === 'v1' ? encryptedAttachment : null,
-        clientId: clientId ?? null,
-        replyToId: replyToId ?? null,
-      })
-      .onConflictDoNothing({ target: [messages.senderId, messages.clientId] })
-      .returning();
+    // Message et effets secondaires dans **la même transaction** : il ne peut
+    // pas exister de message sans sa diffusion prévue, ni de diffusion prévue
+    // pour un message qui n'a pas été écrit. Le second envoi du même `clientId`
+    // ne crée ni message ni ligne d'effet : la contrainte d'unicité tranche.
+    const message = await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(messages)
+        .values({
+          conversationId,
+          senderId,
+          type: messageType,
+          stickerRef: messageType === 'sticker' ? stickerRef : null,
+          content: encryption === 'v1' ? '' : content,
+          encryption,
+          payload: encryption === 'v1' ? (payload ?? null) : null,
+          payloadType: encryption === 'v1' ? (payloadType ?? null) : null,
+          senderDeviceId: encryption === 'v1' ? (senderDeviceId ?? null) : null,
+          attachment,
+          encryptedAttachment: encryption === 'v1' ? encryptedAttachment : null,
+          clientId: clientId ?? null,
+          replyToId: replyToId ?? null,
+        })
+        .onConflictDoNothing({ target: [messages.senderId, messages.clientId] })
+        .returning();
+      if (row) {
+        // Audience **gelée** ici : les membres au moment de l'envoi, moins
+        // l'expéditeur. Elle est écrite dans la même transaction que le
+        // message, donc un membre ajouté juste après ne recevra jamais la
+        // notification de ce message-là.
+        const members = await tx
+          .select({ userId: conversationMembers.userId })
+          .from(conversationMembers)
+          .where(eq(conversationMembers.conversationId, conversationId));
+        await this.messageEvents.enqueue(tx, {
+          messageId: row.id,
+          conversationId,
+          audience: members.map((member) => member.userId).filter((id) => id !== senderId),
+        });
+      }
+      return row;
+    });
 
     // Reprise après une coupure : ce client a déjà déposé ce message. On
     // renvoie l'original au lieu d'en insérer un deuxième.
@@ -1973,10 +2013,22 @@ export class ConversationsService {
     senderId: string,
     content: string,
   ): Promise<MessageDto> {
-    const [row] = await this.db
-      .insert(messages)
-      .values({ conversationId, senderId, type: 'call', content })
-      .returning({ id: messages.id });
+    const [row] = await this.db.transaction(async (tx) => {
+      const rows = await tx
+        .insert(messages)
+        .values({ conversationId, senderId, type: 'call', content })
+        .returning({ id: messages.id });
+      const inserted = rows[0];
+      if (inserted) {
+        await this.messageEvents.enqueue(tx, {
+          messageId: inserted.id,
+          conversationId,
+          audience: null,
+        });
+      }
+      return rows;
+    });
+    this.messageEvents.wake();
     return this.messageDto(row.id);
   }
 
@@ -2089,8 +2141,12 @@ export class ConversationsService {
     return [...visible];
   }
 
-  /** Relit un message unique avec ses jointures habituelles. */
-  private async messageDto(messageId: string): Promise<MessageDto> {
+  /**
+   * Relit un message unique avec ses jointures habituelles. Public : le
+   * journal des effets secondaires reconstruit le DTO depuis la base au lieu
+   * de stocker une copie (les URL signées sont recalculées à chaque envoi).
+   */
+  async messageDto(messageId: string): Promise<MessageDto> {
     const [row] = await this.fromMessages().where(eq(messages.id, messageId)).limit(1);
     if (!row) {
       throw new NotFoundException('Message introuvable');

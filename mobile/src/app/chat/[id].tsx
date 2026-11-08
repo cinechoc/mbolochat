@@ -43,6 +43,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActionSheet, type SheetAction } from '@/components/action-sheet';
 import { AttachPanel } from '@/components/attach-panel';
 import { Avatar } from '@/components/avatar';
+import { QuoteBlock } from '@/components/quote-block';
 import { SwipeableBubble } from '@/components/swipeable-bubble';
 import { BlurTarget } from '@/components/blur-target';
 import { Glass } from '@/components/glass';
@@ -346,35 +347,6 @@ function Ticks({
   );
 }
 
-/** Ce qu'affiche une citation quand l'original n'avait que du média. */
-function quoteText(quote: MessageQuote): string {
-  if (quote.deleted) {
-    return 'Message supprimé';
-  }
-  if (quote.type === 'sticker') {
-    return 'Sticker';
-  }
-  if (quote.content) {
-    return quote.content;
-  }
-  switch (quote.attachmentType) {
-    case 'AUDIO':
-      return 'Message vocal';
-    case 'VIDEO':
-      return 'Vidéo';
-    case 'IMAGE':
-      return 'Photo';
-    case 'GIF':
-      return 'GIF';
-    case 'STICKER':
-      return 'Sticker';
-    case 'FILE':
-      return 'Document';
-    default:
-      return 'Pièce jointe';
-  }
-}
-
 /** Aperçu à insérer dans une réponse, depuis le message que l'on cite. */
 function quoteOfMessage(message: Message): MessageQuote {
   return {
@@ -385,41 +357,6 @@ function quoteOfMessage(message: Message): MessageQuote {
     attachmentType: message.deleted ? null : (message.attachment?.type ?? null),
     deleted: message.deleted,
   };
-}
-
-/** Bandeau du message cité, posé au-dessus du texte de la réponse. */
-function QuoteBlock({ quote, mine, onPress }: { quote: MessageQuote; mine: boolean; onPress?: () => void }) {
-  const chat = useChatColors();
-  const tone = useMemo(
-    () => ({
-      quote: { backgroundColor: mine ? chat.quoteBackgroundMine : chat.quoteBackground },
-      bar: { backgroundColor: mine ? chat.quoteBarMine : chat.quoteBar },
-      name: { color: chat.quoteName },
-      text: { color: chat.quoteText },
-    }),
-    [chat, mine],
-  );
-  const body = (
-    <View style={[styles.quote, tone.quote]}>
-      <View style={[styles.quoteBar, tone.bar]} />
-      <View style={styles.quoteBody}>
-        <ThemedText type="smallBold" style={tone.name}>
-          {quote.senderName}
-        </ThemedText>
-        <EmojiText numberOfLines={1} style={[styles.quotePreviewText, tone.text]}>
-          {quoteText(quote)}
-        </EmojiText>
-      </View>
-    </View>
-  );
-  if (!onPress) {
-    return body;
-  }
-  return (
-    <Pressable onPress={onPress} hitSlop={4} accessibilityRole="button" accessibilityLabel="Aller au message cité">
-      {body}
-    </Pressable>
-  );
 }
 
 function TypingDots({ color }: { color: string }) {
@@ -1791,6 +1728,7 @@ export default function ChatScreen() {
             uri={mine ? user?.avatarUrl : first.sender.avatarUrl}
             size={40}
             gender={mine ? user?.gender : first.sender.gender}
+            shape="rounded"
             style={styles.messageAvatar}
           />
         );
@@ -1890,6 +1828,7 @@ export default function ChatScreen() {
           uri={mine ? user?.avatarUrl : message.sender.avatarUrl}
           size={40}
           gender={mine ? user?.gender : message.sender.gender}
+          shape="rounded"
           style={styles.messageAvatar}
         />
       );
@@ -2771,29 +2710,6 @@ export default function ChatScreen() {
     return <Redirect href="/login" />;
   }
 
-  // Garde commune à tous les points d'entrée (notification, profil, recherche,
-  // nouveau chat) : une conversation chiffrée ne s'ouvre jamais dans l'écran
-  // en clair, qui stockerait brouillons et file d'envoi hors SQLCipher.
-  if (
-    isE2eeEnabled() &&
-    conversation?.type === 'DIRECT' &&
-    conversation.e2eeSince
-  ) {
-    const peer = conversation.members.find((member) => member.id !== user.id);
-    return (
-      <Redirect
-        href={{
-          pathname: '/e2ee-chat/[id]',
-          params: {
-            id: conversation.id,
-            peerId: peer?.id ?? '',
-            name: conversationTitle(conversation, user.id),
-          },
-        }}
-      />
-    );
-  }
-
   return (
     <ThemedView
       style={[
@@ -3289,7 +3205,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   messageAvatar: {
-    borderRadius: Radii.full,
+    borderRadius: Radii.md,
   },
   bubble: {
     borderRadius: Radii.lg,
@@ -3305,14 +3221,14 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: Radii.xs,
-    top: 15,
+    top: 13,
     transform: [{ rotate: '45deg' }],
   },
   tailLeft: {
-    left: -5,
+    left: -4,
   },
   tailRight: {
-    right: -5,
+    right: -4,
   },
   messageText: {
     fontSize: 16,
@@ -3370,26 +3286,6 @@ const styles = StyleSheet.create({
   mediaFailedActions: {
     flexDirection: 'row',
     gap: Spacing.three,
-  },
-  /** Citation : barre colorée et aperçu sur une ligne, dans la bulle de la réponse. */
-  quote: {
-    flexDirection: 'row',
-    gap: Spacing.one,
-    borderRadius: Radii.xs,
-    paddingVertical: 4,
-    overflow: 'hidden',
-  },
-  quoteBar: {
-    width: 3,
-  },
-  quotePreviewText: {
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '500',
-  },
-  quoteBody: {
-    flex: 1,
-    paddingRight: Spacing.two,
   },
   /** Bandeau de la réponse en cours, au-dessus du champ de saisie. */
   replyBar: {

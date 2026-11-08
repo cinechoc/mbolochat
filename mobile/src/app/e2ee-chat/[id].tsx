@@ -1,5 +1,6 @@
 import { Redirect, Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { X } from 'lucide-react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -8,13 +9,16 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { LiquidGlass } from '@/components/liquid-glass';
 import { AttachPanel } from '@/components/attach-panel';
+import { QuoteBlock } from '@/components/quote-block';
+import { SwipeableBubble } from '@/components/swipeable-bubble';
+import { useChatColors } from '@/constants/chat-theme';
 import { Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { fr } from '@/i18n/fr';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { connectSocket, ensureSocket } from '@/lib/socket';
-import type { ConversationSummary, Message } from '@/lib/types';
+import type { ConversationSummary, Message, MessageQuote } from '@/lib/types';
 import {
   isRejectedMedia,
   normalizeImageAsset,
@@ -30,7 +34,6 @@ import {
   loadE2eeAccount,
   openE2eeDatabase,
   saveDraft,
-  saveE2eeAccount,
   searchLocalMessages,
   type E2eeAccountRow,
   type StoredE2eeMessage,
@@ -80,6 +83,7 @@ export default function E2eeChatScreen() {
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<StoredE2eeMessage[]>([]);
   const [draft, setDraft] = useState('');
+  const [replyTo, setReplyTo] = useState<StoredE2eeMessage | null>(null);
   const [sending, setSending] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -95,9 +99,42 @@ export default function E2eeChatScreen() {
   // dans le dossier privé tant que la route visionneuse est au premier plan).
   const openedDocumentRef = useRef<string | null>(null);
 
-  const persistAccount = useCallback(async (account: E2eeAccountRow) => {
+  // Palette WeChat de la conversation (partagée avec le chat classique) : les
+  // bulles chiffrées reprennent exactement les mêmes couleurs que les claires.
+  const chat = useChatColors();
+  const chatStyles = useMemo(
+    () => ({
+      messageText: { color: chat.primaryText },
+      bubbleMine: { backgroundColor: chat.mineBubble },
+      bubbleTheirs: { backgroundColor: chat.theirBubble },
+    }),
+    [chat],
+  );
+
+  /** Aperçu d'un message cité, reconstruit localement depuis la base chiffrée. */
+  const resolveQuote = useCallback(
+    (quoteId: string | null): MessageQuote | null => {
+      if (!quoteId) return null;
+      const origin = messages.find((item) => item.id === quoteId);
+      if (!origin) return null;
+      const media = origin.media_meta ? decodeMediaMeta(origin.media_meta) : null;
+      return {
+        id: origin.id,
+        senderName: origin.sender_name,
+        content: origin.body,
+        type: 'text',
+        attachmentType: media?.type ?? null,
+        deleted: false,
+      };
+    },
+    [messages],
+  );
+
+  // `decryptIncoming` persiste le compte dans la même transaction que la
+  // session et le message : l'écran ne garde ici que l'état en mémoire, sans
+  // seconde écriture qui pourrait écraser une avancée plus récente.
+  const rememberAccount = useCallback((account: E2eeAccountRow) => {
     accountRef.current = account;
-    if (dbRef.current) await saveE2eeAccount(dbRef.current, account);
   }, []);
 
   const addStored = useCallback((stored: StoredE2eeMessage) => {
@@ -119,7 +156,7 @@ export default function E2eeChatScreen() {
           message,
           currentUserId: user?.id ?? '',
         });
-        await persistAccount(result.account);
+        rememberAccount(result.account);
         addStored(result.stored);
         if (result.keyChanged) {
           Alert.alert(fr.e2eeChat.keyChangedTitle, fr.e2eeChat.keyChangedBody);
@@ -129,7 +166,7 @@ export default function E2eeChatScreen() {
         return null;
       }
     },
-    [addStored, persistAccount, token, user?.id],
+    [addStored, rememberAccount, token, user?.id],
   );
 
   // Les déchiffrements doivent se suivre : deux messages simultanés partiraient
@@ -297,8 +334,10 @@ export default function E2eeChatScreen() {
         currentUserName: user.displayName,
         text,
         allowKeyChange,
+        replyToId: replyTo?.id ?? null,
       });
       addStored(result.stored);
+      setReplyTo(null);
       setDraft('');
       await saveDraft(dbRef.current, conversationId, '');
     } catch (cause) {
@@ -359,8 +398,10 @@ export default function E2eeChatScreen() {
         currentUserId: user.id,
         currentUserName: user.displayName,
         asset,
+        replyToId: replyTo?.id ?? null,
       });
       addStored(result.stored);
+      setReplyTo(null);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : '';
       Alert.alert(
@@ -529,19 +570,29 @@ export default function E2eeChatScreen() {
           // porte que le texte. Un média sans référence exploitable s'affiche
           // comme un simple texte, jamais comme une erreur.
           const media = item.media_meta ? decodeMediaMeta(item.media_meta) : null;
-          return (
+          const mine = item.mine === 1;
+          const quote = resolveQuote(item.quote_id);
+          const bubble = (
             <View
               style={[
                 styles.bubble,
-                item.mine
-                  ? { alignSelf: 'flex-end', backgroundColor: theme.accent }
-                  : { alignSelf: 'flex-start', backgroundColor: theme.backgroundElement },
+                mine ? chatStyles.bubbleMine : chatStyles.bubbleTheirs,
+                mine ? styles.bubbleMineEdge : styles.bubbleTheirsEdge,
               ]}>
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.tail,
+                  mine ? styles.tailRight : styles.tailLeft,
+                  mine ? chatStyles.bubbleMine : chatStyles.bubbleTheirs,
+                ]}
+              />
+              {quote ? <QuoteBlock quote={quote} mine={mine} /> : null}
               {media ? (
                 <SecureMediaMessage
                   token={token}
                   media={media}
-                  mine={item.mine === 1}
+                  mine={mine}
                   caption={item.body}
                   onOpen={(uri, opened) => {
                     const id = opened.blob.uploadId;
@@ -566,12 +617,49 @@ export default function E2eeChatScreen() {
                   }}
                 />
               ) : (
-                <ThemedText style={item.mine ? styles.mineText : undefined}>{item.body}</ThemedText>
+                <ThemedText style={[styles.messageText, chatStyles.messageText]}>{item.body}</ThemedText>
               )}
             </View>
           );
+          return (
+            <SwipeableBubble
+              mine={mine}
+              onReply={() => setReplyTo(item)}
+              onLongPress={() => setReplyTo(item)}
+              style={styles.bubbleWrapper}
+              accessibilityLabel={fr.e2eeChat.messageOptions}>
+              {bubble}
+            </SwipeableBubble>
+          );
         }}
       />
+      {replyTo ? (
+        <View style={styles.replyBar}>
+          <View style={styles.replyBarBody}>
+            <QuoteBlock
+              quote={{
+                id: replyTo.id,
+                senderName: replyTo.sender_name,
+                content: replyTo.body,
+                type: 'text',
+                attachmentType: replyTo.media_meta
+                  ? (decodeMediaMeta(replyTo.media_meta)?.type ?? null)
+                  : null,
+                deleted: false,
+              }}
+              mine={false}
+            />
+          </View>
+          <Pressable
+            onPress={() => setReplyTo(null)}
+            hitSlop={8}
+            style={styles.replyClose}
+            accessibilityRole="button"
+            accessibilityLabel={fr.common.cancel}>
+            <X size={20} color={theme.accent} />
+          </Pressable>
+        </View>
+      ) : null}
       <View style={[styles.composer, { paddingBottom: insets.bottom + Spacing.two }]}>
         <Pressable
           onPress={() => setAttachOpen((open) => !open)}
@@ -658,13 +746,36 @@ const styles = StyleSheet.create({
   result: { paddingVertical: Spacing.two },
   list: { padding: Spacing.three, gap: Spacing.two, flexGrow: 1 },
   empty: { alignSelf: 'center', marginTop: Spacing.five },
+  bubbleWrapper: { maxWidth: '82%' },
   bubble: {
-    maxWidth: '82%',
-    borderRadius: Radii.md,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
+    borderRadius: Radii.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: Spacing.half,
   },
-  mineText: { color: '#ffffff' },
+  /** Coin côté expéditeur légèrement plus petit : donne la direction de la bulle. */
+  bubbleMineEdge: { borderTopRightRadius: Radii.xs },
+  bubbleTheirsEdge: { borderTopLeftRadius: Radii.xs },
+  tail: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: Radii.xs,
+    top: 13,
+    transform: [{ rotate: '45deg' }],
+  },
+  tailLeft: { left: -4 },
+  tailRight: { right: -4 },
+  messageText: { fontSize: 16, lineHeight: 21 },
+  replyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.two,
+  },
+  replyBarBody: { flex: 1 },
+  replyClose: { padding: Spacing.one },
   attachButton: {
     width: 36,
     minHeight: 44,

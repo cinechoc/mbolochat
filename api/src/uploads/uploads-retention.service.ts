@@ -48,11 +48,15 @@ export class UploadRetentionService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Supprime les blobs chiffrés plus vieux que la fenêtre de rétention. */
+  /**
+   * Supprime les blobs chiffrés plus vieux que la fenêtre de rétention, puis les
+   * réservations d'idempotence jamais abouties (processus mort avant validation).
+   */
   async purgeExpired(): Promise<number> {
     const before = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
     const expired = await this.uploads.expiredEncrypted(before);
     if (expired.length === 0) {
+      await this.uploads.purgeStaleClaims();
       return 0;
     }
     const root = resolve(process.cwd());
@@ -60,6 +64,7 @@ export class UploadRetentionService implements OnModuleInit, OnModuleDestroy {
       await this.removeStored(root, row.url);
     }
     await this.uploads.deleteUploads(expired.map((row) => row.id));
+    await this.uploads.purgeStaleClaims();
     return expired.length;
   }
 

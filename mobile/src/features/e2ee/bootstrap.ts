@@ -1,8 +1,9 @@
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
 import { api } from '@/lib/api';
 import { isE2eeEnabled } from './policy';
-import { loadE2eeAccount, openE2eeDatabase, saveE2eeAccount } from './db';
-import { sweepSecureMedia } from './mediaStore';
+import { loadE2eeAccount, openE2eeDatabase, saveE2eeAccount, type E2eeAccountRow } from './db';
+import { withAccountLock } from './locks';
+import { sweepDurablePartials, sweepSecureMedia } from './mediaStore';
 
 export interface BootstrapResult {
   disabled: boolean;
@@ -23,6 +24,10 @@ export async function bootstrapE2ee(token: string): Promise<BootstrapResult> {
   // Un démarrage laisse toujours le dossier privé vide : s'il restait un clair
   // d'une session arrêtée en plein visionnage, il disparaît avant tout accès.
   sweepSecureMedia();
+  // Les ciphertexts durables ne sont jamais balayés ici : seuls les `.part`
+  // d'une écriture interrompue le sont. Le balayage s'abstient de lui-même si
+  // une écriture est en cours dans ce processus.
+  sweepDurablePartials();
   const { db, recovered } = await openE2eeDatabase();
   try {
     let account = await loadE2eeAccount(db);
@@ -43,72 +48,91 @@ export async function bootstrapE2ee(token: string): Promise<BootstrapResult> {
       };
       await saveE2eeAccount(db, account);
     }
+    // Copie non nulle et stable : le compte est lu puis remplacé dans les
+    // sections verrouillées ci-dessous.
+    const base: E2eeAccountRow = account;
 
     const status = await api.getE2eeStatus(token).catch(() => null);
     // Compte recréé localement (perte de clés) : le serveur garde l'ancienne
     // identité sous le même deviceId — il faut republier, même si « registered ».
     const needsRegistration = createdNow || !status?.registered || !status?.fallbackAvailable;
+    // Le pickle de compte est global : toute génération de clés part de l'état
+    // **relu sous verrou**, et l'écriture se fait dedans. Le réseau, lui, reste
+    // dehors : rien n'est publié en tenant le verrou.
     if (needsRegistration) {
-      let fallback: {
-        key?: string;
-        signature?: string;
-        keyId?: string;
-        account_pickle: string;
-      } = {
-        key: account.fallback_key ?? undefined,
-        signature: account.fallback_signature ?? undefined,
-        keyId: account.fallback_key_id ?? undefined,
-        account_pickle: account.account_pickle,
-      };
-      if (!fallback.key || !fallback.signature || !fallback.keyId) {
-        const generated = await MboloCrypto.secureGenerateFallbackKey(account.account_pickle);
-        fallback = {
-          key: generated.key,
-          signature: generated.signature,
-          keyId: generated.key_id,
-          account_pickle: generated.account_pickle,
+      const prepared = await withAccountLock(base.identity_key, async () => {
+        const current: E2eeAccountRow = (await loadE2eeAccount(db)) ?? base;
+        const fallback =
+          current.fallback_key && current.fallback_signature && current.fallback_key_id
+            ? {
+                key: current.fallback_key,
+                signature: current.fallback_signature,
+                keyId: current.fallback_key_id,
+                account_pickle: current.account_pickle,
+              }
+            : await MboloCrypto.secureGenerateFallbackKey(current.account_pickle).then(
+                (generated) => ({
+                  key: generated.key,
+                  signature: generated.signature,
+                  keyId: generated.key_id,
+                  account_pickle: generated.account_pickle,
+                }),
+              );
+        const signedKeys = await MboloCrypto.secureGenerateOneTimeKeysSigned(
+          fallback.account_pickle,
+          5,
+        );
+        const next: E2eeAccountRow = {
+          ...current,
+          account_pickle: signedKeys.account_pickle,
+          fallback_key: fallback.key,
+          fallback_signature: fallback.signature,
+          fallback_key_id: fallback.keyId,
         };
-      }
-      const signedKeys = await MboloCrypto.secureGenerateOneTimeKeysSigned(
-        fallback.account_pickle,
-        5,
-      );
+        // Écrit avant la publication : ces clés privées n'existent que là, et
+        // l'écriture est le seul moment où le pickle peut être écrasé.
+        await saveE2eeAccount(db, next);
+        return { next, fallback, signedKeys };
+      });
       const registration = await api.registerE2eeDevice(token, {
-        identityKey: account.identity_key,
-        signingKey: account.signing_key,
-        fallbackPrekey: fallback.key,
-        fallbackPrekeySignature: fallback.signature,
-        fallbackPrekeyKeyId: fallback.keyId,
-        oneTimeKeys: signedKeys.keys.map((key) => ({
+        identityKey: prepared.next.identity_key,
+        signingKey: prepared.next.signing_key,
+        fallbackPrekey: prepared.fallback.key,
+        fallbackPrekeySignature: prepared.fallback.signature,
+        fallbackPrekeyKeyId: prepared.fallback.keyId,
+        oneTimeKeys: prepared.signedKeys.keys.map((key) => ({
           keyId: key.key_id,
           key: key.key,
           signature: key.signature,
         })),
       });
-      account = {
-        ...account,
-        account_pickle: signedKeys.account_pickle,
-        device_id: registration.deviceId,
-        fallback_key: fallback.key,
-        fallback_signature: fallback.signature,
-        fallback_key_id: fallback.keyId,
-      };
-      await saveE2eeAccount(db, account);
+      // Seul `device_id` est ajouté : le pickle relu peut avoir avancé pendant
+      // l'appel réseau (prekey entrante) et ne doit pas être remplacé.
+      account = await withAccountLock(base.identity_key, async () => {
+        const current = (await loadE2eeAccount(db)) ?? prepared.next;
+        const merged: E2eeAccountRow = { ...current, device_id: registration.deviceId };
+        await saveE2eeAccount(db, merged);
+        return merged;
+      });
     } else if ((status?.prekeysRemaining ?? 0) < 5) {
-      const signedKeys = await MboloCrypto.secureGenerateOneTimeKeysSigned(
-        account.account_pickle,
-        5,
-      );
+      const prepared = await withAccountLock(base.identity_key, async () => {
+        const current: E2eeAccountRow = (await loadE2eeAccount(db)) ?? base;
+        const signedKeys = await MboloCrypto.secureGenerateOneTimeKeysSigned(
+          current.account_pickle,
+          5,
+        );
+        await saveE2eeAccount(db, { ...current, account_pickle: signedKeys.account_pickle });
+        return signedKeys;
+      });
       await api.addE2eePrekeys(
         token,
-        signedKeys.keys.map((key) => ({
+        prepared.keys.map((key) => ({
           keyId: key.key_id,
           key: key.key,
           signature: key.signature,
         })),
       );
-      account = { ...account, account_pickle: signedKeys.account_pickle };
-      await saveE2eeAccount(db, account);
+      account = (await loadE2eeAccount(db)) ?? base;
     }
 
     return { disabled: false, recovered, registered: true };

@@ -9,6 +9,13 @@ import {
   sweepSecureMedia,
 } from './mediaStore';
 
+// Le module touche aussi SQLCipher (lien média ↔ message) : ces tests-ci ne
+// portent que sur les fichiers, la base n'a pas à être chargée pour de vrai.
+vi.mock('expo-sqlite', () => ({
+  deleteDatabaseAsync: vi.fn(),
+  openDatabaseAsync: vi.fn(),
+}));
+
 /** Système de fichiers simulé : on ne garde que ce qui existe encore. */
 const existing = new Set<string>();
 let downloadsShouldFail = false;

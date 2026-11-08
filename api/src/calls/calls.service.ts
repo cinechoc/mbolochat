@@ -377,20 +377,14 @@ export class CallsService implements OnModuleDestroy {
     }
     call.noticeSent = true;
     try {
-      const message = await this.conversations.createCallMessage(
+      // La diffusion de l'avis passe par le journal des effets secondaires du
+      // message : `createCallMessage` y dépose une ligne et réveille le worker.
+      // Émettre aussi ici produirait deux `message:new` pour le même avis.
+      await this.conversations.createCallMessage(
         call.conversationId,
         call.callerId,
         callNoticeText(outcome, durationMs, call.video),
       );
-      if (!this.server) {
-        return;
-      }
-      const memberIds = await this.conversations.listMemberIds(call.conversationId);
-      let broadcast = this.server.to(conversationRoomOf(call.conversationId));
-      for (const memberId of memberIds) {
-        broadcast = broadcast.to(userRoomOf(memberId));
-      }
-      broadcast.emit('message:new', message);
     } catch {
       // L'appel est terminé : un échec d'écriture ne doit pas le relancer.
     }

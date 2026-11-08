@@ -103,7 +103,16 @@ describe('CallsService', () => {
   const eventsFor = (userId: string) =>
     emitted.filter((entry) => entry.room === `user:${userId}`).map((entry) => entry.event);
 
-  const notice = () => emitted.find((entry) => entry.event === 'message:new');
+  /**
+   * L'avis d'appel n'est plus émis par le service : il dépose une ligne dans le
+   * journal des effets secondaires du message, que le worker diffuse. On lit
+   * donc la dernière écriture, pas un événement Socket.IO.
+   */
+  const notice = () => {
+    const calls = conversations.createCallMessage.mock.calls;
+    const last = calls[calls.length - 1];
+    return last ? { conversationId: last[0], content: last[2] } : undefined;
+  };
 
   const flush = async () => {
     await Promise.resolve();
@@ -180,7 +189,7 @@ describe('CallsService', () => {
 
     expect(eventsFor(CALLEE)).toEqual(expect.arrayContaining(['call:missed', 'call:ended']));
     expect(emitted.find((e) => e.event === 'call:ended')?.payload.reason).toBe('timeout');
-    expect(notice()?.payload.content).toBe('Appel manqué');
+    expect(notice()?.content).toBe('Appel manqué');
     expect(push.notifyCallUpdate.mock.calls[0][0].outcome).toBe('missed');
 
     // Les deux sont libres : une nouvelle invitation passe.
@@ -197,9 +206,8 @@ describe('CallsService', () => {
     await flush();
     expect(eventsFor(CALLER)).toContain('call:rejected');
     expect(service.end(CALLER, ack.callId).ok).toBe(false);
-    expect(notice()?.payload.content).toBe('Appel refusé');
-    // Diffusion : conversation ouverte + liste des deux membres.
-    expect(notice()?.room).toMatch(/^conv:|^user:/);
+    expect(notice()?.content).toBe('Appel refusé');
+    expect(notice()?.conversationId).toBe('conv-1');
     expect(conversations.createCallMessage).toHaveBeenCalledOnce();
   });
 
@@ -212,10 +220,8 @@ describe('CallsService', () => {
 
     expect(service.end(CALLEE, ack.callId).ok).toBe(true);
     await flush();
-    expect(notice()?.payload.content).toBe('Appel vocal · 1:05');
-    expect(notice()?.payload.type).toBe('call');
+    expect(notice()?.content).toBe('Appel vocal · 1:05');
     expect(conversations.createCallMessage).toHaveBeenCalledOnce();
-    expect(conversations.listMemberIds).toHaveBeenCalledWith('conv-1');
   });
 
   it('transmet le mode vidéo et titre le message final', async () => {
@@ -229,7 +235,7 @@ describe('CallsService', () => {
     emitted = [];
     expect(service.end(CALLER, ack.callId).ok).toBe(true);
     await flush();
-    expect(notice()?.payload.content).toBe('Appel vidéo · 1:05');
+    expect(notice()?.content).toBe('Appel vidéo · 1:05');
   });
 
   it('relaie la bascule caméra au pair et retient le type vidéo', async () => {
@@ -246,7 +252,7 @@ describe('CallsService', () => {
 
     service.end(CALLER, ack.callId);
     await flush();
-    expect(notice()?.payload.content).toBe('Appel vidéo · 0:05');
+    expect(notice()?.content).toBe('Appel vidéo · 0:05');
   });
 
   it('relaie offer/answer/ice au seul autre participant', async () => {

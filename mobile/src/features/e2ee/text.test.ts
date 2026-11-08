@@ -3,12 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
 import { api } from '@/lib/api';
 import { decryptIncoming } from './text';
+import { persistIncoming } from './atomic';
 import {
+  loadE2eeAccount,
+  loadLocalMessage,
   loadPeerSigningKey,
   loadSession,
-  saveLocalMessage,
-  savePeerSigningKey,
-  saveSession,
   type E2eeAccountRow,
   type E2eeSessionRow,
 } from './db';
@@ -30,22 +30,34 @@ vi.mock('@/lib/socket', () => ({
 }));
 
 vi.mock('./db', () => ({
+  deleteLocalMessage: vi.fn(),
+  loadE2eeAccount: vi.fn(),
+  loadLocalMessage: vi.fn(),
   loadSession: vi.fn(),
-  saveSession: vi.fn(),
   loadPeerSigningKey: vi.fn(),
-  savePeerSigningKey: vi.fn(),
+  renameLocalMessage: vi.fn(),
   saveLocalMessage: vi.fn(),
+  savePeerSigningKey: vi.fn(),
+}));
+
+// La persistance entrante est une transaction unique : la vraie fonction est
+// vérifiée sur SQLite dans inbound.test.ts, ici on observe seulement l'appel.
+vi.mock('./atomic', () => ({
+  loadPersistedEnvelope: vi.fn(),
+  markEnvelopeSent: vi.fn(),
+  persistSessionAndEnvelope: vi.fn(),
+  persistIncoming: vi.fn(),
 }));
 
 const cryptoMock = vi.mocked(MboloCrypto);
 const apiMock = vi.mocked(api);
 const dbMock = {
+  loadE2eeAccount: vi.mocked(loadE2eeAccount),
   loadSession: vi.mocked(loadSession),
-  saveSession: vi.mocked(saveSession),
+  loadLocalMessage: vi.mocked(loadLocalMessage),
   loadPeerSigningKey: vi.mocked(loadPeerSigningKey),
-  savePeerSigningKey: vi.mocked(savePeerSigningKey),
-  saveLocalMessage: vi.mocked(saveLocalMessage),
 };
+const persistMock = vi.mocked(persistIncoming);
 
 const account: E2eeAccountRow = {
   account_pickle: 'account-pickle',
@@ -93,9 +105,8 @@ const plaintext = (text: string) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  dbMock.saveSession.mockResolvedValue(undefined as never);
-  dbMock.saveLocalMessage.mockResolvedValue(undefined as never);
-  dbMock.savePeerSigningKey.mockResolvedValue(undefined as never);
+  dbMock.loadE2eeAccount.mockResolvedValue(null);
+  persistMock.mockResolvedValue(undefined as never);
 });
 
 describe('decryptIncoming — repli après changement de clé', () => {
@@ -137,22 +148,18 @@ describe('decryptIncoming — repli après changement de clé', () => {
       'peer-ident-2',
       'enveloppe',
     );
-    expect(dbMock.savePeerSigningKey).toHaveBeenCalledWith(
-      expect.anything(),
-      'peer-1',
-      'peer-sign-2',
-      true,
+    // Session, message, compte et épinglage de clé dans la même écriture.
+    expect(persistMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: expect.objectContaining({ session_pickle: 'new-session' }),
+        account: expect.objectContaining({ account_pickle: 'account-pickle-2' }),
+        message: expect.objectContaining({ id: 'msg-1', body: 'salut' }),
+        pinPeerKey: true,
+      }),
     );
   });
 
-  it('écrit le message avant de faire avancer la session', async () => {
-    const order: string[] = [];
-    dbMock.saveLocalMessage.mockImplementation((async () => {
-      order.push('message');
-    }) as never);
-    dbMock.saveSession.mockImplementation((async () => {
-      order.push('session');
-    }) as never);
+  it('écrit le message et la session dans une seule écriture', async () => {
     dbMock.loadSession.mockResolvedValue(oldSession);
     dbMock.loadPeerSigningKey.mockResolvedValue('peer-sign-1');
     cryptoMock.secureDecrypt.mockResolvedValue({
@@ -168,7 +175,13 @@ describe('decryptIncoming — repli après changement de clé', () => {
       currentUserId: 'me',
     });
 
-    expect(order).toEqual(['message', 'session']);
+    expect(persistMock).toHaveBeenCalledTimes(1);
+    expect(persistMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: expect.objectContaining({ session_pickle: 'advanced-session' }),
+        message: expect.objectContaining({ id: 'msg-1', body: 'ok' }),
+      }),
+    );
   });
 
   it('repropage l’échec d’un message normal non déchiffrable (pas de faux repli)', async () => {

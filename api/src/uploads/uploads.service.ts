@@ -1,12 +1,20 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+} from '@nestjs/common';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, resolve, sep } from 'node:path';
 import { and, eq, lt } from 'drizzle-orm';
 import { DRIZZLE, type Database } from '../db/db.module.js';
 import {
   conversationMembers,
   uploadConversations,
+  uploadIdempotency,
   uploads,
   type E2eeAttachmentRef,
   type MessageAttachment,
@@ -52,6 +60,11 @@ export interface UploadMeta {
  */
 export interface UploadEncryptedOptions {
   encrypted: true;
+  /**
+   * Clé d'idempotence fournie par le client, stable pour toute la durée d'une
+   * même opération (média principal et vignette ont chacun la leur).
+   */
+  idempotencyKey: string;
   /** Conversation déclarée par l'appareil, vérifiée avant enregistrement. */
   conversationId: string;
   /** Type du clair d'origine (IMAGE, VIDEO…), pour l'affichage côté client. */
@@ -59,6 +72,34 @@ export interface UploadEncryptedOptions {
 }
 
 export type UploadOptions = { encrypted?: false } | UploadEncryptedOptions;
+
+/**
+ * Fenêtre pendant laquelle une seconde requête identique attend le résultat de
+ * la première au lieu de créer un second blob. Au-delà, le client reçoit un
+ * conflit explicite et réessaiera : rien n'est perdu, rien n'est dupliqué.
+ */
+const CLAIM_WAIT_MS = 4_000;
+const CLAIM_POLL_MS = 100;
+/**
+ * Âge à partir duquel une réservation `pending` est considérée abandonnée (le
+ * processus est mort avant de valider sa transaction) et peut être reprise.
+ */
+const CLAIM_STALE_MS = 3 * 60_000;
+/** Âge au-delà duquel une réservation jamais aboutie est purement nettoyée. */
+const CLAIM_EXPIRY_MS = 24 * 60 * 60_000;
+
+/**
+ * Ce que réserve une clé d'idempotence avant toute écriture.
+ *
+ * `token` est le jeton de **fencing** de cette tentative : il change à chaque
+ * reprise. Toute validation ou tout nettoyage exige que la ligne le porte
+ * encore, ce qui rend inoffensive une tentative périmée.
+ */
+interface KeyClaim {
+  key: string;
+  token: string;
+  storedUrl: string;
+}
 
 export interface UploadDto extends MessageAttachment {
   id: string;
@@ -131,6 +172,10 @@ export class UploadsService {
    * Import chiffré : le contenu est opaque, l'appareil joint le type d'origine.
    * L'appartenance à la conversation est vérifiée ici puis journalisée : c'est
    * ce lien, et lui seul, qui autorisera le téléchargement.
+   *
+   * L'opération est **idempotente** : la clé du client réserve une ligne
+   * `upload_idempotency` avant toute écriture, ce qui rend un rejeu après
+   * timeout, coupure ou redémarrage sûr — même identifiant, même blob.
    */
   private async saveEncrypted(
     userId: string,
@@ -145,43 +190,349 @@ export class UploadsService {
       throw new ForbiddenException('Vous n’êtes pas membre de cette discussion');
     }
 
-    const relativeUrl = await this.writeFileOnDisk(file.buffer, '.bin');
     const width = this.round(meta.width);
     const height = this.round(meta.height);
     const durationMs = this.round(meta.durationMs);
     const name = this.cleanEncryptedName(meta.name);
+    // L'empreinte est calculée sur les octets reçus : jamais sur une valeur
+    // annoncée par le client.
+    const digest = createHash('sha256').update(file.buffer).digest('hex');
+    const claim = await this.claimKey(userId, file, options, digest);
 
-    const [row] = await this.db
-      .insert(uploads)
-      .values({
-        userId,
-        url: relativeUrl,
-        mime: 'application/octet-stream',
+    if ('existing' in claim) {
+      return claim.existing;
+    }
+
+    try {
+      // Écriture au chemin réservé : un rejeu réécrit le même fichier, donc un
+      // arrêt entre l'écriture et la validation SQL ne laisse pas d'orphelin.
+      await this.storeAt(claim.storedUrl, file.buffer, claim.token);
+      const row = await this.commitClaim(userId, claim, options, {
         size: file.size,
-        name,
         width,
         height,
         durationMs,
-        encrypted: true,
+        name,
+      });
+      return {
+        id: row.id,
+        type: options.kind,
+        url: row.url,
+        mime: 'application/octet-stream',
+        size: row.size,
+        width: width ?? undefined,
+        height: height ?? undefined,
+        duration: durationMs ?? undefined,
+        name: name ?? undefined,
+      };
+    } catch (error) {
+      // La transaction a échoué : ni ligne ni référence. On libère le blob et
+      // la réservation pour qu'un rejeu immédiat soit possible.
+      await this.abandonClaim(userId, claim);
+      throw error;
+    }
+  }
+
+  /**
+   * Réserve la clé du client, ou retrouve le résultat déjà obtenu.
+   *
+   * L'insertion est la primitive d'atomicité : la contrainte de clé primaire
+   * `(user_id, key)` garantit qu'une seule requête crée le blob, sans verrou
+   * applicatif ni fenêtre de course.
+   */
+  private async claimKey(
+    userId: string,
+    file: Express.Multer.File,
+    options: UploadEncryptedOptions,
+    digest: string,
+    depth = 0,
+  ): Promise<KeyClaim | { existing: UploadDto }> {
+    const storedUrl = this.allocatePath('.bin');
+    const token = randomUUID();
+    const inserted = await this.db
+      .insert(uploadIdempotency)
+      .values({
+        userId,
+        key: options.idempotencyKey,
+        conversationId: options.conversationId,
+        contentSha256: digest,
+        size: file.size,
+        storedUrl,
+        kind: options.kind,
+        attemptToken: token,
       })
-      .returning();
+      .onConflictDoNothing({
+        target: [uploadIdempotency.userId, uploadIdempotency.key],
+      })
+      .returning({ storedUrl: uploadIdempotency.storedUrl });
 
-    await this.db.insert(uploadConversations).values({
-      uploadId: row.id,
-      conversationId: options.conversationId,
-    });
+    if (inserted.length > 0) {
+      return { key: options.idempotencyKey, token, storedUrl };
+    }
+    if (depth >= 2) {
+      // La réservation disparaît à répétition : on ne boucle pas, on le dit.
+      throw new ConflictException('Envoi déjà en cours, réessaie dans un instant');
+    }
+    return this.resolveClaim(userId, file, options, digest, depth);
+  }
 
+  /** Clé déjà connue : même résultat, conflit, ou attente de la requête en cours. */
+  private async resolveClaim(
+    userId: string,
+    file: Express.Multer.File,
+    options: UploadEncryptedOptions,
+    digest: string,
+    depth: number,
+  ): Promise<KeyClaim | { existing: UploadDto }> {
+    const deadline = Date.now() + CLAIM_WAIT_MS;
+    for (;;) {
+      const claim = await this.loadClaim(userId, options.idempotencyKey);
+      if (!claim) {
+        // Réservation nettoyée entre-temps : on repart proprement.
+        return this.claimKey(userId, file, options, digest, depth + 1);
+      }
+      // Même clé, autre contenu (ou autre conversation) : refus explicite,
+      // jamais un remplacement silencieux.
+      if (
+        claim.conversationId !== options.conversationId ||
+        claim.contentSha256 !== digest ||
+        claim.size !== file.size
+      ) {
+        throw new ConflictException(
+          'Clé d’idempotence déjà utilisée pour un autre fichier',
+        );
+      }
+      if (claim.state === 'done' && claim.uploadId) {
+        const existing = await this.uploadDtoOf(claim.uploadId, userId, claim.kind);
+        // Un upload n'est annoncé réussi que si le blob est réellement là.
+        if (existing && existsSync(this.absolutePath(existing.url))) {
+          return { existing };
+        }
+        // Blob disparu (purge, perte de disque) : la réservation ne vaut plus
+        // rien, on la retire pour laisser le client réenvoyer — jamais un faux
+        // succès sur un fichier absent.
+        await this.db
+          .delete(uploadIdempotency)
+          .where(
+            and(
+              eq(uploadIdempotency.userId, userId),
+              eq(uploadIdempotency.key, options.idempotencyKey),
+              eq(uploadIdempotency.state, 'done'),
+              eq(uploadIdempotency.uploadId, claim.uploadId),
+            ),
+          );
+        return this.claimKey(userId, file, options, digest, depth + 1);
+      }
+      // En cours ailleurs : reprendre la réservation seulement si elle est
+      // abandonnée, sinon attendre brièvement son issue.
+      const takeover = await this.takeOverStaleClaim(userId, options.idempotencyKey);
+      if (takeover) {
+        // Le chemin de l'ancienne tentative n'est plus référencé par la ligne :
+        // on le libère, sans jamais toucher à celui du nouveau propriétaire.
+        if (claim.storedUrl !== takeover.storedUrl) {
+          await this.removeStored(claim.storedUrl);
+        }
+        return takeover;
+      }
+      if (Date.now() >= deadline) {
+        throw new ConflictException('Envoi déjà en cours, réessaie dans un instant');
+      }
+      await new Promise((resolve) => setTimeout(resolve, CLAIM_POLL_MS));
+    }
+  }
+
+  /** Réponse d'un upload déjà enregistré, sans rien recréer. */
+  private async uploadDtoOf(
+    uploadId: string,
+    userId: string,
+    kind: string,
+  ): Promise<UploadDto | null> {
+    const [row] = await this.db
+      .select()
+      .from(uploads)
+      .where(and(eq(uploads.id, uploadId), eq(uploads.userId, userId)))
+      .limit(1);
+    if (!row) {
+      return null;
+    }
     return {
       id: row.id,
-      type: options.kind,
-      url: relativeUrl,
-      mime: 'application/octet-stream',
+      type: kind as MessageAttachmentType,
+      url: row.url,
+      mime: row.mime,
       size: row.size,
-      width: width ?? undefined,
-      height: height ?? undefined,
-      duration: durationMs ?? undefined,
-      name: name ?? undefined,
+      width: row.width ?? undefined,
+      height: row.height ?? undefined,
+      duration: row.durationMs ?? undefined,
+      name: row.name ?? undefined,
     };
+  }
+
+  private async loadClaim(userId: string, key: string) {
+    const [claim] = await this.db
+      .select()
+      .from(uploadIdempotency)
+      .where(and(eq(uploadIdempotency.userId, userId), eq(uploadIdempotency.key, key)))
+      .limit(1);
+    return claim ?? null;
+  }
+
+  /**
+   * Reprend une réservation laissée `pending` par un processus mort.
+   *
+   * Le `UPDATE … WHERE state = 'pending' AND updated_at < seuil` arbitre la
+   * course : une seule requête gagne. Elle repart avec un **nouveau jeton** et
+   * un **nouveau chemin** de fichier ; l'ancienne tentative garde le sien, donc
+   * elle ne peut ni écraser le blob de la nouvelle, ni valider, ni nettoyer sa
+   * réservation. Le délai n'est qu'un indice de départ, jamais une preuve.
+   */
+  private async takeOverStaleClaim(
+    userId: string,
+    key: string,
+  ): Promise<KeyClaim | null> {
+    const cutoff = new Date(Date.now() - CLAIM_STALE_MS);
+    const token = randomUUID();
+    const storedUrl = this.allocatePath('.bin');
+    const taken = await this.db
+      .update(uploadIdempotency)
+      .set({ updatedAt: new Date(), attemptToken: token, storedUrl })
+      .where(
+        and(
+          eq(uploadIdempotency.userId, userId),
+          eq(uploadIdempotency.key, key),
+          eq(uploadIdempotency.state, 'pending'),
+          lt(uploadIdempotency.updatedAt, cutoff),
+        ),
+      )
+      .returning({ attemptToken: uploadIdempotency.attemptToken });
+    if (taken.length === 0) {
+      return null;
+    }
+    return { key, token, storedUrl };
+  }
+
+  /**
+   * Fichier, ligne et passage à `done` dans **une** transaction : il n'existe
+   * aucun instant où le blob est annoncé sans être réellement disponible.
+   */
+  private async commitClaim(
+    userId: string,
+    claim: KeyClaim,
+    options: UploadEncryptedOptions,
+    meta: {
+      size: number;
+      width: number | null;
+      height: number | null;
+      durationMs: number | null;
+      name: string | null;
+    },
+  ) {
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(uploads)
+        .values({
+          userId,
+          url: claim.storedUrl,
+          mime: 'application/octet-stream',
+          size: meta.size,
+          name: meta.name,
+          width: meta.width,
+          height: meta.height,
+          durationMs: meta.durationMs,
+          encrypted: true,
+        })
+        .returning();
+      await tx.insert(uploadConversations).values({
+        uploadId: row.id,
+        conversationId: options.conversationId,
+      });
+      // La validation n'est possible que si la réservation porte encore notre
+      // jeton. Sinon la transaction entière est annulée : aucune ligne d'upload
+      // n'est laissée derrière une tentative périmée.
+      const fenced = await tx
+        .update(uploadIdempotency)
+        .set({ state: 'done', uploadId: row.id, updatedAt: new Date() })
+        .where(
+          and(
+            eq(uploadIdempotency.userId, userId),
+            eq(uploadIdempotency.key, claim.key),
+            eq(uploadIdempotency.state, 'pending'),
+            eq(uploadIdempotency.attemptToken, claim.token),
+          ),
+        )
+        .returning({ key: uploadIdempotency.key });
+      if (fenced.length === 0) {
+        throw new ConflictException(
+          'Réservation reprise par une autre tentative, envoi abandonné',
+        );
+      }
+      return row;
+    });
+  }
+
+  /**
+   * Libère blob et réservation après un échec de validation.
+   *
+   * Le fichier supprimé est celui **de cette tentative** : son chemin lui est
+   * propre, une reprise en a alloué un autre. La réservation, elle, n'est
+   * retirée que si elle porte encore notre jeton — une tentative périmée ne doit
+   * jamais effacer le travail de la tentative qui l'a remplacée.
+   */
+  private async abandonClaim(userId: string, claim: KeyClaim): Promise<void> {
+    await this.removeStored(claim.storedUrl);
+    try {
+      await this.db
+        .delete(uploadIdempotency)
+        .where(
+          and(
+            eq(uploadIdempotency.userId, userId),
+            eq(uploadIdempotency.key, claim.key),
+            eq(uploadIdempotency.state, 'pending'),
+            eq(uploadIdempotency.attemptToken, claim.token),
+          ),
+        );
+    } catch {
+      // Réservation laissée en place : le nettoyage périodique la reprendra.
+    }
+  }
+
+  /**
+   * Réservations jamais abouties : le processus est mort avant de valider sa
+   * transaction. Leur blob (écrit ou non) n'est référencé par aucun upload, on
+   * le supprime avec la réservation ; la clé redevient libre.
+   */
+  async purgeStaleClaims(): Promise<number> {
+    const cutoff = new Date(Date.now() - CLAIM_EXPIRY_MS);
+    const stale = await this.db
+      .select({
+        userId: uploadIdempotency.userId,
+        key: uploadIdempotency.key,
+        storedUrl: uploadIdempotency.storedUrl,
+        token: uploadIdempotency.attemptToken,
+      })
+      .from(uploadIdempotency)
+      .where(
+        and(
+          eq(uploadIdempotency.state, 'pending'),
+          lt(uploadIdempotency.updatedAt, cutoff),
+        ),
+      );
+    for (const row of stale) {
+      await this.removeStored(row.storedUrl);
+      // La condition porte le jeton : si une reprise a eu lieu entre-temps, la
+      // réservation rafraîchie n'est pas effacée.
+      await this.db
+        .delete(uploadIdempotency)
+        .where(
+          and(
+            eq(uploadIdempotency.userId, row.userId),
+            eq(uploadIdempotency.key, row.key),
+            eq(uploadIdempotency.state, 'pending'),
+            eq(uploadIdempotency.attemptToken, row.token),
+          ),
+        );
+    }
+    return stale.length;
   }
 
   /** Le fichier appartient-il bien à cet utilisateur ? */
@@ -318,16 +669,69 @@ export class UploadsService {
     return row !== undefined;
   }
 
-  /** Range un fichier par mois et renvoie son chemin relatif. */
+  /** Range un fichier par mois, l'écrit et renvoie son chemin relatif. */
   private async writeFileOnDisk(buffer: Buffer, extension: string): Promise<string> {
-    // Range les fichiers par mois : uploads/2026/10/<uuid>.m4a
+    const relative = this.allocatePath(extension);
+    await this.storeAt(relative, buffer);
+    return relative;
+  }
+
+  /**
+   * Réserve un chemin mensuel sans écrire : `uploads/2026/10/<uuid>.m4a`.
+   * Le nom est figé avant l'écriture pour qu'une reprise réécrive le même
+   * fichier au lieu d'en semer un second.
+   */
+  private allocatePath(extension: string): string {
     const now = new Date();
     const folder = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const fileName = `${randomUUID()}${extension}`;
-    const directory = join(process.cwd(), 'uploads', folder);
-    await mkdir(directory, { recursive: true });
-    await writeFile(join(directory, fileName), buffer);
-    return `/uploads/${folder}/${fileName}`;
+    return `/uploads/${folder}/${randomUUID()}${extension}`;
+  }
+
+  /**
+   * Écrit un fichier au chemin relatif donné, par **publication atomique**.
+   *
+   * Le contenu est d'abord écrit dans un temporaire propre à la tentative
+   * (`.part-<jeton>`), puis renommé : aucun état partiel ne porte jamais le nom
+   * définitif, et deux tentatives ne peuvent pas se mélanger dans le même
+   * fichier puisqu'elles n'ont pas le même chemin.
+   */
+  private async storeAt(
+    relative: string,
+    buffer: Buffer,
+    token: string = randomUUID(),
+  ): Promise<void> {
+    const target = this.absolutePath(relative);
+    await mkdir(dirname(target), { recursive: true });
+    const partial = `${target}.part-${token}`;
+    await writeFile(partial, buffer);
+    try {
+      await rename(partial, target);
+    } catch (error) {
+      await rm(partial, { force: true });
+      throw error;
+    }
+  }
+
+  /**
+   * Chemin absolu d'un chemin relatif de stockage, confiné au dossier
+   * `uploads/` : aucun chemin venu d'ailleurs ne peut écrire hors du disque
+   * prévu, y compris une valeur rejouée depuis la base.
+   */
+  private absolutePath(relative: string): string {
+    const root = resolve(process.cwd(), 'uploads');
+    const target = resolve(process.cwd(), '.' + relative);
+    if (target !== root && !target.startsWith(root + sep)) {
+      throw new BadRequestException('Chemin de fichier invalide');
+    }
+    return target;
+  }
+
+  private async removeStored(relative: string): Promise<void> {
+    try {
+      await rm(this.absolutePath(relative), { force: true });
+    } catch {
+      // Disque indisponible ou chemin refusé : rien à faire de plus.
+    }
   }
 
   private toDto(

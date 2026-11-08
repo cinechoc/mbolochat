@@ -20,15 +20,20 @@ class ScreenSecurityModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("MboloScreenSecurity")
 
+    // setFlags/clearFlags passent par ViewRootImpl, qui exige le thread UI ;
+    // les fonctions Expo synchrones s'exécutent sur le thread JS, d'où le
+    // dispatch explicite (runOnUiThread exécute inline si déjà sur le thread UI).
     Function("setSecure") { enabled: Boolean ->
       val activity = currentActivity() ?: return@Function false
-      if (enabled) {
-        activity.window.setFlags(
-          WindowManager.LayoutParams.FLAG_SECURE,
-          WindowManager.LayoutParams.FLAG_SECURE,
-        )
-      } else {
-        activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+      activity.runOnUiThread {
+        if (enabled) {
+          activity.window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE,
+          )
+        } else {
+          activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
       }
       true
     }

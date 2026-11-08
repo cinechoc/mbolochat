@@ -72,9 +72,20 @@ vi.mock('@/lib/socket', () => ({ ensureSocket: vi.fn() }));
 vi.mock('./db', () => ({
   saveLocalMessage: vi.fn(),
   renameLocalMessage: vi.fn(),
+  updateLocalMessageMedia: vi.fn(),
+  loadLocalMessage: vi.fn(),
 }));
 
-vi.mock('./text', () => ({ encryptEnvelope: vi.fn() }));
+vi.mock('./text', () => ({ encryptEnvelope: vi.fn(), E2eeAlreadySentError: class extends Error {} }));
+
+vi.mock('./atomic', () => ({
+  loadOutboxMediaRefs: vi.fn(),
+  loadPersistedEnvelope: vi.fn(),
+  markEnvelopeSent: vi.fn(),
+}));
+
+/** Dossier durable simulé : présence par `id/kind`, hors de la zone de travail. */
+const durable = new Map<string, string>();
 
 vi.mock('./mediaStore', () => ({
   fileSystemPath: (uri: string) => uri,
@@ -82,7 +93,17 @@ vi.mock('./mediaStore', () => ({
   releaseStage: () => {
     releases += 1;
     files.clear();
+    durable.clear();
   },
+  storeDurableMedia: async (input: { id: string; kind?: string; sourceUri: string }) => {
+    const kind = input.kind ?? 'media';
+    const uri = `file:///docs/durable/${input.id}/${kind}`;
+    durable.set(`${input.id}/${kind}`, uri);
+    return { id: input.id, kind, uri, size: files.get(input.sourceUri) ?? 1, reused: false };
+  },
+  verifyDurableMedia: () => ({ ok: true }),
+  durableMediaUri: (id: string, kind = 'media') => durable.get(`${id}/${kind}`) ?? null,
+  removeDurableMediaIfUnreferenced: vi.fn(async () => true),
 }));
 
 const cryptoMock = vi.mocked(MboloCrypto);

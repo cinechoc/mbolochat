@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   NotFoundException,
   Param,
   Post,
@@ -20,6 +21,13 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { JwtPayload } from '../auth/jwt-payload.js';
 import type { MessageAttachmentType } from '../db/schema.js';
 import { MAX_UPLOAD_BYTES, UploadsService } from './uploads.service.js';
+
+/**
+ * Clé d'idempotence : opaque, stable pour une même opération, et bornée. Le
+ * client la dérive de l'identité durable de sa préparation média ; le serveur
+ * ne l'interprète pas, il s'en sert de clé primaire `(utilisateur, clé)`.
+ */
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,200}$/;
 
 /** Les natures qu'un appareil peut déclarer pour un fichier chiffré. */
 const ENCRYPTED_KINDS = new Set<MessageAttachmentType>([
@@ -50,6 +58,7 @@ export class UploadsController {
   upload(
     @CurrentUser() current: JwtPayload,
     @UploadedFile() file: Express.Multer.File | undefined,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body()
     body: {
       width?: string;
@@ -75,10 +84,18 @@ export class UploadsController {
       if (!ENCRYPTED_KINDS.has(kind)) {
         throw new BadRequestException('Nature de fichier chiffré invalide');
       }
+      // Un import chiffré rejoue sans risque : la clé rend l'opération
+      // idempotente, elle est donc obligatoire dans ce mode.
+      if (!idempotencyKey || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+        throw new BadRequestException(
+          'Clé d’idempotence manquante ou invalide pour un fichier chiffré',
+        );
+      }
       return this.uploadsService.save(current.sub, file, meta, {
         encrypted: true,
         conversationId: body.conversationId,
         kind,
+        idempotencyKey,
       });
     }
 

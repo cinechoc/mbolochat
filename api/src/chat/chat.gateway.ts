@@ -4,6 +4,7 @@ import {
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -15,17 +16,17 @@ import type { Subscription } from 'rxjs';
 import { authenticateSocket, userRoomOf } from './socket-auth.js';
 import {
   ConversationsService,
-  type MessageDto,
   type ReceiptChange,
 } from '../conversations/conversations.service.js';
 import {
   ConversationEventsService,
   type ConversationChange,
 } from '../conversations/conversation-events.service.js';
-import { PushService } from '../push/push.service.js';
 import { MediaService } from '../media/media.service.js';
 import { PresenceService, type PresenceChange } from '../presence/presence.service.js';
 import { UsersService } from '../users/users.service.js';
+import { PushService } from '../push/push.service.js';
+import { MessageEventsDispatcher } from './message-events.dispatcher.js';
 import { SocketRateLimiter } from './socket-rate-limit.js';
 import { InvalidGifAttachmentError, normalizeGifAttachment } from './gif-attachment.js';
 import {
@@ -38,7 +39,9 @@ import { isMessageType, isValidStickerRef, type MessageType } from './sticker-re
 const roomOf = (conversationId: string) => `conv:${conversationId}`;
 
 @WebSocketGateway({ cors: { origin: true } })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
+export class ChatGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
+{
   @WebSocketServer()
   server: Server;
 
@@ -58,6 +61,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     private readonly jwtService: JwtService,
     private readonly conversationsService: ConversationsService,
     private readonly conversationEvents: ConversationEventsService,
+    private readonly dispatcher: MessageEventsDispatcher,
     private readonly pushService: PushService,
     private readonly media: MediaService,
     private readonly presence: PresenceService,
@@ -70,6 +74,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     this.conversationChanges = this.conversationEvents.changes$.subscribe((change) => {
       void this.broadcastConversationChange(change);
     });
+  }
+
+  /**
+   * Le worker des effets secondaires a besoin du serveur temps réel : il n'est
+   * disponible qu'ici, une fois la passerelle construite.
+   */
+  afterInit(server: Server) {
+    this.dispatcher.attachServer(server);
   }
 
   onModuleDestroy(): void {
@@ -260,22 +272,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     if ('error' in message) {
       return message;
     }
-    // Diffusion unique : salon de la conversation (écran ouvert) + salon
-    // personnel de chaque membre (liste des discussions, y compris une
-    // conversation qui vient d'être créée). Socket.IO n'envoie qu'une fois
-    // par socket, même si elle est dans plusieurs de ces salons.
-    const memberIds = await this.conversationsService.listMemberIds(conversationId);
-    let broadcast = this.server.to(roomOf(conversationId));
-    for (const memberId of memberIds) {
-      broadcast = broadcast.to(userRoomOf(memberId));
-    }
+    // Diffusion et push passent par le journal durable. Un deuxième envoi du
+    // même `clientId` retombe sur le message déjà écrit : ses effets sont
+    // `done`, donc ni rediffusion ni nouvelle notification. Si le serveur tombe
+    // entre l'écriture et la diffusion, le worker reprend la ligne au
+    // démarrage. L'acquittement attend la diffusion, pas les push.
+    await this.dispatcher.deliverMessage(message.id);
     // Le temps réel ne traverse pas l'intercepteur des réponses HTTP : les
-    // médias sont signés ici, sinon l'image ne s'afficherait nulle part.
-    const payload = this.media.signMessage(message);
-    broadcast.emit('message:new', payload);
-    // Notifications push en arrière-plan : l'ack du message ne les attend pas.
-    void this.notifyPush(payload, conversationId);
-    return payload;
+    // médias sont signés pour la réponse à l'émetteur.
+    return this.media.signMessage(message);
   }
 
   /**
@@ -398,13 +403,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
    * Prévient les membres absents de la conversation. Ceux qui l'ont ouverte
    * à l'écran voient déjà le message : inutile de les notifier.
    */
-  private async notifyPush(message: MessageDto, conversationId: string): Promise<void> {
-    const activeUserIds = [...this.viewing.values()]
-      .filter((entry) => entry.conversationId === conversationId)
-      .map((entry) => entry.userId);
-    await this.pushService.notifyNewMessage(message, activeUserIds);
-  }
-
   @SubscribeMessage('typing')
   async typing(
     @ConnectedSocket() client: Socket,
@@ -570,13 +568,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     if (!this.server) return;
 
     if (change.kind === 'message') {
-      const memberIds = await this.conversationsService.listMemberIds(change.conversationId);
-      this.server
-        .to([
-          roomOf(change.conversationId),
-          ...memberIds.map((memberId) => userRoomOf(memberId)),
-        ])
-        .emit('message:new', change.message);
+      // Le message système a déjà sa ligne dans le journal : on laisse le
+      // worker l'émettre, au lieu d'émettre en double.
+      await this.dispatcher.deliverMessage(change.message.id);
       return;
     }
 

@@ -52,6 +52,16 @@ describe('parsePayload — texte v1', () => {
   it('accepte un texte vide', () => {
     expect(parsePayload(buildTextV1(''))).toEqual({ kind: 'text', text: '' });
   });
+
+  it('sans replyTo, garde le format historique au bit près', () => {
+    // Non-régression : l'absence de citation ne doit pas ajouter de champ.
+    expect(decodeText(buildTextV1('abc'))).toBe('{"v":1,"text":"abc"}');
+  });
+
+  it('transporte replyTo quand une réponse cite un message', () => {
+    const parsed = parsePayload(buildTextV1('bonjour', 'msg-42'));
+    expect(parsed).toEqual({ kind: 'text', text: 'bonjour', replyTo: 'msg-42' });
+  });
 });
 
 describe('parsePayload — média v2', () => {
@@ -76,6 +86,14 @@ describe('parsePayload — média v2', () => {
     if (parsed.kind !== 'media') return;
     expect(parsed.caption).toBe('');
     expect(parsed.media.thumb).toBeUndefined();
+  });
+
+  it('transporte replyTo dans une réponse à un média', () => {
+    const parsed = parsePayload(buildMediaV2(media, 'ma photo', 'msg-7'));
+    expect(parsed.kind).toBe('media');
+    if (parsed.kind !== 'media') return;
+    expect(parsed.replyTo).toBe('msg-7');
+    expect(parsed.media).toEqual(media);
   });
 });
 

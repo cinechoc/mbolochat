@@ -48,8 +48,8 @@ export interface EncryptedMedia {
 }
 
 export type ParsedPayload =
-  | { kind: 'text'; text: string }
-  | { kind: 'media'; media: EncryptedMedia; caption: string };
+  | { kind: 'text'; text: string; replyTo?: string }
+  | { kind: 'media'; media: EncryptedMedia; caption: string; replyTo?: string };
 
 export type PayloadError = 'invalid_payload' | 'unsupported_version';
 
@@ -84,14 +84,17 @@ export function decodeText(value: string): string {
   return decodeURIComponent(encoded);
 }
 
-/** Sérialise le contenu `v:1` d'un message texte. */
-export function buildTextV1(text: string): string {
-  return encodeText(JSON.stringify({ v: 1, text }));
+/** Sérialise le contenu `v:1` d'un message texte. `replyTo` reste optionnel : son
+ * absence préserve le format historique `{v:1,text}` au bit près. */
+export function buildTextV1(text: string, replyTo?: string): string {
+  return encodeText(JSON.stringify(replyTo ? { v: 1, text, replyTo } : { v: 1, text }));
 }
 
 /** Sérialise le contenu `v:2` d'un média chiffré. */
-export function buildMediaV2(media: EncryptedMedia, caption = ''): string {
-  return encodeText(JSON.stringify({ v: 2, kind: 'media', media, caption }));
+export function buildMediaV2(media: EncryptedMedia, caption = '', replyTo?: string): string {
+  return encodeText(
+    JSON.stringify(replyTo ? { v: 2, kind: 'media', media, caption, replyTo } : { v: 2, kind: 'media', media, caption }),
+  );
 }
 
 function isBlob(value: unknown): value is EncryptedBlob {
@@ -154,18 +157,21 @@ export function parsePayload(plaintextB64: string): ParsedPayload {
     throw new InvalidPayloadError('invalid_payload');
   }
   const envelope = parsed as Record<string, unknown>;
+  const replyTo = typeof envelope.replyTo === 'string' ? envelope.replyTo : undefined;
   if (envelope.v === 1) {
     if (typeof envelope.text !== 'string') {
       throw new InvalidPayloadError('invalid_payload');
     }
-    return { kind: 'text', text: envelope.text };
+    return replyTo ? { kind: 'text', text: envelope.text, replyTo } : { kind: 'text', text: envelope.text };
   }
   if (envelope.v === 2) {
     if (envelope.kind !== 'media' || !isMedia(envelope.media)) {
       throw new InvalidPayloadError('invalid_payload');
     }
     const caption = typeof envelope.caption === 'string' ? envelope.caption : '';
-    return { kind: 'media', media: envelope.media, caption };
+    return replyTo
+      ? { kind: 'media', media: envelope.media, caption, replyTo }
+      : { kind: 'media', media: envelope.media, caption };
   }
   throw new InvalidPayloadError('unsupported_version');
 }

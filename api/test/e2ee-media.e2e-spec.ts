@@ -134,7 +134,7 @@ describe('Médias chiffrés de bout en bout (e2e)', () => {
       alice.id,
       asFile('photo.bin', 'application/octet-stream', ciphertext),
       { name: 'photo.jpg', width: 1600, height: 1200 },
-      { encrypted: true, conversationId: conversation.id, kind: 'IMAGE' },
+      { encrypted: true, conversationId: conversation.id, kind: 'IMAGE', idempotencyKey: randomUUID() },
     );
 
     // Le serveur ne renvoie aucune URL signée : juste un identifiant opaque.
@@ -200,7 +200,7 @@ describe('Médias chiffrés de bout en bout (e2e)', () => {
       alice.id,
       asFile('secret.bin', 'application/octet-stream', Buffer.from('SECRET')),
       {},
-      { encrypted: true, conversationId: conversation.id, kind: 'FILE' },
+      { encrypted: true, conversationId: conversation.id, kind: 'FILE', idempotencyKey: randomUUID() },
     );
     written.push(saved.url.replace(/^\//, ''));
 
@@ -290,7 +290,7 @@ describe('Médias chiffrés de bout en bout (e2e)', () => {
       alice.id,
       asFile('x.bin', 'application/octet-stream', Buffer.from('X')),
       {},
-      { encrypted: true, conversationId: other.id, kind: 'FILE' },
+      { encrypted: true, conversationId: other.id, kind: 'FILE', idempotencyKey: randomUUID() },
     );
     written.push(saved.url.replace(/^\//, ''));
 
@@ -323,7 +323,7 @@ describe('Médias chiffrés de bout en bout (e2e)', () => {
       alice.id,
       asFile('gal.bin', 'application/octet-stream', Buffer.from('G')),
       {},
-      { encrypted: true, conversationId: conversation.id, kind: 'IMAGE' },
+      { encrypted: true, conversationId: conversation.id, kind: 'IMAGE', idempotencyKey: randomUUID() },
     );
     written.push(saved.url.replace(/^\//, ''));
 
@@ -365,7 +365,7 @@ describe('Médias chiffrés de bout en bout (e2e)', () => {
       alice.id,
       asFile('old.bin', 'application/octet-stream', body),
       {},
-      { encrypted: true, conversationId: conversation.id, kind: 'FILE' },
+      { encrypted: true, conversationId: conversation.id, kind: 'FILE', idempotencyKey: randomUUID() },
     );
     const onDisk = join(process.cwd(), saved.url.replace(/^\//, ''));
     expect(onDisk).toContain('uploads');
@@ -407,13 +407,13 @@ describe('Médias chiffrés de bout en bout (e2e)', () => {
       alice.id,
       asFile('video.bin', 'application/octet-stream', Buffer.from('VIDEO-CIPHER')),
       {},
-      { encrypted: true, conversationId: conversation.id, kind: 'VIDEO' },
+      { encrypted: true, conversationId: conversation.id, kind: 'VIDEO', idempotencyKey: randomUUID() },
     );
     const thumb = await uploadsService.save(
       alice.id,
       asFile('thumb.bin', 'application/octet-stream', Buffer.from('THUMB-CIPHER')),
       {},
-      { encrypted: true, conversationId: conversation.id, kind: 'IMAGE' },
+      { encrypted: true, conversationId: conversation.id, kind: 'IMAGE', idempotencyKey: randomUUID() },
     );
     written.push(video.url.replace(/^\//, ''), thumb.url.replace(/^\//, ''));
 
@@ -460,7 +460,7 @@ describe('Médias chiffrés de bout en bout (e2e)', () => {
         outsider.id,
         asFile('intrus.bin', 'application/octet-stream', Buffer.from('I')),
         {},
-        { encrypted: true, conversationId: conversation.id, kind: 'FILE' },
+        { encrypted: true, conversationId: conversation.id, kind: 'FILE', idempotencyKey: randomUUID() },
       ),
     ).rejects.toThrow(/membre/i);
   });
