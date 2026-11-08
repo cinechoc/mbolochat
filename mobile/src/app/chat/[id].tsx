@@ -623,14 +623,23 @@ export default function ChatScreen() {
   const [conversation, setConversation] = useState<ConversationSummary | null>(() =>
     id ? cache.getConversation(id) : null,
   );
+  /**
+   * Conversation chiffrée de bout en bout : son brouillon ne doit jamais
+   * toucher `cache` (AsyncStorage non chiffré). La copie durable d'un brouillon
+   * E2EE vit dans SQLCipher, côté écran `e2ee-chat` ; ici on se contente de ne
+   * rien laisser en clair.
+   */
+  const e2eeConversation = Boolean(isE2eeEnabled() && conversation?.e2eeSince);
   const [messages, setMessages] = useState<Message[]>(() => (id ? cache.getMessages(id) ?? [] : []));
   /** Mes messages pas encore partis : la file, persistée sur l'appareil. */
   const [queued, setQueued] = useState<OutboxItem[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [input, setInput] = useState('');
-  /** Brouillon persistant de cette conversation. */
-  const [draft, setDraft] = useState(() => (id ? cache.getDraft(id) : ''));
+  /** Brouillon persistant de cette conversation (jamais en clair si E2EE). */
+  const [draft, setDraft] = useState(() =>
+    id && conversation && !e2eeConversation ? cache.getDraft(id) : '',
+  );
   const [typing, setTyping] = useState<{ userId: string; text: string } | null>(null);
   /** Anti-double-appui : deux stickers identiques ne partent pas en rafale. */
   const lastStickerSendAt = useRef(0);
@@ -683,14 +692,14 @@ export default function ChatScreen() {
   const resetComposer = useCallback(() => {
     setInput('');
     setDraft('');
-    if (id) {
+    if (id && !e2eeConversation) {
       cache.clearDraft(id);
     }
     setComposerKey((key) => key + 1);
     if (token && id) {
       connectSocket(token).emit('typing', { conversationId: id, typing: false });
     }
-  }, [token, id]);
+  }, [token, id, e2eeConversation]);
 
   const composerTheme = useMemo<ComposerTheme>(
     () => ({
@@ -728,7 +737,9 @@ export default function ChatScreen() {
     (value: string) => {
       setInput(value);
       setDraft(value);
-      if (id) {
+      // Le brouillon d'une conversation chiffrée n'est jamais écrit en clair :
+      // on exige de connaître la conversation et qu'elle ne soit pas E2EE.
+      if (id && conversation && !e2eeConversation) {
         cache.setDraft(id, value);
       }
       if (!token || !id) return;
@@ -751,8 +762,17 @@ export default function ChatScreen() {
         if (pending !== null) emitTyping();
       }, wait);
     },
-    [emitTyping, token, id],
+    [emitTyping, token, id, conversation, e2eeConversation],
   );
+
+  // Un brouillon laissé en clair par une version antérieure pour une
+  // conversation chiffrée ne doit pas survivre dans AsyncStorage : dès qu'on
+  // sait la conversation E2EE, on purge la copie non chiffrée.
+  useEffect(() => {
+    if (id && e2eeConversation) {
+      cache.clearDraft(id);
+    }
+  }, [id, e2eeConversation]);
 
   useEffect(() => {
     if (!token || !id || !user) {
@@ -2642,12 +2662,14 @@ export default function ChatScreen() {
       }
       setError(null);
       await enqueue({ conversationId: id, content, replyTo: replyTo?.id ?? null });
-      cache.clearDraft(id);
+      if (!e2eeConversation) {
+        cache.clearDraft(id);
+      }
       setDraft('');
       setReplyTo(null);
       void drain(token);
     },
-    [token, id, replyTo],
+    [token, id, replyTo, e2eeConversation],
   );
 
   /** Un sticker ne transporte qu'une référence de catalogue, jamais un fichier. */
