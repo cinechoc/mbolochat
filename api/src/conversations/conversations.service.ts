@@ -1640,6 +1640,89 @@ export class ConversationsService {
   }
 
   /**
+   * Marque comme lus ces messages, et eux seulement : un compteur « Ouvert »
+   * ne doit pas précéder la présentation réelle d'un message à l'écran. Mêmes
+   * règles que `markDelivered` (conversation membre, envoyé par un autre) et
+   * même idempotence (`read_at IS NULL`) que `recordRead` : un message déjà
+   * lu ne change plus, sans error.
+   */
+  async markMessagesRead(
+    conversationId: string,
+    userId: string,
+    messageIds: string[],
+  ): Promise<ReceiptChange[]> {
+    const ids = [...new Set(messageIds)]
+      .filter((id) => typeof id === 'string' && id.length > 0)
+      .slice(0, 200);
+    if (ids.length === 0) return [];
+
+    const candidates = await this.db
+      .select({
+        messageId: messages.id,
+        conversationId: messages.conversationId,
+        senderId: messages.senderId,
+      })
+      .from(messages)
+      .innerJoin(
+        conversationMembers,
+        and(
+          eq(conversationMembers.conversationId, messages.conversationId),
+          eq(conversationMembers.userId, userId),
+        ),
+      )
+      .where(
+        and(
+          eq(messages.conversationId, conversationId),
+          inArray(messages.id, ids),
+          ne(messages.senderId, userId),
+          sql`${messages.type} not in ('call', 'system')`,
+        ),
+      );
+    if (candidates.length === 0) return [];
+
+    const origin = new Map(candidates.map((row) => [row.messageId, row]));
+    const stamped = await this.db
+      .insert(messageReceipts)
+      .values(
+        candidates.map((row) => ({
+          messageId: row.messageId,
+          userId,
+          deliveredAt: new Date(),
+          readAt: new Date(),
+        })),
+      )
+      .onConflictDoUpdate({
+        target: [messageReceipts.messageId, messageReceipts.userId],
+        set: {
+          deliveredAt: sql`coalesce(${messageReceipts.deliveredAt}, now())`,
+          readAt: sql`now()`,
+        },
+        where: isNull(messageReceipts.readAt),
+      })
+      .returning({
+        messageId: messageReceipts.messageId,
+        userId: messageReceipts.userId,
+        deliveredAt: messageReceipts.deliveredAt,
+        readAt: messageReceipts.readAt,
+      });
+
+    return stamped.flatMap((row) => {
+      const from = origin.get(row.messageId);
+      if (!from) return [];
+      return [
+        {
+          messageId: row.messageId,
+          userId: row.userId,
+          deliveredAt: row.deliveredAt,
+          readAt: row.readAt,
+          conversationId: from.conversationId,
+          senderId: from.senderId,
+        },
+      ];
+    });
+  }
+
+  /**
    * Signale que l'appareil de `userId` a bien reçu ces messages : c'est la coche
    * « reçue ». Seuls les messages d'une conversation où l'utilisateur est membre
    * et envoyés par quelqu'un d'autre sont acceptés.

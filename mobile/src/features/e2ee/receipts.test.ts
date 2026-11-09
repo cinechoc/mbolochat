@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import type { MessageReceipt } from '@/lib/types';
 
-import { canMarkRead, deliveredIds, mergeReceipts, receiptState } from './receipts';
+import {
+  canMarkRead,
+  canReportDelivered,
+  deliveredIds,
+  mergeReceipts,
+  receiptState,
+} from './receipts';
 
 const receipt = (over: Partial<MessageReceipt> = {}): MessageReceipt => ({
   messageId: 'm1',
@@ -32,9 +38,16 @@ describe('receiptState — « Reçu » puis « Ouvert »', () => {
   });
 
   it('« Ouvert » reste définitif même si le destinataire disparaît de la présence', () => {
-    // L'état ne dépend que des lignes persistées, jamais de la présence.
+    // La lecture est acquise : la présence ne la révoque jamais.
     const stored = [receipt({ deliveredAt: null, readAt: '2024-01-01T10:01:00Z' })];
-    expect(receiptState(stored, 'me')).toBe('read');
+    expect(receiptState(stored, 'me', false)).toBe('read');
+  });
+
+  it('« Reçu » disparaît quand le destinataire se déconnecte avant d’avoir lu', () => {
+    const stored = [receipt({ deliveredAt: '2024-01-01T10:00:00Z' })];
+    expect(receiptState(stored, 'me', false)).toBe('none');
+    // Reconnexion sans lecture : la livraison confirmée + présence le fait réapparaître.
+    expect(receiptState(stored, 'me', true)).toBe('delivered');
   });
 
   it("l'accusé de l'auteur lui-même ne compte pas", () => {
@@ -103,5 +116,14 @@ describe('canMarkRead — ouverture réelle seulement', () => {
     expect(canMarkRead({ focused: false, appActive: true, ready: true })).toBe(false);
     expect(canMarkRead({ focused: true, appActive: false, ready: true })).toBe(false);
     expect(canMarkRead({ focused: true, appActive: true, ready: false })).toBe(false);
+  });
+});
+
+describe('canReportDelivered — accusat de livraison au premier plan seulement', () => {
+  it('exige application active et liste prête (pas de focus par écran)', () => {
+    expect(canReportDelivered({ appActive: true, ready: true })).toBe(true);
+    expect(canReportDelivered({ appActive: false, ready: true })).toBe(false);
+    expect(canReportDelivered({ appActive: true, ready: false })).toBe(false);
+    expect(canReportDelivered({ appActive: false, ready: false })).toBe(false);
   });
 });

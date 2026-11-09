@@ -201,4 +201,20 @@ export class ConversationsController {
   async markRead(@CurrentUser() current: JwtPayload, @Param('id') id: string) {
     await this.conversationsService.markRead(id, current.sub);
   }
+
+  /**
+   * Marque comme lus ces messages, et eux seulement : l'écran chiffré ne
+   * déclare « Ouvert » que pour les messages réellement visibles. Même forme
+   * que `markDelivered` (sanitised côté service), sans envoi d'événement
+   * temps réel (l'expéditeur relit par `GET :id/receipts`, comme pour `:id/read`).
+   */
+  @Post(':id/messages/read')
+  async markMessagesRead(
+    @CurrentUser() current: JwtPayload,
+    @Param('id') id: string,
+    @Body() body: { messageIds?: unknown },
+  ) {
+    const messageIds = Array.isArray(body?.messageIds) ? (body.messageIds as string[]) : [];
+    return this.conversationsService.markMessagesRead(id, current.sub, messageIds);
+  }
 }

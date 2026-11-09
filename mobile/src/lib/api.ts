@@ -605,6 +605,18 @@ export const api = {
     return request<void>(`/conversations/${conversationId}/read`, { method: 'POST', token });
   },
 
+  /**
+   * Marque comme lus ces messages, et eux seulement : le écran chiffré ne
+   * déclare « Ouvert » que pour les messages réellement visibles à l'écran.
+   */
+  markMessagesRead(token: string, conversationId: string, messageIds: string[]) {
+    return request<void>(`/conversations/${conversationId}/messages/read`, {
+      method: 'POST',
+      token,
+      body: { messageIds },
+    });
+  },
+
   markAllRead(token: string) {
     return request<void>('/conversations/read-all', { method: 'POST', token });
   },

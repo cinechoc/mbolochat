@@ -1,5 +1,5 @@
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { Copy, Phone, Reply, Video } from 'lucide-react-native';
+import { Copy, Forward, Info, Phone, Reply, Trash2, Video } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -41,7 +41,7 @@ import { emojiOnlyCount, splitEmoji, type EmojiSegment } from '@/features/emoji/
 import { mediaDisplaySize } from '@/features/media/mediaLayout';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTextScale } from '@/lib/text-scale';
-import { formatClock } from '@/lib/format';
+import { formatClock, formatDateLabel } from '@/lib/format';
 import { copyToClipboard } from '@/lib/clipboard';
 import { buildMessageRows, type E2eeListRow } from '@/features/e2ee/rows';
 import { peerProfileRoute } from '@/features/e2ee/routing';
@@ -50,8 +50,24 @@ import { useTheme } from '@/hooks/use-theme';
 import { fr } from '@/i18n/fr';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { connectSocket, ensureSocket, reportDelivered } from '@/lib/socket';
-import { canMarkRead, deliveredIds, mergeReceipts, receiptState } from '@/features/e2ee/receipts';
+import { connectSocket, deleteMessage, ensureSocket, reportDelivered } from '@/lib/socket';
+import {
+  canMarkRead,
+  canReportDelivered,
+  deliveredIds,
+  mergeReceipts,
+  receiptState,
+} from '@/features/e2ee/receipts';
+import {
+  READ_VISIBILITY_MIN_TIME_MS,
+  READ_VISIBILITY_PERCENT,
+  visibleForeignMessageIds,
+  type ViewableRow,
+} from '@/features/e2ee/read-visibility';
+import {
+  getPresenceRecord,
+  subscribePresenceUser,
+} from '@/features/presence/presenceStore';
 import { MessageReceiptLabel } from '@/features/chat/ui/message-receipt';
 import type {
   ConversationSummary,
@@ -75,6 +91,7 @@ import {
 } from '@/features/e2ee/initState';
 import { runE2eeInit } from '@/features/e2ee/initRunner';
 import {
+  deleteLocalMessage,
   knownMessageKeys,
   listLocalMessages,
   loadDraft,
@@ -105,6 +122,16 @@ function sortMessages(messages: StoredE2eeMessage[]): StoredE2eeMessage[] {
       return true;
     });
 }
+
+/**
+ * Configuration de traçage de viewport : la moitié de la bulle à l'écran et
+ * un maintien minimal (stabilité pendant le défilement) afin de ne pas
+ * déclarer « Ouvert » un message qui ne fait que traverser l'écran.
+ */
+const READ_VIEWABILITY_CONFIG = {
+  itemVisiblePercentThreshold: READ_VISIBILITY_PERCENT,
+  minimumViewTime: READ_VISIBILITY_MIN_TIME_MS,
+};
 
 export default function E2eeChatScreen() {
   const params = useLocalSearchParams<{
@@ -147,6 +174,12 @@ export default function E2eeChatScreen() {
   const [sendingMedia, setSendingMedia] = useState(false);
   /** Message dont la feuille d'actions est ouverte (appui long). */
   const [menuFor, setMenuFor] = useState<StoredE2eeMessage | null>(null);
+  /** Message dont la fiche d'informations est ouverte. */
+  const [infoFor, setInfoFor] = useState<StoredE2eeMessage | null>(null);
+  /** Message texte en cours de transfert vers une autre discussion chiffrée. */
+  const [forwardFor, setForwardFor] = useState<StoredE2eeMessage | null>(null);
+  const [forwardTargets, setForwardTargets] = useState<ConversationSummary[]>([]);
+  const [forwardLoading, setForwardLoading] = useState(false);
   const [composerKey, setComposerKey] = useState(0);
   /**
    * Accusés de mes messages envoyés, par identifiant (`Reçu` / `Ouvert`).
@@ -157,6 +190,20 @@ export default function E2eeChatScreen() {
   const [receipts, setReceipts] = useState<Record<string, MessageReceipt[]>>({});
   const [appActive, setAppActive] = useState(true);
   const [focused, setFocused] = useState(false);
+  /** Correspondant en ligne (application au premier plan) : pilote « Reçu ». */
+  const [peerOnline, setPeerOnline] = useState(false);
+  /** Accusés de livraison en attente du retour au premier plan. */
+  const pendingAckRef = useRef<string[]>([]);
+  /** Porte d'accusé, lue sans ré-ancrer les déchiffrements en cours. */
+  const ackGateRef = useRef({ appActive: true, ready: false });
+  /** Données de lecture, lues depuis des callbacks stables (ref lecteur). */
+  const tokenRef = useRef(token);
+  const conversationIdRef = useRef(conversationId);
+  /** Porte de consultation réelle des lectures (focus/app/ready), sans effet. */
+  const readGateRef = useRef({ focused: false, appActive: true, ready: false });
+  /** Identifiants étrangers actuellement visibles, en attente d'envoi. */
+  const lastVisibleIdsRef = useRef<string[]>([]);
+  const readTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [chatAreaHeight, setChatAreaHeight] = useState(0);
   const [replyBarHeight, setReplyBarHeight] = useState(0);
   const blurTargetRef = useRef<React.ComponentRef<typeof View> | null>(null);
@@ -272,10 +319,17 @@ export default function E2eeChatScreen() {
         rememberAccount(result.account);
         addStored(result.stored);
         // Le message est écrit sur cet appareil : c'est exactement ce que
-        // signifie « Reçu » pour l'expéditeur. Aucun accusé n'est envoyé
-        // avant cette écriture, ni pour un message que je viens d'envoyer.
+        // signifie « Reçu » pour l'expéditeur. L'accusé ne part que si
+        // l'application est active : reçu en arrière-plan, il attend le retour
+        // au premier plan plutôt que de signaler une présence inexistante.
         const acked = deliveredIds([result.stored]);
-        if (acked.length > 0) reportDelivered(acked);
+        if (acked.length > 0) {
+          if (canReportDelivered(ackGateRef.current)) {
+            reportDelivered(acked);
+          } else {
+            pendingAckRef.current = [...pendingAckRef.current, ...acked];
+          }
+        }
         if (result.keyChanged) {
           Alert.alert(fr.e2eeChat.keyChangedTitle, fr.e2eeChat.keyChangedBody);
         }
@@ -353,8 +407,8 @@ export default function E2eeChatScreen() {
           if (message.clientId && known.clientIds.has(message.clientId)) continue;
           await queueDecrypt(message);
         }
-        // L'accusé de lecture est déclenché par l'effet de consultation réelle
-        // (`markReadNow`), pas par le simple chargement de l'écran.
+        // L'accusé de lecture n'est émis que par la visibilité réelle
+        // (`handleViewableItemsChanged`), jamais par le chargement.
         if (!cancelled) setReady(true);
       } catch (cause) {
         if (!cancelled) {
@@ -392,18 +446,99 @@ export default function E2eeChatScreen() {
   }, []);
 
   /**
-   * « Ouvert » n'est déclaré que si la conversation est réellement consultée :
-   * écran au premier plan, application active, liste chargée. Un message reçu
-   * en arrière-plan reste donc « Reçu » (ou sans statut s'il n'est pas encore
-   * arrivé sur l'appareil).
+   * « Ouvert » n'est déclaré que pour les messages réellement visibles dans la
+   * conversation consultée : écran au premier plan, application active, liste
+   * chargée, et élément effectivement affiché (pas seulement en mémoire).
+   * Un message hors écran, chargé mais non visible, ou reçu en arrière-plan
+   * n'est jamais déclaré lu.
    */
-  const markReadNow = useCallback(() => {
-    if (!token || !canMarkRead({ focused, appActive, ready })) return;
-    void api.markRead(token, conversationId).catch(() => undefined);
-  }, [appActive, conversationId, focused, ready, token]);
+  const flushReadPending = useCallback(() => {
+    readTimerRef.current = null;
+    if (!canMarkRead(readGateRef.current)) return;
+    const ids = lastVisibleIdsRef.current;
+    lastVisibleIdsRef.current = [];
+    if (ids.length === 0) return;
+    const currentToken = tokenRef.current;
+    const conversationIdRefCurrent = conversationIdRef.current;
+    if (!currentToken || !conversationIdRefCurrent) return;
+    void api
+      .markMessagesRead(currentToken, conversationIdRefCurrent, ids)
+      .catch(() => {
+        // Idempotent côté serveur : les identifiants restent en file pour la
+        // prochaine visibilité, sans effet double.
+        lastVisibleIdsRef.current = [...lastVisibleIdsRef.current, ...ids];
+      });
+  }, []);
+
+  /**
+   * Regroupe les lectures visibles avant l'appel réseau : le défilement
+   * déclenche des visibilités par fenêtres, un court délai les fusionne.
+   */
+  const scheduleReadFlush = useCallback(() => {
+    if (readTimerRef.current) clearTimeout(readTimerRef.current);
+    readTimerRef.current = setTimeout(() => {
+      void flushReadPending();
+    }, 150);
+  }, [flushReadPending]);
+
+  /**
+   * Traçage de viewport : la liste annonce les éléments réellement affichés
+   * (seuil + stabilité). Les lectures passent seulement si la porte de
+   * consultation réelle est ouverte *au moment de l'enregistrement*.
+   */
+  const handleViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewableRow[] }) => {
+      const ids = visibleForeignMessageIds(viewableItems);
+      lastVisibleIdsRef.current = ids;
+      if (!canMarkRead(readGateRef.current)) return;
+      scheduleReadFlush();
+    },
+    [scheduleReadFlush],
+  );
+
+  // Présence en ligne du correspondant : « Reçu » la suit en direct, sans
+  // attendre un événement temps réel du serveur sur le métier.
   useEffect(() => {
-    markReadNow();
-  }, [markReadNow, messages.length]);
+    if (!peerId) {
+      setPeerOnline(false);
+      return;
+    }
+    const sync = () => {
+      setPeerOnline(getPresenceRecord(peerId).state === 'online');
+    };
+    sync();
+    return subscribePresenceUser(peerId, sync);
+  }, [peerId]);
+
+  // Synchronise les portes d'accusé/lecture et décharge les files dès que
+  // l'application (et l'écran) redeviennent actifs.
+  useEffect(() => {
+    ackGateRef.current = { appActive, ready };
+    readGateRef.current = { focused, appActive, ready };
+    tokenRef.current = token;
+    conversationIdRef.current = conversationId;
+    if (canReportDelivered({ appActive, ready }) && pendingAckRef.current.length > 0) {
+      const ids = pendingAckRef.current;
+      pendingAckRef.current = [];
+      reportDelivered(ids);
+    }
+    // Les lectures visibles en attente partent quand la porte s'ouvre : un
+    // message devenu visible pendant le chargement n'est déclaré lu qu'après.
+    if (canMarkRead({ focused, appActive, ready }) && lastVisibleIdsRef.current.length > 0) {
+      scheduleReadFlush();
+    }
+  }, [appActive, conversationId, focused, ready, scheduleReadFlush, token]);
+
+  // Le changement de discussion ne doit pas laisser filer une lecture de la
+  // précédente : file, visible et minuteur sont vidés avant tout chargement.
+  useEffect(() => {
+    lastVisibleIdsRef.current = [];
+    if (readTimerRef.current) {
+      clearTimeout(readTimerRef.current);
+      readTimerRef.current = null;
+    }
+    pendingAckRef.current = [];
+  }, [conversationId]);
 
   useEffect(() => {
     if (!token || !ready || !isE2eeEnabled()) return;
@@ -411,10 +546,9 @@ export default function E2eeChatScreen() {
     const onMessage = (message: Message) => {
       if (message.conversationId !== conversationId || message.sender.id === user?.id) return;
       if (message.encryption !== 'v1') return;
+      // Un message arrivé n'est découvert que s'il devient visible : le
+      // déchiffrement le rend, la visibilité décide de la lecture.
       void queueDecrypt(message);
-      // Accusé de lecture seulement si l'écran est réellement visible : un
-      // message qui arrive en arrière-plan reste « Reçu », jamais « Ouvert ».
-      markReadNow();
     };
     // « Reçu » puis « Ouvert » : les états viennent du serveur, message par
     // message, et sont fusionnés sans jamais rétrograder une lecture connue.
@@ -429,7 +563,7 @@ export default function E2eeChatScreen() {
       socket.off('message:new', onMessage);
       socket.off('receipt', onReceipt);
     };
-  }, [conversationId, markReadNow, queueDecrypt, ready, token, user?.id]);
+  }, [conversationId, queueDecrypt, ready, token, user?.id]);
 
   useEffect(() => {
     return () => {
@@ -772,6 +906,91 @@ export default function E2eeChatScreen() {
     }
   };
 
+  /**
+   * « Supprimer pour moi » : on retire la ligne locale (SQLCipher) et on
+   * demande au serveur de ne plus la renvoyer à ce compte. Le correspondant
+   * n'est pas concerné — il garde sa copie, c'est exactement la différence
+   * avec « supprimer pour tous » (non proposé ici : la copie du pair est
+   * déchiffrée sur son appareil, aucun retrait n'y est possible).
+   */
+  const deleteForMe = async (message: StoredE2eeMessage) => {
+    const db = dbRef.current;
+    if (!db) return;
+    if (replyTo?.id === message.id) setReplyTo(null);
+    setMessages((prev) => prev.filter((item) => item.id !== message.id));
+    if (message.media_meta) {
+      try {
+        closeMedia(decodeMediaMeta(message.media_meta)?.blob.uploadId ?? '');
+      } catch {
+        // Fermeture best-effort : le média décorrelé reste inaccessible.
+      }
+    }
+    void deleteLocalMessage(db, message.id).catch(() => undefined);
+    try {
+      await deleteMessage(token, conversationId, message.id, false);
+    } catch {
+      Alert.alert(fr.e2eeChat.error, fr.e2eeChat.deleteFailed);
+    }
+  };
+
+  /** Seul un texte clair transitable est traférable ; jamais un média ou un illisible. */
+  const isForwardable = (message: StoredE2eeMessage) =>
+    Boolean(message.body) &&
+    !message.media_meta &&
+    !message.sticker_ref &&
+    !message.unreadable_reason;
+
+  const nameOf = (target: ConversationSummary) => {
+    const other = target.members.find((member) => member.id !== user?.id);
+    return target.name ?? other?.displayName ?? other?.username ?? fr.e2eeChat.title;
+  };
+
+  /** Les cibles ne sont que des discussions directes chiffrées (jamais du clair). */
+  const openForward = (message: StoredE2eeMessage) => {
+    setForwardFor(message);
+    setForwardTargets([]);
+    setForwardLoading(true);
+    void api
+      .listConversations(token)
+      .then((list) => {
+        const targets = (list ?? []).filter(
+          (target) =>
+            target.type === 'DIRECT' && !!target.e2eeSince && target.id !== conversationId,
+        );
+        setForwardTargets(targets);
+      })
+      .catch(() => setForwardTargets([]))
+      .finally(() => setForwardLoading(false));
+  };
+
+  /** Ré-émission chiffrée vers le pair de la discussion cible. */
+  const doForward = (message: StoredE2eeMessage, target: ConversationSummary) => {
+    const db = dbRef.current;
+    const account = accountRef.current;
+    setForwardFor(null);
+    if (!db || !account || !user) return;
+    void (async () => {
+      try {
+        await sendEncryptedText({
+          token,
+          db,
+          account,
+          conversation: target,
+          currentUserId: user.id,
+          currentUserName: user.displayName,
+          text: message.body,
+        });
+        Alert.alert(fr.e2eeChat.forward, fr.e2eeChat.forwardDone);
+      } catch (cause) {
+        if (cause instanceof E2eeKeyChangedError) {
+          Alert.alert(fr.e2eeChat.keyChangedTitle, fr.e2eeChat.keyChangedBody);
+        } else {
+          Alert.alert(fr.e2eeChat.error, fr.e2eeChat.forwardError);
+        }
+      }
+    })();
+  };
+
   const menuActions: SheetAction[] = menuFor
     ? [
         {
@@ -780,6 +999,16 @@ export default function E2eeChatScreen() {
           icon: Reply,
           onPress: () => setReplyTo(menuFor),
         },
+        ...(isForwardable(menuFor)
+          ? [
+              {
+                key: 'forward',
+                label: fr.e2eeChat.forward,
+                icon: Forward,
+                onPress: () => void openForward(menuFor),
+              } as SheetAction,
+            ]
+          : []),
         ...(menuFor.body
           ? [
               {
@@ -787,9 +1016,22 @@ export default function E2eeChatScreen() {
                 label: fr.e2eeChat.copy,
                 icon: Copy,
                 onPress: () => void copyMessage(menuFor),
-              },
+              } as SheetAction,
             ]
           : []),
+        {
+          key: 'info',
+          label: fr.e2eeChat.messageInfo,
+          icon: Info,
+          onPress: () => setInfoFor(menuFor),
+        },
+        {
+          key: 'deleteForMe',
+          label: fr.e2eeChat.deleteForMe,
+          icon: Trash2,
+          destructive: true,
+          onPress: () => void deleteForMe(menuFor),
+        },
       ]
     : [];
 
@@ -843,7 +1085,7 @@ export default function E2eeChatScreen() {
               <StickerMessage stickerRef={stickerRef} size={140} />
             </View>
           </SwipeableBubble>
-          {mine ? <MessageReceiptLabel state={receiptState(receipts[message.id], user?.id)} /> : null}
+          {mine ? <MessageReceiptLabel state={receiptState(receipts[message.id], user?.id, peerOnline)} /> : null}
         </ChatMessageRow>
       );
     }
@@ -911,7 +1153,7 @@ export default function E2eeChatScreen() {
               />
             </View>
           </SwipeableBubble>
-          {mine ? <MessageReceiptLabel state={receiptState(receipts[message.id], user?.id)} /> : null}
+          {mine ? <MessageReceiptLabel state={receiptState(receipts[message.id], user?.id, peerOnline)} /> : null}
         </ChatMessageRow>
       );
     }
@@ -961,7 +1203,7 @@ export default function E2eeChatScreen() {
               </View>
             </View>
           </SwipeableBubble>
-          {mine ? <MessageReceiptLabel state={receiptState(receipts[message.id], user?.id)} /> : null}
+          {mine ? <MessageReceiptLabel state={receiptState(receipts[message.id], user?.id, peerOnline)} /> : null}
         </ChatMessageRow>
       );
     }
@@ -1002,7 +1244,7 @@ export default function E2eeChatScreen() {
             )}
           </ChatBubble>
         </SwipeableBubble>
-        {mine ? <MessageReceiptLabel state={receiptState(receipts[message.id], user?.id)} /> : null}
+        {mine ? <MessageReceiptLabel state={receiptState(receipts[message.id], user?.id, peerOnline)} /> : null}
       </ChatMessageRow>
     );
   };
@@ -1086,6 +1328,8 @@ export default function E2eeChatScreen() {
             ref={listRef}
             data={rows}
             keyExtractor={(row) => row.key}
+            viewabilityConfig={READ_VIEWABILITY_CONFIG}
+            onViewableItemsChanged={handleViewableItemsChanged}
             contentContainerStyle={[
               styles.listContent,
               rows.length === 0 ? styles.listContentEmpty : null,
@@ -1174,6 +1418,90 @@ export default function E2eeChatScreen() {
         actions={menuActions}
         onClose={() => setMenuFor(null)}
       />
+      <ActionSheet
+        visible={infoFor !== null}
+        title={fr.e2eeChat.messageInfo}
+        actions={[]}
+        onClose={() => setInfoFor(null)}
+        header={
+          <View style={styles.infoRows}>
+            <View style={styles.infoRow}>
+              <ThemedText style={chatStyles.secondaryText}>{fr.e2eeChat.infoSender}</ThemedText>
+              <ThemedText>
+                {infoFor && infoFor.mine === 1
+                  ? fr.e2eeChat.me
+                  : (infoFor?.sender_name ?? title)}
+              </ThemedText>
+            </View>
+            <View style={styles.infoRow}>
+              <ThemedText style={chatStyles.secondaryText}>{fr.e2eeChat.infoSentAt}</ThemedText>
+              <ThemedText>
+                {infoFor
+                  ? `${formatDateLabel(infoFor.created_at)} · ${formatClock(infoFor.created_at)}`
+                  : ''}
+              </ThemedText>
+            </View>
+            <View style={styles.infoRow}>
+              <ThemedText style={chatStyles.secondaryText}>{fr.e2eeChat.infoType}</ThemedText>
+              <ThemedText>
+                {infoFor?.unreadable_reason
+                  ? fr.e2eeChat.infoTypeUnreadable
+                  : infoFor?.media_meta
+                    ? fr.e2eeChat.infoTypeMedia
+                    : infoFor?.sticker_ref
+                      ? fr.e2eeChat.infoTypeSticker
+                      : fr.e2eeChat.infoTypeText}
+              </ThemedText>
+            </View>
+            <View style={styles.infoRow}>
+              <ThemedText style={chatStyles.secondaryText}>{fr.e2eeChat.infoState}</ThemedText>
+              <ThemedText>
+                {infoFor
+                  ? (() => {
+                      const state = receiptState(
+                        receipts[infoFor.id],
+                        user?.id,
+                        peerOnline,
+                      );
+                      return state === 'read'
+                        ? fr.e2eeChat.receiptRead
+                        : state === 'delivered'
+                          ? fr.e2eeChat.receiptDelivered
+                          : fr.e2eeChat.infoStateNone;
+                    })()
+                  : ''}
+              </ThemedText>
+            </View>
+          </View>
+        }
+      />
+      <ActionSheet
+        visible={forwardFor !== null}
+        title={fr.e2eeChat.forwardTo}
+        actions={[]}
+        onClose={() => setForwardFor(null)}
+        header={
+          <View>
+            {forwardLoading ? (
+              <ThemedText style={styles.forwardNote}>{fr.e2eeChat.forwardLoading}</ThemedText>
+            ) : forwardTargets.length === 0 ? (
+              <ThemedText style={styles.forwardNote}>{fr.e2eeChat.forwardNoTarget}</ThemedText>
+            ) : (
+              forwardTargets.map((target) => (
+                <Pressable
+                  key={target.id}
+                  onPress={() => {
+                    if (forwardFor) doForward(forwardFor, target);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={nameOf(target)}>
+                  <ThemedText style={styles.forwardRow}>{nameOf(target)}</ThemedText>
+                </Pressable>
+              ))
+            )}
+          </View>
+        }
+      />
       {viewer ? (
         viewer.kind === 'image' ? (
           <ImageViewer urls={[viewer.uri]} initialIndex={0} onClose={closeViewer} />
@@ -1236,4 +1564,15 @@ const styles = StyleSheet.create({
   fatalLabel: { fontWeight: '600' },
   unreadableText: { fontStyle: 'italic', opacity: 0.8 },
   error: { color: '#e5484d', paddingHorizontal: Spacing.three },
+  infoRows: { gap: Spacing.two, paddingBottom: Spacing.two },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  forwardNote: { paddingVertical: Spacing.two },
+  forwardRow: {
+    paddingVertical: Spacing.threeHalf,
+    paddingHorizontal: Spacing.one,
+  },
 });

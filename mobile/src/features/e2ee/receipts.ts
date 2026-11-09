@@ -15,14 +15,19 @@ export type ReceiptState = 'none' | 'delivered' | 'read';
  *
  * - `read` dès qu'un destinataire a ouvert le message — et pour toujours : une
  *   déconnexion ou une absence ultérieure ne fait jamais retomber l'état ;
- * - `delivered` si un destinataire a seulement confirmé la réception ;
+ * - `delivered` si un destinataire a confirmé la réception **et** est en ligne
+ *   (son application au premier plan) : un destinataire qui se déconnecte
+ *   avant d'avoir ouvert le message fait disparaître le « Reçu » de l'affichage,
+ *   qui réapparaît à sa reconnexion tant qu'il n'a pas lu ;
  * - `none` sinon (aucun statut affiché, notamment destinataire hors ligne).
  *
  * L'accusé de l'auteur lui-même est ignoré : il ne renseigne sur personne.
+ * `peerOnline` vaut `true` par défaut pour préserver les appelants historiques.
  */
 export function receiptState(
   receipts: MessageReceipt[] | undefined,
   senderId: string | null | undefined,
+  peerOnline = true,
 ): ReceiptState {
   let delivered = false;
   for (const receipt of receipts ?? []) {
@@ -30,7 +35,7 @@ export function receiptState(
     if (receipt.readAt) return 'read';
     if (receipt.deliveredAt) delivered = true;
   }
-  return delivered ? 'delivered' : 'none';
+  return delivered && peerOnline ? 'delivered' : 'none';
 }
 
 /**
@@ -92,4 +97,15 @@ export function canMarkRead(input: {
   ready: boolean;
 }): boolean {
   return input.focused && input.appActive && input.ready;
+}
+
+/**
+ * Tot accusé de livraison côté destinataire : la livraison est confirmée sur
+ * l'appareil dès que le message y est persisté, mais l'accusé ne part que si
+ * l'application est active et que l'écran a fini de charger. Un message reçu
+ * en arrière-plan reste en file locale et est accusé au retour au premier
+ * plan — jamais pendant que l'application est en arrière-plan.
+ */
+export function canReportDelivered(input: { appActive: boolean; ready: boolean }): boolean {
+  return input.appActive && input.ready;
 }
