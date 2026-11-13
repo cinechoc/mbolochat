@@ -16,6 +16,7 @@ import { AuthService } from './auth.service.js';
 import { CurrentUser } from './current-user.decorator.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { LoginDto } from './dto/login.dto.js';
+import { RefreshTokenDto } from './dto/refresh-token.dto.js';
 import { RegisterDto } from './dto/register.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
@@ -52,15 +53,15 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
-  refresh(@Body() body: { refreshToken?: string }) {
-    return this.authService.refresh(body?.refreshToken ?? '');
+  refresh(@Body() dto: RefreshTokenDto) {
+    return this.authService.refresh(dto?.refreshToken ?? '');
   }
 
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(JwtAuthGuard)
-  async logout(@CurrentUser() current: JwtPayload, @Body() body: { refreshToken?: string }) {
-    await this.authService.logout(body?.refreshToken, current.deviceId);
+  async logout(@CurrentUser() current: JwtPayload, @Body() dto: RefreshTokenDto) {
+    await this.authService.logout(dto?.refreshToken, current.deviceId);
   }
 
   /**

@@ -20,6 +20,7 @@ import {
 import { UploadsService } from '../uploads/uploads.service.js';
 import { UsersService } from '../users/users.service.js';
 import { canSee } from '../users/visibility.js';
+import { detectImageKind, isStrictBase64 } from '../common/image-signature.js';
 import type { StickerAttachmentMeta } from '../chat/sticker-attachment.js';
 import { isValidStickerRef, isMessageType, type MessageType } from '../chat/sticker-ref.js';
 import {
@@ -29,6 +30,11 @@ import {
 import { MessageEventsService } from '../message-events/message-events.service.js';
 import { ConversationEventsService } from './conversation-events.service.js';
 import { MAX_GROUP_MEMBERS } from './group-limits.js';
+
+/** Plafond de l'image décodée (photo de groupe, aligné sur l'avatar). */
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+/** Longueur base64 maximale pour ce plafond (4 caractères pour 3 octets). */
+const MAX_IMAGE_BASE64_CHARS = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 4;
 
 export interface SenderInfo {
   id: string;
@@ -813,28 +819,32 @@ export class ConversationsService {
     conversationId: string,
     userId: string,
     data: string,
-    mimeType = 'image/jpeg',
+    // Conservé pour la compatibilité d'appel ; l'extension vient du contenu.
+    _mimeType = 'image/jpeg',
   ): Promise<ConversationSummary> {
     await this.requireGroup(conversationId);
     await this.requireAdmin(conversationId, userId);
 
-    const extensions: Record<string, string> = {
-      'image/jpeg': 'jpg',
-      'image/jpg': 'jpg',
-      'image/png': 'png',
-      'image/webp': 'webp',
-    };
-    const ext = extensions[mimeType.toLowerCase()];
-    if (!ext) {
-      throw new BadRequestException('Format d’image non pris en charge');
+    // Mêmes règles que l'avatar : taille contrôlée avant décodage, base64
+    // strict, signature binaire JPEG/PNG/WebP — jamais le MIME déclaré.
+    if (data.length > MAX_IMAGE_BASE64_CHARS) {
+      throw new BadRequestException('Image trop lourde (max 2 Mo)');
+    }
+    if (!isStrictBase64(data)) {
+      throw new BadRequestException('Image invalide (base64)');
     }
     const buffer = Buffer.from(data, 'base64');
     if (buffer.length === 0) {
       throw new BadRequestException('Image vide');
     }
-    if (buffer.length > 2 * 1024 * 1024) {
+    if (buffer.length > MAX_IMAGE_BYTES) {
       throw new BadRequestException('Image trop lourde (max 2 Mo)');
     }
+    const detected = detectImageKind(buffer);
+    if (!detected) {
+      throw new BadRequestException('Format d’image non pris en charge (JPEG, PNG ou WebP attendu)');
+    }
+    const ext = detected.extension;
 
     const dir = join(process.cwd(), 'uploads');
     if (!existsSync(dir)) {

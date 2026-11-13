@@ -18,6 +18,7 @@ import { CurrentUser } from '../auth/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { JwtPayload } from '../auth/jwt-payload.js';
 import { ConversationsService } from './conversations.service.js';
+import { AddMembersDto } from './dto/add-members.dto.js';
 import { CreateConversationDto } from './dto/create-conversation.dto.js';
 import { UpdateGroupDto } from './dto/update-group.dto.js';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto.js';
@@ -122,9 +123,9 @@ export class ConversationsController {
   addMembers(
     @CurrentUser() current: JwtPayload,
     @Param('id') id: string,
-    @Body() body: { memberIds?: string[] },
+    @Body() dto: AddMembersDto,
   ) {
-    return this.conversationsService.addMembers(id, current.sub, body?.memberIds ?? []);
+    return this.conversationsService.addMembers(id, current.sub, dto.memberIds ?? []);
   }
 
   @Delete(':id/members/:userId')

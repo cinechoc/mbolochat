@@ -18,8 +18,16 @@ import { join } from 'node:path';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import type { JwtPayload } from '../auth/jwt-payload.js';
+import { detectImageKind, isStrictBase64 } from '../common/image-signature.js';
+import { RegisterPushTokenDto, RemovePushTokenDto } from './dto/push-token.dto.js';
+import { UpdateMeDto } from './dto/update-me.dto.js';
 import { UsersService, toPublicUser, type SettingsPatch } from './users.service.js';
 import type { Request } from 'express';
+
+/** Plafond de l'image décodée (avatar et photo de groupe, alignés). */
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+/** Longueur base64 maximale pour ce plafond (4 caractères pour 3 octets). */
+const MAX_BASE64_CHARS = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 4;
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
@@ -33,17 +41,7 @@ export class UsersController {
   }
 
   @Patch('me')
-  async updateMe(
-    @CurrentUser() current: JwtPayload,
-    @Body()
-    body: {
-      displayName?: string;
-      bio?: string;
-      notificationsEnabled?: boolean;
-      notificationSound?: boolean;
-      notificationPreview?: boolean;
-    },
-  ) {
+  async updateMe(@CurrentUser() current: JwtPayload, @Body() body: UpdateMeDto) {
     const incoming = (body ?? {}) as Record<string, unknown>;
     for (const forbidden of ['city', 'country', 'birthday', 'cityUpdatedAt']) {
       if (incoming[forbidden] !== undefined) {
@@ -100,13 +98,34 @@ export class UsersController {
   }
 
   @Post('me/avatar')
-  async uploadAvatar(@CurrentUser() current: JwtPayload, @Req() req: Request) {    // Expect raw body as binary image via multipart? We'll accept base64 JSON instead.
+  async uploadAvatar(@CurrentUser() current: JwtPayload, @Req() req: Request) {
     const body = req.body as { data?: string; mimeType?: string } | undefined;
     if (!body?.data) {
-      throw new (await import('@nestjs/common')).BadRequestException('Missing image data');
+      throw new BadRequestException('Missing image data');
     }
-    const mime = body.mimeType ?? 'image/jpeg';
-    const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+    // La taille est contrôlée avant décodage : la chaîne base64 ne doit pas
+    // dépasser ce que 2 Mo décodés exigent, sinon elle est rejetée sans
+    // allocation proportionnelle.
+    if (body.data.length > MAX_BASE64_CHARS) {
+      throw new BadRequestException('Image too large (max 2MB)');
+    }
+    if (!isStrictBase64(body.data)) {
+      throw new BadRequestException('Image invalide (base64)');
+    }
+    const buffer = Buffer.from(body.data, 'base64');
+    if (buffer.length === 0) {
+      throw new BadRequestException('Image vide');
+    }
+    if (buffer.length > MAX_IMAGE_BYTES) {
+      throw new BadRequestException('Image too large (max 2MB)');
+    }
+    // L'extension vient de la signature binaire, jamais du MIME déclaré :
+    // un SVG déguisé en JPEG est refusé ici.
+    const detected = detectImageKind(buffer);
+    if (!detected) {
+      throw new BadRequestException('Format d’image non pris en charge (JPEG, PNG ou WebP attendu)');
+    }
+    const ext = detected.extension;
     const dir = join(process.cwd(), 'uploads');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const filename = `${current.sub}.${ext}`;
@@ -115,13 +134,14 @@ export class UsersController {
     for (const oldExt of ['png', 'jpg', 'webp']) {
       if (oldExt !== ext) rmSync(join(dir, `${current.sub}.${oldExt}`), { force: true });
     }
-    const buffer = Buffer.from(body.data, 'base64');
-    if (buffer.length > 2 * 1024 * 1024) {
-      throw new (await import('@nestjs/common')).BadRequestException('Image too large (max 2MB)');
-    }
-    const stream = createWriteStream(filepath);
-    stream.write(buffer);
-    stream.end();
+    // Écriture attendue : l'URL publiée ne doit jamais pointer vers un
+    // fichier en cours d'écriture (comme la photo de groupe).
+    await new Promise<void>((resolve, reject) => {
+      const stream = createWriteStream(filepath);
+      stream.on('error', reject);
+      stream.on('finish', () => resolve());
+      stream.end(buffer);
+    });
     const url = `/uploads/${filename}?v=${Date.now()}`;
     const user = await this.usersService.updateProfile(current.sub, { avatarUrl: url });
     return toPublicUser(user);
@@ -143,7 +163,7 @@ export class UsersController {
   @Post('me/push-token')
   async registerPushToken(
     @CurrentUser() current: JwtPayload,
-    @Body() body: { token?: string; platform?: string; apiBaseUrl?: string },
+    @Body() body: RegisterPushTokenDto,
   ) {
     const token = body?.token?.trim();
     if (!token) {
@@ -160,7 +180,7 @@ export class UsersController {
   }
 
   @Delete('me/push-token')
-  async removePushToken(@CurrentUser() current: JwtPayload, @Body() body: { token?: string }) {
+  async removePushToken(@CurrentUser() current: JwtPayload, @Body() body: RemovePushTokenDto) {
     const token = body?.token?.trim();
     if (token) {
       await this.usersService.removePushToken(current.sub, token);
