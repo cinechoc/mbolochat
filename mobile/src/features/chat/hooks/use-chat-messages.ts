@@ -4,6 +4,7 @@ import {
   INITIAL_MESSAGES_STATE,
   messagesReducer,
 } from '../model/messages-state';
+import { unreadBoundary } from '../model/merge';
 import { buildChatRows, type ChatRow } from '../model/rows';
 import type { ChatTransport } from '../transport/types';
 
@@ -15,7 +16,9 @@ import type { ChatTransport } from '../transport/types';
 export function useChatMessages(input: {
   transport: ChatTransport | null;
   timeGapMs: number;
-  unreadFrom?: { id: string; count: number } | null;
+  currentUserId: string;
+  /** Nombre de messages non lus fourni par le résumé serveur. */
+  unreadCount?: number;
 }): {
   messages: ReturnType<typeof messagesReducer>['messages'];
   rows: ChatRow[];
@@ -23,9 +26,11 @@ export function useChatMessages(input: {
   ready: boolean;
   hasMore: boolean;
   error: string | null;
+  typing: { userId: string; text: string } | null;
+  online: boolean;
   loadOlder: () => Promise<void>;
 } {
-  const { transport, timeGapMs, unreadFrom = null } = input;
+  const { transport, timeGapMs, currentUserId, unreadCount = 0 } = input;
   const [state, dispatch] = useReducer(messagesReducer, INITIAL_MESSAGES_STATE);
 
   useEffect(() => {
@@ -55,8 +60,8 @@ export function useChatMessages(input: {
       onMessageRemoved: (id, forEveryone) => dispatch({ type: 'remove', id, forEveryone }),
       onReceipts: (receipts) => dispatch({ type: 'receipts', receipts }),
       onReaction: (id, reactions) => dispatch({ type: 'reaction', id, reactions }),
-      onTyping: () => undefined,
-      onConnection: () => undefined,
+      onTyping: (typing) => dispatch({ type: 'typing', typing }),
+      onConnection: (online) => dispatch({ type: 'connection', online }),
       onConversationUpdated: () => undefined,
       onConversationRemoved: () => undefined,
       onError: (error) => dispatch({ type: 'error', error }),
@@ -79,6 +84,11 @@ export function useChatMessages(input: {
     dispatch({ type: 'hasMore', hasMore: page.hasMore });
   }, [transport, state.hasMore, state.messages]);
 
+  const unreadFrom = useMemo(
+    () => unreadBoundary(state.messages, unreadCount, currentUserId),
+    [state.messages, unreadCount, currentUserId],
+  );
+
   const rows = useMemo(
     () =>
       buildChatRows({
@@ -96,6 +106,8 @@ export function useChatMessages(input: {
     ready: state.ready,
     hasMore: state.hasMore,
     error: state.error,
+    typing: state.typing,
+    online: state.online,
     loadOlder,
   };
 }

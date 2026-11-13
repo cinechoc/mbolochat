@@ -38,7 +38,7 @@ export function ChatMessageList({
   windowWidth,
   token,
   resolveQuote,
-  seenByCount,
+  seenByCountFor,
   onReply,
   onLongPress,
   onRetry,
@@ -61,7 +61,7 @@ export function ChatMessageList({
         windowWidth={windowWidth}
         token={token}
         resolveQuote={resolveQuote}
-        seenByCount={seenByCount}
+        seenByCountFor={seenByCountFor}
         onReply={onReply}
         onLongPress={onLongPress}
         onRetry={onRetry}
@@ -81,7 +81,7 @@ export function ChatMessageList({
       windowWidth,
       token,
       resolveQuote,
-      seenByCount,
+      seenByCountFor,
       onReply,
       onLongPress,
       onRetry,

@@ -111,6 +111,8 @@ import { ApiError, api } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { isE2eeEnabled } from '@/features/e2ee/policy';
 import { chatRouteFor } from '@/features/e2ee/routing';
+import { ChatScreen as UnifiedChatScreen } from '@/features/chat/ui/chat-screen';
+import { useUnifiedChatFlag } from '@/features/chat/unified-flag';
 import { cache } from '@/lib/cache';
 import { copyToClipboard } from '@/lib/clipboard';
 import { conversationTitle, formatClock, formatDateLabel, tickState, type TickState } from '@/lib/format';
@@ -465,7 +467,7 @@ function ReactionChips({
   );
 }
 
-export default function ChatScreen() {
+function LegacyChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { token, user } = useAuth();
@@ -2946,6 +2948,15 @@ export default function ChatScreen() {
       />
     </ThemedView>
   );
+}
+
+export default function ChatRoute() {
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const unified = useUnifiedChatFlag();
+  if (unified && id) {
+    return <UnifiedChatScreen conversationId={id} />;
+  }
+  return <LegacyChatScreen />;
 }
 
 const styles = StyleSheet.create({

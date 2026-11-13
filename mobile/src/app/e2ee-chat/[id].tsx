@@ -111,6 +111,7 @@ import { SecureMediaMessage } from '@/features/e2ee/SecureMediaMessage';
 import { StickerMessage } from '@/features/stickers/StickerView';
 import type { VoiceNote } from '@/features/voice-notes/useVoiceRecorder';
 import { decryptIncoming, E2eeKeyChangedError, sendEncryptedText } from '@/features/e2ee/text';
+import { useUnifiedChatFlag } from '@/features/chat/unified-flag';
 
 function sortMessages(messages: StoredE2eeMessage[]): StoredE2eeMessage[] {
   const seen = new Set<string>();
@@ -133,7 +134,7 @@ const READ_VIEWABILITY_CONFIG = {
   minimumViewTime: READ_VISIBILITY_MIN_TIME_MS,
 };
 
-export default function E2eeChatScreen() {
+function LegacyE2eeChatScreen() {
   const params = useLocalSearchParams<{
     id?: string;
     peerId?: string;
@@ -1533,6 +1534,15 @@ export default function E2eeChatScreen() {
       ) : null}
     </ThemedView>
   );
+}
+
+export default function E2eeChatRoute() {
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const unified = useUnifiedChatFlag();
+  if (unified && id) {
+    return <Redirect href={{ pathname: '/chat/[id]', params: { id } }} />;
+  }
+  return <LegacyE2eeChatScreen />;
 }
 
 const styles = StyleSheet.create({

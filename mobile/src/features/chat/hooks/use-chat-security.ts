@@ -11,7 +11,7 @@ import type { ChatMode } from '../transport/types';
  *
  * En mode clair, aucun des deux n'est activé.
  */
-export function useChatSecurity(mode: ChatMode | 'blocked'): void {
+export function useChatSecurity(mode: ChatMode | 'blocked' | 'pending'): void {
   useSecureScreen(mode === 'e2ee');
   useEffect(() => {
     if (mode !== 'e2ee') return;

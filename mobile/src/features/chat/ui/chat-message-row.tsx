@@ -52,7 +52,8 @@ export interface ChatMessageRowProps {
   windowWidth: number;
   token: string;
   resolveQuote: (id: string | null) => MessageQuote | null;
-  seenByCount?: number;
+  /** Nombre de lecteurs d'un message (groupes), calculé par l'écran. */
+  seenByCountFor?: (message: ChatMessageView) => number;
   onReply: (message: ChatMessageView) => void;
   onLongPress: (message: ChatMessageView) => void;
   onRetry: (message: ChatMessageView) => void;
@@ -634,14 +635,14 @@ function ChatMessageRowComponent(props: ChatMessageRowProps) {
             <ReceiptBadge message={message} capabilities={capabilities} chat={chat} />
           </View>
         ) : null}
-        {message.mine && isGroup && (props.seenByCount ?? 0) > 0 ? (
+        {message.mine && isGroup && (props.seenByCountFor?.(message) ?? 0) > 0 ? (
           <Pressable
             onPress={() => props.onSeenBy?.(message)}
             accessibilityRole="button"
-            accessibilityLabel={fr.chat.unified.seenBy(props.seenByCount ?? 0)}
+            accessibilityLabel={fr.chat.unified.seenBy(props.seenByCountFor?.(message) ?? 0)}
             style={styles.seenBy}>
             <ThemedText type="micro" themeColor="textSecondary">
-              {fr.chat.unified.seenBy(props.seenByCount ?? 0)}
+              {fr.chat.unified.seenBy(props.seenByCountFor?.(message) ?? 0)}
             </ThemedText>
           </Pressable>
         ) : null}

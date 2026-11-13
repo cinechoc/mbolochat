@@ -9,6 +9,8 @@ export interface MessagesState {
   ready: boolean;
   hasMore: boolean;
   error: string | null;
+  typing: { userId: string; text: string } | null;
+  online: boolean;
 }
 
 export const INITIAL_MESSAGES_STATE: MessagesState = {
@@ -17,6 +19,8 @@ export const INITIAL_MESSAGES_STATE: MessagesState = {
   ready: false,
   hasMore: false,
   error: null,
+  typing: null,
+  online: true,
 };
 
 /** Insertion par recherche binaire, horodatages égaux conservés dans l'ordre. */
@@ -120,7 +124,9 @@ export type MessagesAction =
   | { type: 'receipts'; receipts: MessageReceipt[] }
   | { type: 'ready' }
   | { type: 'hasMore'; hasMore: boolean }
-  | { type: 'error'; error: string | null };
+  | { type: 'error'; error: string | null }
+  | { type: 'typing'; typing: { userId: string; text: string } | null }
+  | { type: 'connection'; online: boolean };
 
 export function messagesReducer(state: MessagesState, action: MessagesAction): MessagesState {
   switch (action.type) {
@@ -128,6 +134,7 @@ export function messagesReducer(state: MessagesState, action: MessagesAction): M
       return INITIAL_MESSAGES_STATE;
     case 'snapshot':
       return {
+        ...state,
         messages: fullSort(action.snapshot.messages),
         receipts: action.snapshot.receipts,
         ready: true,
@@ -156,6 +163,10 @@ export function messagesReducer(state: MessagesState, action: MessagesAction): M
       return state.hasMore === action.hasMore ? state : { ...state, hasMore: action.hasMore };
     case 'error':
       return state.error === action.error ? state : { ...state, error: action.error };
+    case 'typing':
+      return state.typing === action.typing ? state : { ...state, typing: action.typing };
+    case 'connection':
+      return state.online === action.online ? state : { ...state, online: action.online };
     default:
       return state;
   }

@@ -8,8 +8,8 @@ export interface ChatDocumentTarget {
 }
 
 /**
- * État local des visionneuses. La fermeture d'un média chiffré est déléguée à
- * l'écran (`closeMedia`), qui seul sait quel clair temporaire libérer.
+ * État local des visionneuses. Toutes les actions sont stables : l'écran peut
+ * les passer telles quelles aux composants mémoïsés.
  */
 export function useChatMedia(): {
   image: { urls: string[]; index: number } | null;
@@ -29,16 +29,21 @@ export function useChatMedia(): {
   const openImage = useCallback((urls: string[], index: number) => {
     setImage({ urls, index: Math.max(0, Math.min(index, urls.length - 1)) });
   }, []);
+  const openVideo = useCallback((url: string) => setVideo(url), []);
+  const openDocument = useCallback((target: ChatDocumentTarget) => setDocument(target), []);
+  const closeImage = useCallback(() => setImage(null), []);
+  const closeVideo = useCallback(() => setVideo(null), []);
+  const closeDocument = useCallback(() => setDocument(null), []);
 
   return {
     image,
     video,
     document,
     openImage,
-    openVideo: setVideo,
-    openDocument: setDocument,
-    closeImage: () => setImage(null),
-    closeVideo: () => setVideo(null),
-    closeDocument: () => setDocument(null),
+    openVideo,
+    openDocument,
+    closeImage,
+    closeVideo,
+    closeDocument,
   };
 }
