@@ -43,3 +43,28 @@ Version 1.0 — 2026-11-13. À passer sur **Waydroid** (ou appareil réel) aprè
 ## Résultat
 
 Consigner la date, la build/commit, l'appareil, et joindre les captures des KO. La Phase 5 ne peut être déclarée terminée qu'avec toutes les lignes OK ou N/A justifiées.
+
+## Traçabilité — nouveau chemin de code (B.3.5b)
+
+| # | Fonctionnalité | Fichier / fonction du nouveau chemin | État |
+|---|---|---|---|
+| 1 | Envoi texte | `features/chat/ui/chat-screen.tsx` → `sendText` → `transport.sendText` (`classic-transport.ts` / `e2ee-transport.ts`) | Complet |
+| 2 | Réception | `hooks/use-chat-messages.ts` → `messagesReducer` ; transports `subscribe` | Complet |
+| 3 | Pagination | `classic-transport.ts` `loadOlder` ; chiffré : `loadOlder` vide | **Manque en chiffré (assumé)** |
+| 4 | Notes vocales | `chat-message-row.tsx` `VoiceMessageBubble` ; `e2ee-transport.ts` `sendVoice` | Complet |
+| 5 | Images/vidéos/documents | `chat-message-row.tsx` `MessageBody` ; `chat-screen.tsx` `openMedia` + `model/media-leases.ts` | Complet |
+| 6 | Réponses | `chat-screen.tsx` `quoteOfView` ; `chat-message-row.tsx` `QuoteBlock` | Complet |
+| 7 | Réactions | `model/chat-actions.ts` + `chat-message-row.tsx` `ReactionChips` ; capacité `reactions` | Clair uniquement |
+| 8 | Suppression | `chat-screen.tsx` `menuActions` → `transport.deleteMessage` | Complet |
+| 9 | Accusés | `chat-message-row.tsx` `ReceiptBadge` ; `e2ee-transport.ts` `deliveryOf` | Complet |
+| 10 | Frappe | `chat-screen.tsx` bandeau + `use-chat-messages.ts` `typing` | Clair seulement |
+| 11 | Brouillon | `use-chat-draft.ts` + `model/draft-buffer.ts` ; transport `saveDraft/loadDraft` | Complet |
+| 12 | Défilement | `use-chat-scroll.ts` + `model/scroll-state.ts` ; liste inversée les deux modes | Complet, **à vérifier appareil** |
+| 13 | Connexion | `use-chat-messages.ts` `online` + bandeau `chat-screen.tsx` | Complet |
+| 14 | Menus | `model/chat-actions.ts` ; transfert `e2ee-transport.ts` `forwardText` | Transfert texte chiffré porté ; **favori sticker classique non porté** |
+| 15 | Accessibilité | `docs/ACCESSIBILITE-FUSION-CHAT.md` | Complet, pertes listées |
+| 16 | Groupes | `chat-screen.tsx` (permissions, mentions) | Complet |
+| 17 | Appels | `chat-screen.tsx` `headerRight` ; refus chiffré | Complet |
+| 18 | Sécurité d'écran | `hooks/use-chat-security.ts` + `model/media-leases.ts` | Complet |
+
+Scénarios marqués manquants : pagination chiffrée (#3), indicateur de frappe chiffré (#10, volontairement absent), favori sticker classique (#14).

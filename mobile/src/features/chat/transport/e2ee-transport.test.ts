@@ -300,6 +300,20 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     await transport.dispose();
   });
 
+  it('transfère un texte uniquement vers une cible chiffrée directe', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new E2eeTransport(fakes.deps, options);
+    const target = summary({ id: 'target-1' });
+    await transport.forwardText(target, 'à transférer');
+    expect(fakes.crypto.sendEncryptedText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'à transférer', conversation: target }),
+    );
+    await expect(
+      transport.forwardText(summary({ id: 'target-2', e2eeSince: null }), 'interdit'),
+    ).rejects.toThrow();
+    await transport.dispose();
+  });
+
   it('charge le brouillon depuis SQLCipher, pas depuis le cache clair', async () => {
     const fakes = createFakes(SEED);
     const transport = new E2eeTransport(fakes.deps, options);

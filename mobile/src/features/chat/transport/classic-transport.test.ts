@@ -137,7 +137,7 @@ function createFakes(seed: Message[]) {
       handler(...args);
     }
   };
-  return { deps, cache, api, outbox, socketDeps, emitEvent };
+  return { deps, cache, api, outbox, socket, socketDeps, emitEvent };
 }
 
 const SEED = [
@@ -208,6 +208,16 @@ describe('ClassicTransport — anti-downgrade et outbox', () => {
       replyTo: 'quote-1',
     });
     expect(fakes.outbox.drain).toHaveBeenCalledWith('token');
+  });
+
+  it('signale la lecture une fois l’historique chargé, comme l’ancien écran', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new ClassicTransport(fakes.deps, options);
+    await transport.loadInitial();
+    expect(fakes.socket.emit).toHaveBeenCalledWith('message:read', {
+      conversationId: 'conversation-1',
+    });
+    await transport.dispose();
   });
 
   it('n’écrit aucun brouillon pour un texte vide', () => {

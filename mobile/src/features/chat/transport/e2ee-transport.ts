@@ -24,6 +24,7 @@ const E2EE_CAPABILITIES: ChatCapabilities = {
   deleteForEveryone: false,
   stickers: false,
   gifs: false,
+  forwarded: true,
   voice: true,
   typing: false,
   calls: false,
@@ -246,6 +247,28 @@ export class E2eeTransport implements ChatTransport {
 
   async sendGif(_gif: RecentGif): Promise<void> {
     throw new UnsupportedCapabilityError('gifs');
+  }
+
+  async forwardText(
+    target: E2eeTransportOptions['summary'],
+    text: string,
+  ): Promise<void> {
+    if (!this.capabilities.forwarded) {
+      throw new UnsupportedCapabilityError('forwarded');
+    }
+    if (!target.e2eeSince || target.type !== 'DIRECT') {
+      throw new Error('Transfert refusé : la cible doit être une conversation chiffrée directe.');
+    }
+    const { db, account } = await this.credentials();
+    await this.deps.crypto.sendEncryptedText({
+      token: this.token,
+      db,
+      account,
+      conversation: target,
+      currentUserId: this.currentUser.id,
+      currentUserName: this.currentUser.displayName,
+      text,
+    });
   }
 
   async deleteMessage(id: string, forEveryone: boolean): Promise<void> {

@@ -36,6 +36,7 @@ const CLASSIC_CAPABILITIES: ChatCapabilities = {
   deleteForEveryone: true,
   stickers: true,
   gifs: true,
+  forwarded: false,
   voice: true,
   typing: true,
   calls: true,
@@ -132,6 +133,9 @@ export class ClassicTransport implements ChatTransport {
     this.deps.cache.setConversation(summary);
     this.deps.cache.setMessages(this.conversationId, history);
     void this.deps.sync.advanceCursor(history);
+    // Même déclencheur que l'ancien écran : la lecture est signalée une fois
+    // l'historique chargé, jamais avant.
+    this.deps.socket.getSocket()?.emit('message:read', { conversationId: this.conversationId });
     return {
       messages: this.views(),
       receipts: this.receipts,
@@ -390,6 +394,10 @@ export class ClassicTransport implements ChatTransport {
       },
     });
     await this.deps.outbox.drain(this.token);
+  }
+
+  async forwardText(): Promise<void> {
+    throw new UnsupportedCapabilityError('forwarded');
   }
 
   async deleteMessage(id: string, forEveryone: boolean): Promise<void> {

@@ -43,6 +43,7 @@ Version 1.0 — 2026-11-13. Inventaire des `accessibilityRole`, `accessibilityLa
 1. **Indicateur de frappe** : pas encore rendu dans les composants B.3.4 ; à brancher dans `ChatScreen` (B.3.5) avec la région live existante. En mode chiffré, il reste absent (capacité `typing=false`).
 2. **« Vu par N »** : nécessite le compteur d'accusés ; prévu dans `ChatScreen` (B.3.5) via `seenByCount`.
 3. **Sélecteur de réactions dans la feuille** : porté en B.3.5 avec `ChatScreen`, car il dépend du mode et du menu.
-4. **Transfert chiffré et fiche d'informations** : reportés à B.3.5 (l'interface de transport expose `loadDraft`, pas encore les métadonnées de transfert) ; aucune perte silencieuse : l'action ne sera pas affichée si non portée.
+4. **Transfert chiffré et fiche d'informations** : portés en B.3.5b (`transport.forwardText`, feuille d'informations) ; aucune perte silencieuse.
+5. **Favori de sticker classique** : non porté à ce stade ; l'action n'est pas affichée plutôt que simulée.
 
 Toute autre disparition constatée lors de la validation appareil doit être ajoutée ici avant la suppression des anciens écrans (B.3.6).

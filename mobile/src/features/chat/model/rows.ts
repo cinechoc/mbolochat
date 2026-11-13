@@ -1,5 +1,6 @@
 import { formatClock, formatDateLabel } from '@/lib/format';
 import type { ChatMessageView } from '@/features/chat/transport/types';
+import { reuseChatRow } from './row-equality';
 
 /**
  * Rangées unifiées de la liste, quel que soit le mode.
@@ -39,22 +40,7 @@ const atMs = (value: string): number => new Date(value).getTime();
 
 /** Réutilise une rangée identique de la construction précédente. */
 function reuseRow(previous: Map<string, ChatRow>, candidate: ChatRow): ChatRow {
-  const old = previous.get(candidate.key);
-  if (!old || old.type !== candidate.type) {
-    return candidate;
-  }
-  if (old.type === 'message' && candidate.type === 'message') {
-    return old.message === candidate.message && old.continuation === candidate.continuation
-      ? old
-      : candidate;
-  }
-  if (old.type === 'album' && candidate.type === 'album') {
-    const sameMessages =
-      old.messages.length === candidate.messages.length &&
-      old.messages.every((message, index) => message === candidate.messages[index]);
-    return sameMessages && old.continuation === candidate.continuation ? old : candidate;
-  }
-  return old;
+  return reuseChatRow(previous, candidate);
 }
 
 /** Un média entre dans un album s'il est nu : ni légende ni réponse. */

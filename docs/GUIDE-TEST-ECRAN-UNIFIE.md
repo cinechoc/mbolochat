@@ -2,6 +2,52 @@
 
 Version 1.0 — 2026-11-13. Ce guide active l'écran unifié **sans rebuild**, sur un build de développement existant, puis liste les scénarios à passer en premier.
 
+## Préparation mémoire (HP ProBook 4 Go)
+
+État relevé le 2026-11-13 :
+
+- `free -h` : **3,3 Gi** de RAM, ~503 Mi libres, ~901 Mi disponibles ; **2,4 Gi utilisés** (Metro/API arrêtés).
+- `swapon --show` : swap fichier **2 G** (`/swap/swap`, ~10 Mo utilisés) + **zram 1,6 G** actif (~1,3 G utilisés).
+- Conclusion : **aucun ajout nécessaire** ; zram et swap sont déjà en place. Ne pas lancer Waydroid avant d'avoir libéré de la RAM.
+
+Avant de démarrer : fermer navigateurs, éditeurs lourds et applications Electron non utilisées. Garder ZCode uniquement si nécessaire (il consomme plusieurs centaines de Mo). Vérifier avec `free -h` avant l'étape 4.
+
+Si le swap venait à manquer (commandes sans redirection de sortie) :
+
+```bash
+sudo fallocate -l 2G /swap/swap2
+sudo chmod 600 /swap/swap2
+sudo mkswap /swap/swap2
+sudo swapon /swap/swap2
+printf '/swap/swap2 none swap sw 0 0\n' | sudo tee -a /etc/fstab
+```
+
+Pour zram, préférer l'outil déjà installé (`zramctl`, `systemctl status systemd-zram-setup@zram0`), ne pas reconfigurer à chaud pendant les tests.
+
+### Ordre de lancement
+
+1. **PostgreSQL** (déjà natif) : `pg_isready -h localhost -p 5432`.
+2. **API** : `cd api && npm run start:dev`, attendre « Nest application successfully started ».
+3. **Metro** : `cd mobile && EXPO_PUBLIC_API_URL=http://192.168.240.1:3001 npx expo start --dev-client`, attendre `Waiting on http://localhost:8081`.
+4. **Waydroid en dernier** : `waydroid session start` puis lancement de l'app ; ne jamais démarrer Waydroid avant l'API et Metro.
+
+Entre deux sessions de test : arrêter Metro et l'API (`Ctrl+C`), laisser Waydroid tourner uniquement si nécessaire.
+
+## Dix premiers scénarios (dans l'ordre)
+
+1. **Conversation historique en clair** : ouverture, historique, envoi texte, réception.
+2. Clair : accusés (coches), réponse/citation, suppression pour moi.
+3. Clair : photo + document (ouverture, fermeture, retour).
+4. Clair : notes vocales (envoi, lecture).
+5. Clair : brouillon (quitter/revenir), défilement long, pastille de retour.
+6. **Conversation chiffrée** : ouverture, historique local, envoi texte, réception.
+7. Chiffré : « Reçu » puis « Ouvert » (visibilité réelle 50 %/400 ms), jamais à la réception seule.
+8. Chiffré : photo puis document ; vérifier la libération du clair à la fermeture et au retour de la route document.
+9. Chiffré : transfert de texte vers une autre conversation chiffrée ; cible claire absente.
+10. Chiffré : défilement inversé, mode inconnu hors ligne (attente sans compositeur), retour réseau.
+
+Passer ensuite les scénarios 10 à 18 de la checklist principale (groupes, appels, TalkBack, FLAG_SECURE).
+
 ## Prérequis
 
 - Un **development build** MboloChat installé (Waydroid ou appareil réel) : `expo-dev-client` est requis pour charger le bundle Metro. Un build EAS `development` convient.

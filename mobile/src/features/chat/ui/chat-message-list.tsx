@@ -44,6 +44,7 @@ export function ChatMessageList({
   onRetry,
   onDiscard,
   onOpenMedia,
+  onOpenAlbum,
   onToggleReaction,
   onPressAvatar,
   onSeenBy,
@@ -67,6 +68,7 @@ export function ChatMessageList({
         onRetry={onRetry}
         onDiscard={onDiscard}
         onOpenMedia={onOpenMedia}
+        onOpenAlbum={onOpenAlbum}
         onToggleReaction={onToggleReaction}
         onPressAvatar={onPressAvatar}
         onSeenBy={onSeenBy}
@@ -87,6 +89,7 @@ export function ChatMessageList({
       onRetry,
       onDiscard,
       onOpenMedia,
+      onOpenAlbum,
       onToggleReaction,
       onPressAvatar,
       onSeenBy,

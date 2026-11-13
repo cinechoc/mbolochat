@@ -30,6 +30,7 @@ import { fr } from '@/i18n/fr';
 import { useTextScale } from '@/lib/text-scale';
 import type { MessageQuote } from '@/lib/types';
 import type { ChatRow } from '../model/rows';
+import { sameChatMessageRow } from '../model/row-equality';
 import type { ChatCapabilities, ChatIdentity, ChatMessageView } from '../transport/types';
 
 export interface MediaOpenRequest {
@@ -54,6 +55,7 @@ export interface ChatMessageRowProps {
   resolveQuote: (id: string | null) => MessageQuote | null;
   /** Nombre de lecteurs d'un message (groupes), calculé par l'écran. */
   seenByCountFor?: (message: ChatMessageView) => number;
+  onOpenAlbum?: (messages: ChatMessageView[], index: number) => void;
   onReply: (message: ChatMessageView) => void;
   onLongPress: (message: ChatMessageView) => void;
   onRetry: (message: ChatMessageView) => void;
@@ -537,7 +539,7 @@ function ChatMessageRowComponent(props: ChatMessageRowProps) {
           !mine && props.onPressAvatar ? () => props.onPressAvatar?.(first.sender.id) : undefined
         }>
         <View style={[styles.albumGrid, { maxWidth: tileWidth * 2 + 4 }]}>
-          {row.messages.map((message) => {
+          {row.messages.map((message, index) => {
             const attachment = message.attachment;
             if (!attachment?.url) return null;
             const uri = mediaUrl(attachment.url);
@@ -551,7 +553,9 @@ function ChatMessageRowComponent(props: ChatMessageRowProps) {
                 failed={message.state === 'failed'}
                 onRetry={() => props.onRetry(message)}
                 onPress={() =>
-                  props.onOpenMedia({ uri, kind: 'image', encrypted: false })
+                  props.onOpenAlbum
+                    ? props.onOpenAlbum(row.messages, index)
+                    : props.onOpenMedia({ uri, kind: 'image', encrypted: false })
                 }
                 onLongPress={() => props.onLongPress(message)}
               />
@@ -651,37 +655,11 @@ function ChatMessageRowComponent(props: ChatMessageRowProps) {
   );
 }
 
-function sameMessages(a: ChatMessageView[], b: ChatMessageView[]): boolean {
-  return a.length === b.length && a.every((message, index) => message === b[index]);
-}
-
 /**
- * Ligne mémoïsée : la comparaison porte sur les **références de messages**,
- * stables après fusion, et ignore les callbacks (stabilisés par l'écran).
+ * Ligne mémoïsée : la comparaison pure est dans `row-equality.ts` et porte sur
+ * les références de messages, jamais sur l'objet de rangée recréé.
  */
-export const ChatMessageRow = memo(ChatMessageRowComponent, (previous, next) => {
-  if (previous.row.type !== next.row.type) return false;
-  if (previous.row.type === 'message' && next.row.type === 'message') {
-    return (
-      previous.row.message === next.row.message &&
-      previous.row.continuation === next.row.continuation
-    );
-  }
-  if (previous.row.type === 'album' && next.row.type === 'album') {
-    return (
-      sameMessages(previous.row.messages, next.row.messages) &&
-      previous.row.continuation === next.row.continuation
-    );
-  }
-  return (
-    previous.row.key === next.row.key &&
-    previous.currentUser === next.currentUser &&
-    previous.capabilities === next.capabilities &&
-    previous.chat === next.chat &&
-    previous.windowWidth === next.windowWidth &&
-    previous.token === next.token
-  );
-});
+export const ChatMessageRow = memo(ChatMessageRowComponent, sameChatMessageRow);
 
 const styles = StyleSheet.create({
   stickerBlock: { gap: 4, maxWidth: 160 },

@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ActionSheet } from '@/components/action-sheet';
+import { ActionSheet, type SheetAction } from '@/components/action-sheet';
 import { Avatar } from '@/components/avatar';
 import { BlurTarget } from '@/components/blur-target';
 import { ThemedText } from '@/components/themed-text';
@@ -28,6 +28,9 @@ import { ChatInputBar } from '@/features/chat/ui/chat-input-bar';
 import { ChatMessageList } from '@/features/chat/ui/chat-message-list';
 import { ChatSecurityBanner } from '@/features/chat/ui/chat-security-banner';
 import type { MediaOpenRequest } from '@/features/chat/ui/chat-message-row';
+import { mediaUrl } from '@/features/media/mediaUrl';
+import { createMediaLeaseRegistry } from '../model/media-leases';
+import { canMarkEncryptedRead } from '../model/read-gate';
 import { ImageViewer, VideoViewer } from '@/features/media/MediaViewers';
 import {
   isRejectedMedia,
@@ -49,7 +52,7 @@ import { StickerView } from '@/features/stickers/StickerView';
 import { findSticker } from '@/features/stickers/stickerPacks';
 import { copyToClipboard } from '@/lib/clipboard';
 import { conversationTitle } from '@/lib/format';
-import type { MessageQuote, MessageReceipt } from '@/lib/types';
+import type { ConversationSummary, MessageQuote, MessageReceipt } from '@/lib/types';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { fr } from '@/i18n/fr';
@@ -76,6 +79,7 @@ const EMPTY_CAPABILITIES: ChatCapabilities = {
   deleteForEveryone: false,
   stickers: false,
   gifs: false,
+  forwarded: false,
   voice: false,
   typing: false,
   calls: false,
@@ -120,10 +124,14 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   const [replyTo, setReplyTo] = useState<MessageQuote | null>(null);
   const [menuFor, setMenuFor] = useState<ChatMessageView | null>(null);
   const [seenFor, setSeenFor] = useState<ChatMessageView | null>(null);
+  const [infoFor, setInfoFor] = useState<ChatMessageView | null>(null);
+  const [forwardFor, setForwardFor] = useState<ChatMessageView | null>(null);
+  const [forwardTargets, setForwardTargets] = useState<ConversationSummary[]>([]);
+  const [forwardLoading, setForwardLoading] = useState(false);
   const [chatAreaHeight, setChatAreaHeight] = useState(0);
   const media = useChatMedia();
   const { openImage, openVideo, closeImage, closeVideo } = media;
-  const mediaIdRef = useRef<string | null>(null);
+  const leasesRef = useRef(createMediaLeaseRegistry());
   const appActiveRef = useRef(AppState.currentState === 'active');
   const blurTargetRef = useRef<ComponentRef<typeof View>>(null);
 
@@ -347,9 +355,59 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     }
   }, []);
 
+  const openForward = useCallback(
+    (message: ChatMessageView) => {
+      if (!token) return;
+      setForwardFor(message);
+      setForwardTargets([]);
+      setForwardLoading(true);
+      void api
+        .listConversations(token)
+        .then((list) =>
+          setForwardTargets(
+            (list ?? []).filter(
+              (target) =>
+                target.type === 'DIRECT' &&
+                Boolean(target.e2eeSince) &&
+                target.id !== conversationId,
+            ),
+          ),
+        )
+        .catch(() => setForwardTargets([]))
+        .finally(() => setForwardLoading(false));
+    },
+    [token, conversationId],
+  );
+
+  const extraActions = useMemo<SheetAction[]>(() => {
+    if (!menuFor || !transport) return [];
+    const actions: SheetAction[] = [];
+    if (
+      transport.capabilities.forwarded &&
+      menuFor.body &&
+      !menuFor.attachment &&
+      !menuFor.stickerRef
+    ) {
+      actions.push({
+        key: 'forward',
+        label: fr.e2eeChat.forward,
+        onPress: () => openForward(menuFor),
+      });
+    }
+    if (transport.capabilities.encrypted) {
+      actions.push({
+        key: 'info',
+        label: fr.e2eeChat.messageInfo,
+        onPress: () => setInfoFor(menuFor),
+      });
+    }
+    return actions;
+  }, [menuFor, transport, openForward]);
+
   const menuActions = useChatActions({
     message: menuFor,
     capabilities: transport?.capabilities ?? EMPTY_CAPABILITIES,
+    extra: extraActions,
     onReply: (message) => {
       setReplyTo(quoteOfView(message));
       setMenuFor(null);
@@ -369,10 +427,8 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   });
 
   const closeViewer = useCallback(() => {
-    if (mediaIdRef.current) {
-      closeMedia(mediaIdRef.current);
-      mediaIdRef.current = null;
-    }
+    const id = leasesRef.current.releaseViewer();
+    if (id) closeMedia(id);
     closeImage();
     closeVideo();
   }, [closeImage, closeVideo]);
@@ -380,7 +436,11 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   const openMedia = useCallback(
     (request: MediaOpenRequest) => {
       if (request.encrypted && request.uploadId) {
-        mediaIdRef.current = request.uploadId;
+        if (request.kind === 'file') {
+          leasesRef.current.setDocument(request.uploadId);
+        } else {
+          leasesRef.current.setViewer(request.uploadId);
+        }
       }
       if (request.kind === 'file') {
         router.push({
@@ -401,6 +461,16 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
       openImage([request.uri], 0);
     },
     [openImage, openVideo, router],
+  );
+
+  // Au retour de la route document, le clair déchiffré est libéré : c'est le
+  // même geste que l'ancien écran (`openedDocumentRef` + `closeMedia`).
+  useFocusEffect(
+    useCallback(() => {
+      const id = leasesRef.current.releaseDocument();
+      if (id) closeMedia(id);
+      return undefined;
+    }, []),
   );
 
   const sendText = useCallback(
@@ -482,6 +552,39 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
       .catch(() => undefined);
   }, [sendAttachments]);
 
+  const handleReply = useCallback((message: ChatMessageView) => {
+    setReplyTo(quoteOfView(message));
+  }, []);
+
+  const handleRetry = useCallback(
+    (message: ChatMessageView) => transport?.retry(message.clientId ?? message.id),
+    [transport],
+  );
+
+  const handleDiscard = useCallback(
+    (message: ChatMessageView) => {
+      void transport?.discard(message.clientId ?? message.id);
+    },
+    [transport],
+  );
+
+  const handleToggleReaction = useCallback(
+    (message: ChatMessageView, reaction: string) => {
+      void transport?.toggleReaction(message.id, reaction);
+    },
+    [transport],
+  );
+
+  const handleOpenAlbum = useCallback(
+    (albumMessages: ChatMessageView[], index: number) => {
+      const urls = albumMessages.flatMap((message) =>
+        message.attachment?.url ? [mediaUrl(message.attachment.url)] : [],
+      );
+      if (urls.length > 0) openImage(urls, index);
+    },
+    [openImage],
+  );
+
   const onViewableItemsChanged = useCallback(
     (info: { viewableItems: { item?: unknown }[] }) => {
       if (mode !== 'e2ee' || !transport || !focused || !ready || !appActiveRef.current) {
@@ -502,7 +605,15 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
         ];
       });
       const ids = visibleForeignMessageIds(adapted);
-      if (ids.length > 0) {
+      if (
+        canMarkEncryptedRead({
+          mode,
+          focused,
+          appActive: appActiveRef.current,
+          ready,
+          visibleIds: ids,
+        })
+      ) {
         void transport.markRead(ids);
       }
     },
@@ -620,14 +731,13 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
               token={token}
               resolveQuote={quoteResolver}
               seenByCountFor={seenByCountFor}
-              onReply={(message) => setReplyTo(quoteOfView(message))}
+              onReply={handleReply}
               onLongPress={setMenuFor}
-              onRetry={(message) => transport?.retry(message.clientId ?? message.id)}
-              onDiscard={(message) => void transport?.discard(message.clientId ?? message.id)}
+              onRetry={handleRetry}
+              onDiscard={handleDiscard}
               onOpenMedia={openMedia}
-              onToggleReaction={(message, reaction) =>
-                void transport?.toggleReaction(message.id, reaction)
-              }
+              onOpenAlbum={handleOpenAlbum}
+              onToggleReaction={handleToggleReaction}
               onPressAvatar={openProfile}
               onSeenBy={setSeenFor}
               onScroll={scroll.onScroll}
@@ -798,6 +908,59 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
                       ?.displayName ?? fr.e2eeChat.me}
                   </ThemedText>
                 ))}
+            </View>
+          ) : null
+        }
+      />
+
+      <ActionSheet
+        visible={forwardFor !== null}
+        title={fr.e2eeChat.forwardTo}
+        actions={[]}
+        onClose={() => setForwardFor(null)}
+        header={
+          <View>
+            {forwardLoading ? (
+              <ThemedText type="small">{fr.e2eeChat.forwardLoading}</ThemedText>
+            ) : forwardTargets.length === 0 ? (
+              <ThemedText type="small">{fr.e2eeChat.forwardNoTarget}</ThemedText>
+            ) : (
+              forwardTargets.map((target) => {
+                const other = target.members.find((member) => member.id !== user.id);
+                const name = target.name ?? other?.displayName ?? fr.e2eeChat.title;
+                return (
+                  <Pressable
+                    key={target.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={name}
+                    onPress={() => {
+                      if (!forwardFor || !transport) return;
+                      void transport
+                        .forwardText(target, forwardFor.body)
+                        .then(() => Alert.alert(fr.e2eeChat.forward, fr.e2eeChat.forwardDone))
+                        .catch(() => Alert.alert(fr.e2eeChat.error, fr.e2eeChat.forwardError));
+                      setForwardFor(null);
+                    }}>
+                    <ThemedText style={styles.seenRow}>{name}</ThemedText>
+                  </Pressable>
+                );
+              })
+            )}
+          </View>
+        }
+      />
+
+      <ActionSheet
+        visible={infoFor !== null}
+        title={fr.e2eeChat.messageInfo}
+        actions={[]}
+        onClose={() => setInfoFor(null)}
+        header={
+          infoFor ? (
+            <View>
+              <ThemedText type="small">{`${fr.e2eeChat.infoSender} : ${infoFor.sender.displayName}`}</ThemedText>
+              <ThemedText type="small">{`${fr.e2eeChat.infoSentAt} : ${infoFor.createdAt}`}</ThemedText>
+              <ThemedText type="small">{`${fr.e2eeChat.infoState} : ${infoFor.state}`}</ThemedText>
             </View>
           ) : null
         }

@@ -25,6 +25,8 @@ export interface ChatCapabilities {
   deleteForEveryone: boolean;
   stickers: boolean;
   gifs: boolean;
+  /** Transfert de texte vers une autre conversation du même type. */
+  forwarded: boolean;
   voice: boolean;
   typing: boolean;
   calls: boolean;
@@ -42,6 +44,7 @@ export type GatedCapability =
   | 'deleteForEveryone'
   | 'stickers'
   | 'gifs'
+  | 'forwarded'
   | 'voice'
   | 'typing'
   | 'calls';
@@ -204,6 +207,8 @@ export interface ChatTransport {
   sendPersonalSticker(sticker: PersonalSticker): Promise<void>;
   sendGif(gif: RecentGif): Promise<void>;
   sendVoice(note: VoiceNote): Promise<void>;
+  /** Transfère un texte vers une autre conversation, si la capacité l'autorise. */
+  forwardText(target: ConversationSummary, text: string): Promise<void>;
 
   deleteMessage(id: string, forEveryone: boolean): Promise<void>;
   toggleReaction(id: string, reaction: string): Promise<void>;
