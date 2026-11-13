@@ -56,6 +56,19 @@ export class UnsupportedCapabilityError extends Error {
   }
 }
 
+/**
+ * Anti-downgrade : un transport classique ne s'instancie jamais pour une
+ * conversation marquée chiffrée, même si l'appelant se trompe de mode.
+ */
+export class EncryptedConversationError extends Error {
+  readonly code = 'encrypted_conversation';
+
+  constructor(readonly conversationId: string) {
+    super('Conversation chiffrée : le transport classique est refusé');
+    this.name = 'EncryptedConversationError';
+  }
+}
+
 export interface ChatIdentity {
   id: string;
   username: string;
