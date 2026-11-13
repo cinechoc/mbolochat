@@ -10,6 +10,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
+import { corsOrigin, socketAllowRequest } from '../common/cors.js';
 import { authenticateSocket, userRoomOf } from '../chat/socket-auth.js';
 import { CallsService } from './calls.service.js';
 import { GroupCallsService } from './group-calls.service.js';
@@ -19,7 +20,7 @@ import type { GroupCallSignalPayload } from './calls.types.js';
  * Signalisation des appels vocaux : mêmes sockets que le chat (auth JWT), les
  * événements sont routés par le salon personnel `user:<id>`.
  */
-@WebSocketGateway({ cors: { origin: true } })
+@WebSocketGateway({ cors: { origin: corsOrigin, credentials: true }, allowRequest: socketAllowRequest })
 export class CallsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;

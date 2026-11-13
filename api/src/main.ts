@@ -5,10 +5,12 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { json, urlencoded } from 'express';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import helmet from 'helmet';
 import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module.js';
+import { allowedOriginsFromEnv, isAllowedOrigin } from './common/cors.js';
 import { DRIZZLE, type Database } from './db/db.module.js';
 
 /**
@@ -21,7 +23,17 @@ import { DRIZZLE, type Database } from './db/db.module.js';
 setDefaultResultOrder('ipv4first');
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Le parseur JSON par défaut (100 Ko) rendait le plafond de 2 Mo des
+  // avatars inatteignable : leur base64 (~2,8 Mo) était rejeté en 413 avant
+  // tout contrôle applicatif. Plafond explicite de 3 Mo pour les corps JSON
+  // et formulaires ; les routes restent bornées par le throttling et par
+  // leurs propres validations, et les médias volumineux passent toujours
+  // par le multipart (`/uploads`, 50 Mo).
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+  });
+  app.use(json({ limit: '3mb' }));
+  app.use(urlencoded({ extended: true, limit: '3mb' }));
   // Sans ceci, SIGTERM ne déclencherait pas onApplicationShutdown : la
   // dernière présence ne serait pas écrite en base avant l'arrêt.
   app.enableShutdownHooks();
@@ -42,17 +54,10 @@ async function bootstrap() {
    * mobiles n'envoient pas d'en-tête Origin et passent donc toujours ; le web a
    * besoin que son origine soit déclarée dans CORS_ORIGINS.
    */
-  const allowedOrigins = (config.get<string>('CORS_ORIGINS') ?? '')
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const allowedOrigins = allowedOriginsFromEnv(config.get<string>('CORS_ORIGINS'));
   app.enableCors({
     origin: (origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-      callback(null, false);
+      callback(null, isAllowedOrigin(origin, allowedOrigins));
     },
     credentials: true,
   });

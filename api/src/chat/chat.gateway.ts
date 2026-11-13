@@ -13,6 +13,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import type { Server, Socket } from 'socket.io';
 import type { Subscription } from 'rxjs';
+import { corsOrigin, socketAllowRequest } from '../common/cors.js';
 import { authenticateSocket, userRoomOf } from './socket-auth.js';
 import {
   ConversationsService,
@@ -38,7 +39,7 @@ import { isMessageType, isValidStickerRef, type MessageType } from './sticker-re
 
 const roomOf = (conversationId: string) => `conv:${conversationId}`;
 
-@WebSocketGateway({ cors: { origin: true } })
+@WebSocketGateway({ cors: { origin: corsOrigin, credentials: true }, allowRequest: socketAllowRequest })
 export class ChatGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
 {
