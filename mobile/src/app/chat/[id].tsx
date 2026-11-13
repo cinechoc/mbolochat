@@ -394,7 +394,12 @@ function TypingLine({ name, text }: { name: string; text: string }) {
 
   return (
     <Animated.View style={[styles.typingRow, { opacity, transform: [{ translateY }] }]}>
-      <ThemedText type="small" themeColor="textSecondary" style={styles.typing} numberOfLines={1}>
+      <ThemedText
+        type="small"
+        themeColor="textSecondary"
+        style={styles.typing}
+        numberOfLines={1}
+        accessibilityLiveRegion="polite">
         {name} : {text}
       </ThemedText>
       <TypingDots color={theme.accent} />
@@ -1195,7 +1200,7 @@ export default function ChatScreen() {
         return;
       }
       if (conversation.blockedByMe || conversation.blockedByThem) {
-        Alert.alert('Appel indisponible', 'Cette conversation est bloquée.');
+        Alert.alert(fr.chat.callBlockedTitle, fr.chat.callBlockedBody);
         return;
       }
       void calls.startCall(conversation.id, { video: kind === 'video' });
@@ -1255,6 +1260,26 @@ export default function ChatScreen() {
 
   const keyExtractor = useCallback((item: ListRow) => item.key, []);
 
+  const handleScroll = useCallback(
+    (event: { nativeEvent: { contentOffset: { y: number } } }) => {
+      // Liste inversée : offset 0 = le dernier message. On n'y recolle un
+      // nouvel arrivant que si l'utilisateur y était déjà.
+      const offset = event.nativeEvent.contentOffset.y;
+      atBottomRef.current = offset <= 32;
+      // Ce callback tourne à chaque frame : on n'agit qu'aux changements d'état.
+      const shouldShow = !atBottomRef.current && offset > JUMP_AFTER_PX;
+      if (shouldShow !== showJumpRef.current) {
+        showJumpRef.current = shouldShow;
+        setShowJump(shouldShow);
+      }
+      if (atBottomRef.current && unseenRef.current > 0) {
+        unseenRef.current = 0;
+        setUnseen(0);
+      }
+    },
+    [],
+  );
+
   const loadOlder = useCallback(() => {
     if (!hasMore || loadingMore || messages.length === 0 || !token || !id) {
       return;
@@ -1297,7 +1322,7 @@ export default function ChatScreen() {
           (row.type === 'album' && row.messages.some((message) => message.id === messageId)),
       );
       if (index < 0) {
-        setError('Le message cité est plus haut dans la discussion.');
+        setError(fr.chat.errors.quotedTooHigh);
         return;
       }
       setError(null);
@@ -1374,7 +1399,7 @@ export default function ChatScreen() {
   const copyMessage = useCallback(async (message: Message) => {
     setMenuFor(null);
     if (!(await copyToClipboard(message.content))) {
-      setError('Copie indisponible dans cette version de l’application.');
+      setError(fr.chat.errors.copyUnavailable);
     }
   }, []);
 
@@ -1403,7 +1428,7 @@ export default function ChatScreen() {
           });
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Suppression impossible.');
+        setError(err instanceof Error ? err.message : fr.chat.errors.deleteFailed);
       }
     },
     [token, id, queuedById],
@@ -1458,19 +1483,19 @@ export default function ChatScreen() {
           height: target.attachment.height,
           seed: receivedStickerSeed(target.attachment),
         });
-        Alert.alert('Sticker ajouté aux favoris', 'Retrouve-le dans l’onglet Stickers.');
+        Alert.alert(fr.chat.sticker.addedTitle, fr.chat.sticker.addedBody);
         return;
       }
       const added = await toggleStickerFavorite(target.key);
       if (added) {
-        Alert.alert('Sticker ajouté aux favoris', 'Retrouve-le dans l’onglet Stickers.');
+        Alert.alert(fr.chat.sticker.addedTitle, fr.chat.sticker.addedBody);
       }
     } catch (favoriteError) {
       Alert.alert(
-        'Favoris indisponibles',
+        fr.chat.sticker.unavailableTitle,
         favoriteError instanceof Error
           ? favoriteError.message
-          : "Impossible d'enregistrer ce sticker.",
+          : fr.chat.sticker.unavailableBody,
       );
     }
   }, [stickerMenuTarget]);
@@ -1485,7 +1510,7 @@ export default function ChatScreen() {
     if (stickerMenuTarget) {
       actions.push({
         key: 'sticker-favorite',
-        label: stickerIsFavorite ? 'Retirer des favoris' : 'Ajouter aux favoris',
+        label: stickerIsFavorite ? fr.chat.menu.removeFavorite : fr.chat.menu.addFavorite,
         icon: stickerIsFavorite ? StarOff : Star,
         onPress: () => void toggleStickerFromMenu(),
       });
@@ -1493,7 +1518,7 @@ export default function ChatScreen() {
     if (!waiting && !message.deleted) {
       actions.push({
         key: 'reply',
-        label: 'Répondre',
+        label: fr.chat.menu.reply,
         icon: Reply,
         onPress: () => void startReply(message),
       });
@@ -1501,14 +1526,14 @@ export default function ChatScreen() {
     if (message.content) {
       actions.push({
         key: 'copy',
-        label: 'Copier',
+        label: fr.chat.menu.copy,
         icon: Copy,
         onPress: () => void copyMessage(message),
       });
     }
     actions.push({
       key: 'delete-me',
-      label: waiting ? 'Supprimer' : 'Supprimer pour moi',
+      label: waiting ? fr.chat.menu.delete : fr.chat.menu.deleteForMe,
       icon: Trash2,
       destructive: true,
       onPress: () => void removeMessage(message, false),
@@ -1516,7 +1541,7 @@ export default function ChatScreen() {
     if (!waiting && !message.deleted && message.sender.id === user?.id) {
       actions.push({
         key: 'delete-all',
-        label: 'Retirer pour tous',
+        label: fr.chat.menu.deleteForAll,
         icon: Trash,
         destructive: true,
         onPress: () => void removeMessage(message, true),
@@ -1777,18 +1802,18 @@ export default function ChatScreen() {
                       onPress={() => void resend(stuck.clientId)}
                       hitSlop={8}
                       accessibilityRole="button"
-                      accessibilityLabel="Réessayer l'envoi">
+                      accessibilityLabel={fr.chat.retrySend}>
                       <ThemedText style={[styles.failedHint, chatStyles.failed]}>
-                        Réessayer
+                        {fr.chat.retry}
                       </ThemedText>
                     </Pressable>
                     <Pressable
                       onPress={() => void discard(stuck.clientId)}
                       hitSlop={8}
                       accessibilityRole="button"
-                      accessibilityLabel="Supprimer ce sticker">
+                      accessibilityLabel={fr.chat.removeSticker}>
                       <ThemedText style={[styles.failedHint, chatStyles.secondaryText]}>
-                        Supprimer
+                        {fr.chat.menu.delete}
                       </ThemedText>
                     </Pressable>
                   </View>
@@ -1879,18 +1904,18 @@ export default function ChatScreen() {
                         onPress={() => void resend(stuck.clientId)}
                         hitSlop={8}
                         accessibilityRole="button"
-                        accessibilityLabel="Réessayer l'envoi">
+                        accessibilityLabel={fr.chat.retrySend}>
                         <ThemedText style={[styles.failedHint, chatStyles.failed]}>
-                          Réessayer
+                          {fr.chat.retry}
                         </ThemedText>
                       </Pressable>
                       <Pressable
                         onPress={() => void discard(stuck.clientId)}
                         hitSlop={8}
                         accessibilityRole="button"
-                        accessibilityLabel="Supprimer ce message">
+                        accessibilityLabel={fr.chat.removeMessage}>
                         <ThemedText style={[styles.failedHint, chatStyles.secondaryText]}>
-                          Supprimer
+                          {fr.chat.menu.delete}
                         </ThemedText>
                       </Pressable>
                     </View>
@@ -1963,7 +1988,7 @@ export default function ChatScreen() {
                   onPress={() => void resend(stuck.clientId)}
                   hitSlop={8}
                   accessibilityRole="button"
-                  accessibilityLabel="Réessayer l'envoi du message vocal">
+                  accessibilityLabel={fr.chat.retrySendVoice}>
                   <ThemedText style={[styles.failedHint, chatStyles.failed]}>
                     {stuck.error ?? "Le message n'est pas parti."} · Réessayer
                   </ThemedText>
@@ -2032,18 +2057,18 @@ export default function ChatScreen() {
                       onPress={() => void resend(stuck.clientId)}
                       hitSlop={8}
                       accessibilityRole="button"
-                      accessibilityLabel="Réessayer l'envoi">
+                      accessibilityLabel={fr.chat.retrySend}>
                       <ThemedText style={[styles.failedHint, chatStyles.failed]}>
-                        Réessayer
+                        {fr.chat.retry}
                       </ThemedText>
                     </Pressable>
                     <Pressable
                       onPress={() => void discard(stuck.clientId)}
                       hitSlop={8}
                       accessibilityRole="button"
-                      accessibilityLabel="Supprimer ce sticker">
+                      accessibilityLabel={fr.chat.removeSticker}>
                       <ThemedText style={[styles.failedHint, chatStyles.secondaryText]}>
-                        Supprimer
+                        {fr.chat.menu.delete}
                       </ThemedText>
                     </Pressable>
                   </View>
@@ -2191,18 +2216,18 @@ export default function ChatScreen() {
                       onPress={() => void resend(stuck.clientId)}
                       hitSlop={8}
                       accessibilityRole="button"
-                      accessibilityLabel="Réessayer l'envoi">
+                      accessibilityLabel={fr.chat.retrySend}>
                       <ThemedText style={[styles.failedHint, chatStyles.failed]}>
-                        Réessayer
+                        {fr.chat.retry}
                       </ThemedText>
                     </Pressable>
                     <Pressable
                       onPress={() => void discard(stuck.clientId)}
                       hitSlop={8}
                       accessibilityRole="button"
-                      accessibilityLabel="Supprimer ce fichier">
+                      accessibilityLabel={fr.chat.removeFile}>
                       <ThemedText style={[styles.failedHint, chatStyles.secondaryText]}>
-                        Supprimer
+                        {fr.chat.menu.delete}
                       </ThemedText>
                     </Pressable>
                   </View>
@@ -2295,16 +2320,13 @@ export default function ChatScreen() {
       return;
     }
     const lines = rejected.map((item) => `${item.name} — ${item.reason}`);
-    Alert.alert(
-      rejected.length === 1 ? 'Fichier ignoré' : 'Fichiers ignorés',
-      lines.join('\n'),
-    );
+    Alert.alert(fr.chat.picker.filesIgnored(rejected.length), lines.join('\n'));
   }, []);
 
   const reportPickerError = useCallback((title: string, message: string) => {
     Alert.alert(title, message, [
-      { text: 'Annuler', style: 'cancel' },
-      { text: 'Ouvrir les réglages', onPress: () => void Linking.openSettings() },
+      { text: fr.common.cancel, style: 'cancel' },
+      { text: fr.common.openSettings, onPress: () => void Linking.openSettings() },
     ]);
   }, []);
 
@@ -2356,10 +2378,10 @@ export default function ChatScreen() {
       const detail =
         pickerError instanceof Error && pickerError.message
           ? pickerError.message
-          : "Impossible d'ouvrir la galerie.";
+          : fr.chat.picker.galleryOpenFailed;
       reportPickerError(
-        'Galerie indisponible',
-        `${detail}\n\nSi l'accès aux photos est refusé, autorise-le dans les réglages.`,
+        fr.chat.picker.galleryTitle,
+        fr.chat.picker.galleryBody(detail),
       );
     }
   }, [queueAttachments, reportPickerError, showRejected]);
@@ -2369,8 +2391,8 @@ export default function ChatScreen() {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
         reportPickerError(
-          'Appareil photo non autorisé',
-          "Autorise l'appareil photo dans les réglages pour prendre une photo.",
+          fr.chat.picker.cameraDeniedTitle,
+          fr.chat.picker.cameraDeniedBody,
         );
         return;
       }
@@ -2385,7 +2407,7 @@ export default function ChatScreen() {
       }
       await queueAttachments([normalized]);
     } catch {
-      reportPickerError('Appareil photo indisponible', "Impossible d'ouvrir l'appareil photo.");
+      reportPickerError(fr.chat.picker.cameraTitle, fr.chat.picker.cameraBody);
     }
   }, [queueAttachments, reportPickerError, showRejected]);
 
@@ -2398,7 +2420,7 @@ export default function ChatScreen() {
       showRejected(picked.rejected);
       await queueAttachments(picked.files);
     } catch {
-      reportPickerError('Fichiers indisponibles', 'Impossible de sélectionner des fichiers.');
+      reportPickerError(fr.chat.picker.filesTitle, fr.chat.picker.filesBody);
     }
   }, [queueAttachments, reportPickerError, showRejected]);
 
@@ -2432,17 +2454,17 @@ export default function ChatScreen() {
 
   const handleVoicePermissionDenied = useCallback(() => {
     Alert.alert(
-      'Micro non autorisé',
-      'Autorise le micro dans les réglages pour envoyer un message vocal.',
+      fr.chat.picker.micDeniedTitle,
+      fr.chat.picker.micDeniedBody,
       [
-        { text: 'Annuler', style: 'cancel' },
-        { text: 'Ouvrir les réglages', onPress: () => void Linking.openSettings() },
+        { text: fr.common.cancel, style: 'cancel' },
+        { text: fr.common.openSettings, onPress: () => void Linking.openSettings() },
       ],
     );
   }, []);
 
   const handleVoiceError = useCallback((error: unknown) => {
-    setError(error instanceof Error ? error.message : "Impossible d'enregistrer le message vocal.");
+    setError(error instanceof Error ? error.message : fr.chat.errors.voiceRecordFailed);
   }, []);
 
   /**
@@ -2660,23 +2682,13 @@ export default function ChatScreen() {
             onEndReached={loadOlder}
             onEndReachedThreshold={0.3}
             contentContainerStyle={styles.listContent}
-            onScroll={event => {
-              // Liste inversée : offset 0 = le dernier message. On n'y recolle un
-              // nouvel arrivant que si l'utilisateur y était déjà.
-              const offset = event.nativeEvent.contentOffset.y;
-              atBottomRef.current = offset <= 32;
-              // Ce callback tourne à chaque frame : on n'agit qu'aux changements d'état.
-              const shouldShow = !atBottomRef.current && offset > JUMP_AFTER_PX;
-              if (shouldShow !== showJumpRef.current) {
-                showJumpRef.current = shouldShow;
-                setShowJump(shouldShow);
-              }
-              if (atBottomRef.current && unseenRef.current > 0) {
-                unseenRef.current = 0;
-                setUnseen(0);
-              }
-            }}
+            onScroll={handleScroll}
             scrollEventThrottle={160}
+            initialNumToRender={15}
+            maxToRenderPerBatch={10}
+            windowSize={5}
+            updateCellsBatchingPeriod={50}
+            removeClippedSubviews
             renderItem={renderItem}
           />
         </BlurTarget>
@@ -2742,13 +2754,19 @@ export default function ChatScreen() {
         ) : null}
 
         {offline ? (
-          <ThemedText type="small" style={[styles.offline, { color: theme.accent }]}>
+          <ThemedText
+            type="small"
+            style={[styles.offline, { color: theme.accent }]}
+            accessibilityLiveRegion="polite">
             Hors ligne — les messages partiront au retour du réseau
           </ThemedText>
         ) : null}
 
         {error ? (
-          <ThemedText type="small" style={[styles.error, { color: theme.error }]}>
+          <ThemedText
+            type="small"
+            style={[styles.error, { color: theme.error }]}
+            accessibilityLiveRegion="polite">
             {error}
           </ThemedText>
         ) : null}

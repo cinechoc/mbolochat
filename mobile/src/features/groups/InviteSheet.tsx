@@ -95,7 +95,10 @@ export function InviteSheet({ conversationId, groupName, onClose }: InviteSheetP
         keyboardShouldPersistTaps="handled">
             {invite ? (
               <>
-                <View style={styles.qrWrap}>
+                <View
+                  style={styles.qrWrap}
+                  accessible
+                  accessibilityLabel="QR code du lien d’invitation">
                   <QRCode value={link} size={168} backgroundColor="#ffffff" color="#0B1428" />
                 </View>
                 <ThemedText type="small" numberOfLines={2} style={styles.link}>
@@ -157,6 +160,8 @@ export function InviteSheet({ conversationId, groupName, onClose }: InviteSheetP
                     value={requiresApproval}
                     onValueChange={setRequiresApproval}
                     trackColor={{ true: accentColor, false: theme.backgroundSelected }}
+                    accessibilityLabel="Les admins approuvent"
+                    accessibilityHint="Chaque demande d’adhésion attend une validation."
                   />
                 </View>
 
@@ -187,6 +192,9 @@ function Chip({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
       style={[
         styles.chip,
         { backgroundColor: active ? accentColor : theme.backgroundElement },

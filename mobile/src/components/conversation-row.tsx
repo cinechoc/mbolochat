@@ -27,6 +27,7 @@ import { Spacing, Radii } from '@/constants/theme';
 import { EmojiText } from '@/features/emoji/EmojiText';
 import { PresenceDot } from '@/features/presence/PresenceDot';
 import { useTheme } from '@/hooks/use-theme';
+import { fr } from '@/i18n/fr';
 import { conversationPreview, conversationTitle, formatListTimestamp } from '@/lib/format';
 import type { ConversationSummary } from '@/lib/types';
 
@@ -84,8 +85,26 @@ function ConversationRowComponent({
       : 'En train d’écrire'
     : preview.text;
 
+  // Étiquette TalkBack : nom, aperçu, non-lus et drapeaux (muet/épinglé) —
+  // sans elle, la ligne la plus critique de l'application est illisible au
+  // lecteur d'écran (0 occurrence d'accessibility* dans ce composant).
+  const accessibilityLabel = [
+    title,
+    previewText,
+    unread ? fr.conversationRow.unread(conversation.unreadCount) : null,
+    conversation.muted ? fr.conversationRow.muted : null,
+    conversation.pinned ? fr.conversationRow.pinned : null,
+    timestamp,
+  ]
+    .filter(Boolean)
+    .join(', ');
+
   return (
     <AnimatedPressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={fr.conversationRow.openHint}
+      accessibilityState={{ disabled: false }}
       onPress={() => onPress(conversation)}
       onLongPress={() => onLongPress(conversation)}
       delayLongPress={300}
@@ -172,6 +191,7 @@ function ConversationRowComponent({
         <ThemedText
           type="small"
           themeColor="textSecondary"
+          maxFontSizeMultiplier={1.4}
           style={[unread ? styles.timeUnread : undefined, unread ? { color: theme.accent } : null]}>
           {timestamp}
         </ThemedText>
@@ -182,6 +202,7 @@ function ConversationRowComponent({
               { backgroundColor: conversation.muted ? theme.backgroundElement : theme.accent },
             ]}>
             <ThemedText
+              maxFontSizeMultiplier={1.4}
               style={[
                 styles.badgeText,
                 conversation.muted ? { color: theme.textSecondary } : null,

@@ -12,6 +12,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Circle } from 'react-native-svg';
 import { Radii } from '@/constants/theme';
+import { fr } from '@/i18n/fr';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
@@ -22,6 +23,8 @@ export interface ProgressRingProps {
   strokeWidth?: number;
   color?: string;
   trackColor?: string;
+  /** Étiquette lue par TalkBack ; un libellé générique par défaut. */
+  accessibilityLabel?: string;
   children?: ReactNode;
 }
 
@@ -35,6 +38,7 @@ export function ProgressRing({
   strokeWidth = 3,
   color = '#ffffff',
   trackColor = 'rgba(255,255,255,0.3)',
+  accessibilityLabel = fr.media.uploadProgress,
   children,
 }: ProgressRingProps) {
   const center = size / 2;
@@ -82,7 +86,14 @@ export function ProgressRing({
   }));
 
   return (
-    <View style={{ width: size, height: size }}>
+    <View
+      style={{ width: size, height: size }}
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityValue={
+        indeterminate ? undefined : { min: 0, max: 100, now: Math.round(target * 100) }
+      }>
       {indeterminate ? (
         <Animated.View style={[StyleSheet.absoluteFill, spinStyle]}>
           <Svg width={size} height={size}>
@@ -182,7 +193,11 @@ export function UploadStatusBadge({
           <View style={[styles.circle, styles.failedCircle]}>
             <Ionicons name="refresh" size={20} color="#ffffff" />
           </View>
-          {showRetryLabel ? <Text style={styles.retryText}>Réessayer</Text> : null}
+          {showRetryLabel ? (
+            <Text style={styles.retryText} maxFontSizeMultiplier={1.2}>
+              Réessayer
+            </Text>
+          ) : null}
         </Pressable>
       ) : (
         <View style={[styles.circle, styles.sendingCircle]}>

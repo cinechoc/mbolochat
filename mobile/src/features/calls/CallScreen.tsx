@@ -173,7 +173,13 @@ export function CallScreen() {
       navigationBarTranslucent
       onRequestClose={() => undefined}>
       <CallBackdrop remoteStream={remoteStream} videoVisible={remoteVideoVisible}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={() => setControlsVisible(true)} />
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={() => setControlsVisible(true)}
+          accessible={hideBar}
+          accessibilityRole={hideBar ? 'button' : undefined}
+          accessibilityLabel={hideBar ? 'Afficher les commandes de l’appel' : undefined}
+        />
         <View
           style={[
             styles.container,

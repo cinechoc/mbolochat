@@ -179,6 +179,7 @@ export default function RegisterScreen() {
                 blurTarget={blurTargetRef}
                 style={styles.flex}
                 placeholder="Prénom"
+                accessibilityLabel="Prénom"
                 autoCapitalize="words"
                 value={firstName}
                 onChangeText={setFirstName}
@@ -188,6 +189,7 @@ export default function RegisterScreen() {
                 blurTarget={blurTargetRef}
                 style={styles.flex}
                 placeholder="Nom de famille"
+                accessibilityLabel="Nom de famille"
                 autoCapitalize="words"
                 value={lastName}
                 onChangeText={setLastName}
@@ -198,6 +200,7 @@ export default function RegisterScreen() {
               glass
               blurTarget={blurTargetRef}
               placeholder="Adresse e-mail"
+              accessibilityLabel="Adresse e-mail"
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="email-address"
@@ -208,6 +211,7 @@ export default function RegisterScreen() {
               glass
               blurTarget={blurTargetRef}
               placeholder="Nouveau mot de passe"
+              accessibilityLabel="Nouveau mot de passe"
               value={password}
               onChangeText={setPassword}
             />
@@ -255,6 +259,9 @@ export default function RegisterScreen() {
                     <Pressable
                       key={option.value}
                       onPress={() => setGender(option.value)}
+                      accessibilityRole="radio"
+                      accessibilityLabel={option.label}
+                      accessibilityState={{ checked: selected }}
                       style={({ pressed }) => [
                         styles.genderOption,
                         {
@@ -281,6 +288,7 @@ export default function RegisterScreen() {
                   glass
                   blurTarget={blurTargetRef}
                   placeholder="Ton genre (ex. Non-binaire)"
+                  accessibilityLabel="Genre personnalisé"
                   autoCapitalize="sentences"
                   maxLength={32}
                   value={genderCustom}
@@ -294,7 +302,10 @@ export default function RegisterScreen() {
             </ThemedText>
 
             {error ? (
-              <ThemedText type="small" style={{ color: Colors.dark.error }}>
+              <ThemedText
+                type="small"
+                style={{ color: Colors.dark.error }}
+                accessibilityLiveRegion="polite">
                 {error}
               </ThemedText>
             ) : null}

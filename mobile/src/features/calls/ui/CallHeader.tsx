@@ -56,7 +56,7 @@ export function CallHeader({
             {detail ? <Text style={styles.detail}>{detail}</Text> : null}
           </View>
         ) : (
-          <Text style={styles.status} numberOfLines={1}>
+          <Text style={styles.status} numberOfLines={1} accessibilityLiveRegion="polite">
             {status}
             {detail ? ` · ${detail}` : ''}
           </Text>

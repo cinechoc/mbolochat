@@ -36,6 +36,10 @@ export function Select({ placeholder, options, value, onChange, style, glass = f
   const trigger = (
     <Pressable
       onPress={() => setOpen(true)}
+      accessibilityRole="button"
+      accessibilityLabel={selected ? `${placeholder} : ${selected.label}` : placeholder}
+      accessibilityHint="Ouvre la liste des choix"
+      accessibilityState={{ expanded: open }}
       style={({ pressed }) => [
         styles.trigger,
         { backgroundColor: glass ? 'transparent' : theme.backgroundElement },
@@ -79,6 +83,9 @@ export function Select({ placeholder, options, value, onChange, style, glass = f
                   onChange(item.value);
                   setOpen(false);
                 }}
+                accessibilityRole="radio"
+                accessibilityLabel={item.label}
+                accessibilityState={{ checked: isSelected }}
                 style={({ pressed }) => [
                   styles.option,
                   (pressed || isSelected) && { backgroundColor: theme.backgroundSelected },

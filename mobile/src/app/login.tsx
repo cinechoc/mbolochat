@@ -109,6 +109,7 @@ export default function LoginScreen() {
                 glass
                 blurTarget={blurTargetRef}
                 placeholder="Email ou nom d’utilisateur"
+                accessibilityLabel="Email ou nom d’utilisateur"
                 autoCapitalize="none"
                 autoCorrect={false}
                 value={identifier}
@@ -118,6 +119,7 @@ export default function LoginScreen() {
                 glass
                 blurTarget={blurTargetRef}
                 placeholder="Mot de passe"
+                accessibilityLabel="Mot de passe"
                 value={password}
                 onChangeText={setPassword}
                 onSubmitEditing={onSubmit}
@@ -125,13 +127,19 @@ export default function LoginScreen() {
               <Pressable
                 onPress={() => router.push('/forgot-password')}
                 hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Mot de passe oublié ?"
+                accessibilityHint="Ouvre la récupération du mot de passe"
                 style={styles.forgot}>
                 <ThemedText type="link" style={{ color: AuthSurface.accent }}>
                   Mot de passe oublié ?
                 </ThemedText>
               </Pressable>
               {error ? (
-                <ThemedText type="small" style={{ color: Colors.dark.error }}>
+                <ThemedText
+                  type="small"
+                  style={{ color: Colors.dark.error }}
+                  accessibilityLiveRegion="polite">
                   {error}
                 </ThemedText>
               ) : null}
