@@ -56,6 +56,8 @@ export const ImageMessageBubble = memo(function ImageMessageBubble({
         style={StyleSheet.absoluteFill}
         contentFit="cover"
         transition={120}
+        cachePolicy="disk"
+        recyclingKey={uri}
       />
       <UploadStatusBadge
         visible={!!sending}

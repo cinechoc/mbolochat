@@ -88,6 +88,8 @@ export function Avatar({
         source={{ uri: fullUri }}
         style={[{ width: size, height: size, borderRadius: radius }, imageStyle]}
         contentFit="cover"
+        cachePolicy="disk"
+        recyclingKey={fullUri}
         onError={() => setFailedUri(fullUri)}
         accessibilityLabel={`Photo de profil de ${name}`}
       />

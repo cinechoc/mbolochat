@@ -650,6 +650,10 @@ export default function ChatsScreen() {
     ],
   );
 
+  const handleScroll = useCallback(() => {
+    if (openRowId) setOpenRowId(null);
+  }, [openRowId]);
+
   const listEmpty = useMemo(
     () =>
       ready ? (
@@ -888,9 +892,11 @@ export default function ChatsScreen() {
           keyExtractor={listKeyExtractor}
           contentContainerStyle={filteredRows.length === 0 ? styles.emptyList : styles.listContent}
           keyboardShouldPersistTaps="handled"
-          onScroll={() => {
-            if (openRowId) setOpenRowId(null);
-          }}
+          onScroll={handleScroll}
+          initialNumToRender={15}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          updateCellsBatchingPeriod={50}
           ItemSeparatorComponent={ConversationSeparator}
           ListEmptyComponent={listEmpty}
           renderItem={renderItem}

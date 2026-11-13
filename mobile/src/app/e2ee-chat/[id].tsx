@@ -266,6 +266,32 @@ export default function E2eeChatScreen() {
   // claire ; la logique est pure et testée à part (rows.test.ts).
   const rows = useMemo(() => buildMessageRows(messages), [messages]);
 
+  // Callbacks stables de la liste (avant tout retour anticipé de l'écran) :
+  // `keyExtractor` et les gestionnaires de défilement ne doivent pas être
+  // recréés à chaque rendu sous peine de re-rendre les lignes visibles.
+  const keyExtractor = useCallback((row: E2eeListRow) => row.key, []);
+
+  const handleScroll = useCallback(
+    (event: {
+      nativeEvent: {
+        contentOffset: { y: number };
+        contentSize: { height: number };
+        layoutMeasurement: { height: number };
+      };
+    }) => {
+      // Liste simple (non inversée) : on recolle un nouvel arrivant
+      // seulement si l'utilisateur était déjà en bas.
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+      atBottomRef.current =
+        contentSize.height - contentOffset.y - layoutMeasurement.height < 48;
+    },
+    [],
+  );
+
+  const handleContentSizeChange = useCallback(() => {
+    if (atBottomRef.current) listRef.current?.scrollToEnd({ animated: false });
+  }, []);
+
   /** Aperçu d'un message cité, reconstruit localement depuis la base chiffrée. */
   const resolveQuote = useCallback(
     (quoteId: string | null): MessageQuote | null => {
@@ -1327,7 +1353,7 @@ export default function E2eeChatScreen() {
           <FlatList
             ref={listRef}
             data={rows}
-            keyExtractor={(row) => row.key}
+            keyExtractor={keyExtractor}
             viewabilityConfig={READ_VIEWABILITY_CONFIG}
             onViewableItemsChanged={handleViewableItemsChanged}
             contentContainerStyle={[
@@ -1335,17 +1361,13 @@ export default function E2eeChatScreen() {
               rows.length === 0 ? styles.listContentEmpty : null,
             ]}
             keyboardShouldPersistTaps="handled"
-            onScroll={(event) => {
-              // Liste simple (non inversée) : on recolle un nouvel arrivant
-              // seulement si l'utilisateur était déjà en bas.
-              const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-              atBottomRef.current =
-                contentSize.height - contentOffset.y - layoutMeasurement.height < 48;
-            }}
+            onScroll={handleScroll}
             scrollEventThrottle={160}
-            onContentSizeChange={() => {
-              if (atBottomRef.current) listRef.current?.scrollToEnd({ animated: false });
-            }}
+            onContentSizeChange={handleContentSizeChange}
+            initialNumToRender={15}
+            maxToRenderPerBatch={10}
+            windowSize={5}
+            updateCellsBatchingPeriod={50}
             renderItem={renderRow}
             ListEmptyComponent={
               ready ? (
