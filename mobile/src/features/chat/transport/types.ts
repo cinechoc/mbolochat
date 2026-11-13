@@ -69,6 +69,16 @@ export class EncryptedConversationError extends Error {
   }
 }
 
+/** Anti-downgrade inverse : le transport chiffré refuse une conversation claire. */
+export class PlaintextConversationError extends Error {
+  readonly code = 'plaintext_conversation';
+
+  constructor(readonly conversationId: string) {
+    super('Conversation non chiffrée : le transport E2EE est refusé');
+    this.name = 'PlaintextConversationError';
+  }
+}
+
 export interface ChatIdentity {
   id: string;
   username: string;
@@ -201,6 +211,7 @@ export interface ChatTransport {
   reportDelivered(ids: string[]): void;
   setTyping(active: boolean, text?: string): void;
   saveDraft(text: string): void;
+  loadDraft(): Promise<string>;
   retry(id: string): void;
   discard(id: string): Promise<void>;
 }

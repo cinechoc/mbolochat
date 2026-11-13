@@ -19,7 +19,7 @@ export interface TransportContractHarness {
   /** Identifiants de l'instantané initial, triés. */
   expectedInitialIds: string[];
   /** Émet un message entrant comme le ferait le socket. */
-  incoming(message: ChatMessageView): void;
+  incoming(message: ChatMessageView): Promise<void> | void;
   cleanup(): Promise<void>;
 }
 
@@ -132,8 +132,8 @@ export function runTransportContract(fixture: TransportContractFixture): void {
       try {
         await harness.transport.loadInitial();
         const message = contractMessage('incoming-1', '2026-01-01T00:00:05.000Z');
-        harness.incoming(message);
-        harness.incoming(message);
+        await harness.incoming(message);
+        await harness.incoming(message);
         expect(received.filter((id) => id === 'incoming-1')).toHaveLength(1);
       } finally {
         off();
@@ -162,9 +162,9 @@ export function runTransportContract(fixture: TransportContractFixture): void {
       try {
         for (const entry of GATED_METHODS) {
           if (harness.transport.capabilities[entry.capability]) continue;
-          await expect(Promise.resolve(entry.invoke(harness.transport))).rejects.toBeInstanceOf(
-            UnsupportedCapabilityError,
-          );
+          await expect(
+            Promise.resolve().then(() => entry.invoke(harness.transport)),
+          ).rejects.toBeInstanceOf(UnsupportedCapabilityError);
         }
       } finally {
         await harness.cleanup();

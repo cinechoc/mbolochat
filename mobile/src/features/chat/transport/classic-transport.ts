@@ -454,6 +454,10 @@ export class ClassicTransport implements ChatTransport {
     }
   }
 
+  async loadDraft(): Promise<string> {
+    return this.deps.cache.getDraft(this.conversationId);
+  }
+
   retry(id: string): void {
     void this.deps.outbox.retry(id).then(() => this.deps.outbox.drain(this.token));
   }
