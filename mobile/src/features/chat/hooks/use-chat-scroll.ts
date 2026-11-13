@@ -3,14 +3,17 @@ import type { MutableRefObject, RefObject } from 'react';
 import type { FlatList } from 'react-native';
 
 import type { ChatRow } from '../model/rows';
-
-/** Au-delà de ce défilement, la pastille de retour en bas apparaît. */
-const JUMP_AFTER_PX = 320;
+import {
+  INITIAL_SCROLL_STATE,
+  countUnseen,
+  resetScrollState,
+  scrollStateForOffset,
+  type ScrollState,
+} from '../model/scroll-state';
 
 /**
- * Défilement unifié : **liste inversée dans les deux modes** (offset 0 = le
- * dernier message). Le compteur d'invisibles et la pastille de retour sont
- * identiques au clair et au chiffré.
+ * Défilement unifié (liste inversée dans les deux modes). Les calculs sont
+ * dans `scroll-state.ts` ; le hook ne garde que les références et l'état React.
  */
 export function useChatScroll(rows: readonly ChatRow[]): {
   listRef: RefObject<FlatList<ChatRow> | null>;
@@ -18,41 +21,47 @@ export function useChatScroll(rows: readonly ChatRow[]): {
   showJump: boolean;
   unseen: number;
   onScroll: (event: { nativeEvent: { contentOffset: { y: number } } }) => void;
+  notifyIncoming: (count: number) => void;
   jumpToBottom: () => void;
   scrollToMessage: (messageId: string) => void;
 } {
   const listRef = useRef<FlatList<ChatRow>>(null);
   const atBottomRef = useRef(true);
-  const showJumpRef = useRef(false);
-  const unseenRef = useRef(0);
-  const [showJump, setShowJump] = useState(false);
-  const [unseen, setUnseen] = useState(0);
+  const stateRef = useRef<ScrollState>(INITIAL_SCROLL_STATE);
+  const [state, setState] = useState<ScrollState>(INITIAL_SCROLL_STATE);
+
+  const commit = useCallback((next: ScrollState) => {
+    const previous = stateRef.current;
+    if (
+      next.atBottom === previous.atBottom &&
+      next.showJump === previous.showJump &&
+      next.unseen === previous.unseen
+    ) {
+      return;
+    }
+    stateRef.current = next;
+    atBottomRef.current = next.atBottom;
+    setState(next);
+  }, []);
 
   const onScroll = useCallback(
     (event: { nativeEvent: { contentOffset: { y: number } } }) => {
-      const offset = event.nativeEvent.contentOffset.y;
-      atBottomRef.current = offset <= 32;
-      const shouldShow = !atBottomRef.current && offset > JUMP_AFTER_PX;
-      if (shouldShow !== showJumpRef.current) {
-        showJumpRef.current = shouldShow;
-        setShowJump(shouldShow);
-      }
-      if (atBottomRef.current && unseenRef.current > 0) {
-        unseenRef.current = 0;
-        setUnseen(0);
-      }
+      commit(scrollStateForOffset(event.nativeEvent.contentOffset.y, stateRef.current.unseen));
     },
-    [],
+    [commit],
+  );
+
+  const notifyIncoming = useCallback(
+    (count: number) => {
+      commit(countUnseen(stateRef.current, count));
+    },
+    [commit],
   );
 
   const jumpToBottom = useCallback(() => {
-    unseenRef.current = 0;
-    setUnseen(0);
-    showJumpRef.current = false;
-    setShowJump(false);
-    atBottomRef.current = true;
+    commit(resetScrollState());
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
-  }, []);
+  }, [commit]);
 
   const scrollToMessage = useCallback(
     (messageId: string) => {
@@ -68,5 +77,14 @@ export function useChatScroll(rows: readonly ChatRow[]): {
     [rows],
   );
 
-  return { listRef, atBottomRef, showJump, unseen, onScroll, jumpToBottom, scrollToMessage };
+  return {
+    listRef,
+    atBottomRef,
+    showJump: state.showJump,
+    unseen: state.unseen,
+    onScroll,
+    notifyIncoming,
+    jumpToBottom,
+    scrollToMessage,
+  };
 }

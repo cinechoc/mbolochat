@@ -27,9 +27,35 @@ export interface BuildChatRowsInput {
   timeGapMs: number;
   albumGapMs?: number;
   albumMaxTiles?: number;
+  /**
+   * Rangées de la construction précédente. Une rangée dont la clé, le type et
+   * les messages (références) n'ont pas changé est réutilisée telle quelle :
+   * `FlatList` et les composants mémoïsés gardent alors la même identité.
+   */
+  previousRows?: readonly ChatRow[];
 }
 
 const atMs = (value: string): number => new Date(value).getTime();
+
+/** Réutilise une rangée identique de la construction précédente. */
+function reuseRow(previous: Map<string, ChatRow>, candidate: ChatRow): ChatRow {
+  const old = previous.get(candidate.key);
+  if (!old || old.type !== candidate.type) {
+    return candidate;
+  }
+  if (old.type === 'message' && candidate.type === 'message') {
+    return old.message === candidate.message && old.continuation === candidate.continuation
+      ? old
+      : candidate;
+  }
+  if (old.type === 'album' && candidate.type === 'album') {
+    const sameMessages =
+      old.messages.length === candidate.messages.length &&
+      old.messages.every((message, index) => message === candidate.messages[index]);
+    return sameMessages && old.continuation === candidate.continuation ? old : candidate;
+  }
+  return old;
+}
 
 /** Un média entre dans un album s'il est nu : ni légende ni réponse. */
 function isAlbumPart(message: ChatMessageView): boolean {
@@ -84,9 +110,14 @@ export function buildChatRows({
   timeGapMs,
   albumGapMs = DEFAULT_ALBUM_GAP_MS,
   albumMaxTiles = DEFAULT_ALBUM_MAX_TILES,
+  previousRows = [],
 }: BuildChatRowsInput): ChatRow[] {
-  const clusters = clusterAlbums(messages, albumGapMs, albumMaxTiles);
+  const previous = new Map(previousRows.map((row) => [row.key, row]));
   const rows: ChatRow[] = [];
+  const push = (row: ChatRow) => {
+    rows.push(reuseRow(previous, row));
+  };
+  const clusters = clusterAlbums(messages, albumGapMs, albumMaxTiles);
   let lastLabel = '';
   let lastMs: number | null = null;
   let lastSenderId: string | null = null;
@@ -103,28 +134,28 @@ export function buildChatRows({
       firstMs - lastMs <= timeGapMs;
 
     if (label !== lastLabel) {
-      rows.push({ key: `date-${first.id}`, type: 'date', label });
+      push({ key: `date-${first.id}`, type: 'date', label });
       lastLabel = label;
       lastMs = null;
       lastSenderId = null;
     } else if (lastMs !== null && firstMs - lastMs > timeGapMs) {
-      rows.push({ key: `time-${first.id}`, type: 'time', label: formatClock(first.createdAt) });
+      push({ key: `time-${first.id}`, type: 'time', label: formatClock(first.createdAt) });
     }
 
     if (!unreadPlaced && unreadFrom && cluster.some((message) => message.id === unreadFrom.id)) {
-      rows.push({ key: 'unread', type: 'unread', count: unreadFrom.count });
+      push({ key: 'unread', type: 'unread', count: unreadFrom.count });
       unreadPlaced = true;
     }
 
     if (cluster.length > 1) {
-      rows.push({
+      push({
         key: `album-${first.id}-${cluster[cluster.length - 1].id}`,
         type: 'album',
         messages: cluster,
         continuation,
       });
     } else {
-      rows.push({ key: first.id, type: 'message', message: first, continuation });
+      push({ key: first.id, type: 'message', message: first, continuation });
     }
 
     lastMs = lastAt;

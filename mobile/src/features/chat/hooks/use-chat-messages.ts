@@ -1,109 +1,65 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer } from 'react';
 
-import type { MessageReceipt } from '@/lib/types';
-import { MessageIndex } from '../model/message-index';
+import {
+  INITIAL_MESSAGES_STATE,
+  messagesReducer,
+} from '../model/messages-state';
 import { buildChatRows, type ChatRow } from '../model/rows';
-import type { ChatMessageView, ChatTransport } from '../transport/types';
-
-function mergeReceiptMaps(
-  current: Record<string, MessageReceipt[]>,
-  incoming: MessageReceipt[],
-): Record<string, MessageReceipt[]> {
-  const next = { ...current };
-  for (const receipt of incoming) {
-    const list = (next[receipt.messageId] ?? []).filter(
-      (existing) => existing.userId !== receipt.userId,
-    );
-    list.push(receipt);
-    next[receipt.messageId] = list;
-  }
-  return next;
-}
+import type { ChatTransport } from '../transport/types';
 
 /**
- * État des messages d'un transport : instantané initial, abonnements, index
- * incrémental et rangées. La saisie ne passe pas par ce hook, donc une frappe
- * ne re-rend pas la liste.
+ * État des messages d'un transport. La logique (fusion, suppression, accusés,
+ * réactions) vit dans `messages-state.ts` ; le hook ne branche que React et le
+ * transport.
  */
 export function useChatMessages(input: {
   transport: ChatTransport | null;
   timeGapMs: number;
   unreadFrom?: { id: string; count: number } | null;
 }): {
-  messages: ChatMessageView[];
+  messages: ReturnType<typeof messagesReducer>['messages'];
   rows: ChatRow[];
-  receipts: Record<string, MessageReceipt[]>;
+  receipts: ReturnType<typeof messagesReducer>['receipts'];
   ready: boolean;
   hasMore: boolean;
   error: string | null;
   loadOlder: () => Promise<void>;
 } {
   const { transport, timeGapMs, unreadFrom = null } = input;
-  const [messages, setMessages] = useState<ChatMessageView[]>([]);
-  const [receipts, setReceipts] = useState<Record<string, MessageReceipt[]>>({});
-  const [ready, setReady] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const indexRef = useRef(new MessageIndex<ChatMessageView>());
+  const [state, dispatch] = useReducer(messagesReducer, INITIAL_MESSAGES_STATE);
 
   useEffect(() => {
-    if (!transport) {
-      return;
-    }
+    if (!transport) return;
+    dispatch({ type: 'reset' });
     let active = true;
-    indexRef.current = new MessageIndex<ChatMessageView>();
-
-    const publish = () => {
-      if (active) setMessages([...indexRef.current.values()]);
-    };
 
     void transport
       .loadInitial()
       .then((snapshot) => {
-        if (!active) return;
-        indexRef.current = new MessageIndex(snapshot.messages);
-        setMessages([...indexRef.current.values()]);
-        setReceipts(snapshot.receipts);
-        setHasMore(snapshot.hasMore);
+        if (active) dispatch({ type: 'snapshot', snapshot });
       })
       .catch((cause: unknown) => {
-        if (active) setError(cause instanceof Error ? cause.message : null);
+        if (active) {
+          dispatch({
+            type: 'error',
+            error: cause instanceof Error ? cause.message : null,
+          });
+        }
       })
       .finally(() => {
-        if (active) setReady(true);
+        if (active) dispatch({ type: 'ready' });
       });
 
     const off = transport.subscribe({
-      onMessage: (message) => {
-        indexRef.current.upsert(message);
-        publish();
-      },
-      onMessageRemoved: (id, forEveryone) => {
-        const existing = indexRef.current.get(id);
-        if (!existing) return;
-        if (forEveryone) {
-          indexRef.current.upsert({ ...existing, deleted: true, body: '', attachment: null });
-        } else {
-          indexRef.current.remove(id);
-        }
-        publish();
-      },
-      onReceipts: (rows) => {
-        if (active) setReceipts((current) => mergeReceiptMaps(current, rows));
-      },
-      onReaction: (id, reactions) => {
-        const existing = indexRef.current.get(id);
-        if (!existing) return;
-        indexRef.current.upsert({ ...existing, reactions });
-        publish();
-      },
+      onMessage: (message) => dispatch({ type: 'upsert', message }),
+      onMessageRemoved: (id, forEveryone) => dispatch({ type: 'remove', id, forEveryone }),
+      onReceipts: (receipts) => dispatch({ type: 'receipts', receipts }),
+      onReaction: (id, reactions) => dispatch({ type: 'reaction', id, reactions }),
       onTyping: () => undefined,
       onConnection: () => undefined,
       onConversationUpdated: () => undefined,
       onConversationRemoved: () => undefined,
-      onError: (message) => {
-        if (active) setError(message);
-      },
+      onError: (error) => dispatch({ type: 'error', error }),
       onFatal: () => undefined,
     });
 
@@ -114,20 +70,32 @@ export function useChatMessages(input: {
   }, [transport]);
 
   const loadOlder = useCallback(async () => {
-    if (!transport || !hasMore || messages.length === 0) return;
-    const oldest = messages[0];
+    if (!transport || !state.hasMore || state.messages.length === 0) return;
+    const oldest = state.messages[0];
     const page = await transport.loadOlder(oldest.createdAt);
     for (const message of page.messages) {
-      indexRef.current.upsert(message);
+      dispatch({ type: 'upsert', message });
     }
-    setMessages([...indexRef.current.values()]);
-    setHasMore(page.hasMore);
-  }, [transport, hasMore, messages]);
+    dispatch({ type: 'hasMore', hasMore: page.hasMore });
+  }, [transport, state.hasMore, state.messages]);
 
   const rows = useMemo(
-    () => buildChatRows({ messages, timeGapMs, unreadFrom }),
-    [messages, timeGapMs, unreadFrom],
+    () =>
+      buildChatRows({
+        messages: state.messages,
+        timeGapMs,
+        unreadFrom,
+      }),
+    [state.messages, timeGapMs, unreadFrom],
   );
 
-  return { messages, rows, receipts, ready, hasMore, error, loadOlder };
+  return {
+    messages: state.messages,
+    rows,
+    receipts: state.receipts,
+    ready: state.ready,
+    hasMore: state.hasMore,
+    error: state.error,
+    loadOlder,
+  };
 }
