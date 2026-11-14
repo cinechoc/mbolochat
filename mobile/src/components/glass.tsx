@@ -40,6 +40,8 @@ function loadBlurModule(): BlurModule | null {
     return blurModule;
   }
   try {
+    // Le chargement conditionnel évite de référencer une vue native absente.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     blurModule = require('expo-blur') as BlurModule;
   } catch {
     blurModule = null;

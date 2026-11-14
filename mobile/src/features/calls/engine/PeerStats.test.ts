@@ -8,7 +8,7 @@ import {
   type LinkStats,
 } from './PeerStats';
 
-const REPORT: Array<Record<string, any>> = [
+const REPORT: Record<string, any>[] = [
   {
     id: 'pair-1',
     type: 'candidate-pair',

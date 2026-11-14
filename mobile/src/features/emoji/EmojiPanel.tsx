@@ -298,7 +298,7 @@ export function EmojiPanel({
       // de rendu du FlatList sur l'ancienne page — la page cible s'affiche vide.
       if (index >= 0) pagerRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 });
     },
-    [tabs, width],
+    [tabs],
   );
 
   let content: React.ReactElement;

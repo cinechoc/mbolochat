@@ -59,6 +59,8 @@ export function BlurTarget({ ...props }: BlurTargetProps) {
   if (!isBlurAvailable()) {
     return <View {...props} />;
   }
+  // Le chargement conditionnel évite de référencer une vue native absente.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { BlurTargetView } = require('expo-blur');
   return <BlurTargetView {...props} />;
 }

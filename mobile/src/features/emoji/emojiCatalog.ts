@@ -39,7 +39,7 @@ const byKey = new Map<string, EmojiItem>();
 // glyphe → rendu tofu). Masqués tant qu'aucune illustration Mbolo n'existe.
 // Source : unicode-emoji-json (versions) + bloc 1FAE8+ (ajouts 15.1 non listés).
 // Les mains 🫱–🫶 (1FAF0–1FAF6) sont bien Unicode 14.0 et restent visibles.
-const TOO_NEW_RANGES: Array<[number, number]> = [
+const TOO_NEW_RANGES: [number, number][] = [
   [0x1f6d8, 0x1f6d8], // éboulement, sans-fil
   [0x1f6dc, 0x1f6dc],
   [0x1fa75, 0x1fa77], // cœurs bleu clair, gris, rose

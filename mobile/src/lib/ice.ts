@@ -2,6 +2,8 @@
  * Serveurs ICE du client : STUN + TURN lus depuis l'environnement, jamais en
  * dur. Remplacer Metered par un coturn dédié = changer `mobile/.env`.
  */
+import { API_URL } from './config';
+
 export interface IceServerConfig {
   urls: string;
   username?: string;
@@ -16,8 +18,6 @@ function listFromEnv(value: string | undefined): string[] {
     .map((url) => url.trim())
     .filter(Boolean);
 }
-
-import { API_URL } from './config';
 
 const CACHE_FALLBACK_MS = 6 * 60 * 60 * 1000;
 const CACHE_REFRESH_RATIO = 0.8;
