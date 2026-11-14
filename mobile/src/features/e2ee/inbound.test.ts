@@ -5,7 +5,7 @@ import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
 import { api } from '@/lib/api';
 import type { Message } from '@/lib/types';
 import { persistIncoming } from './atomic';
-import type { E2eeAccountRow } from './db';
+import { loadReactionSummaries, type E2eeAccountRow } from './db';
 import * as socketModule from '@/lib/socket';
 import { migrateE2eeSchema } from './schema';
 import { decryptEnvelope, decryptIncoming } from './text';
@@ -148,6 +148,23 @@ const decryptedSticker = (pickle: string, stickerRef: string, replyTo?: string) 
   ...decrypted(pickle),
   plaintext_b64: stickerPlain(stickerRef, replyTo),
 });
+
+const reactionPlain = (
+  targetId: string,
+  reaction = 'mbolo-panther-2d/amour',
+  action: 'add' | 'remove' = 'add',
+) =>
+  Buffer.from(
+    JSON.stringify({ v: 4, kind: 'reaction', targetId, reaction, action }),
+    'utf8',
+  ).toString('base64');
+
+const decryptedReaction = (
+  pickle: string,
+  targetId: string,
+  reaction = 'mbolo-panther-2d/amour',
+  action: 'add' | 'remove' = 'add',
+) => ({ ...decrypted(pickle), plaintext_b64: reactionPlain(targetId, reaction, action) });
 
 function read(fixture: Fixture, sql: string, ...params: unknown[]) {
   return fixture.raw
@@ -884,6 +901,94 @@ describe('déchiffrement entrant — stickers v3', () => {
   });
 });
 
+describe('déchiffrement entrant — réactions v4', () => {
+  it('stocke une réaction masquée même si la cible est inconnue', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt.mockResolvedValue(decryptedReaction('S1', 'inconnu-1') as never);
+
+    const result = await decrypt(fixture, incoming({ id: 'r1' }));
+
+    expect(result.hidden).toBe(true);
+    expect(result.reactionEvent).toEqual({
+      targetId: 'inconnu-1',
+      reaction: 'mbolo-panther-2d/amour',
+      action: 'add',
+      authorId: 'peer-1',
+    });
+    expect(
+      read(
+        fixture,
+        `SELECT body, hidden, content_kind, control_target, reaction, reaction_action
+           FROM e2ee_messages WHERE id = 'r1'`,
+      ),
+    ).toEqual([
+      {
+        body: '',
+        hidden: 1,
+        content_kind: 'reaction',
+        control_target: 'inconnu-1',
+        reaction: 'mbolo-panther-2d/amour',
+        reaction_action: 'add',
+      },
+    ]);
+    expect(read(fixture, 'SELECT id FROM e2ee_messages WHERE COALESCE(hidden, 0) = 0')).toEqual([]);
+  });
+
+  it('agrège par auteur, sans double comptage, et applique le retrait', async () => {
+    const fixture = await seeded();
+    await fixture.handle.runAsync(
+      `INSERT INTO e2ee_messages
+         (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine)
+       VALUES ('m1', 'conv-1', 'peer-1', 'Pair', 'bonjour', '2026-01-01T00:00:00Z', NULL, 0)`,
+    );
+    cryptoMock.secureDecrypt
+      .mockResolvedValueOnce(decryptedReaction('S1', 'm1') as never)
+      .mockResolvedValueOnce(decryptedReaction('S2', 'm1') as never)
+      .mockResolvedValueOnce(decryptedReaction('S3', 'm1', 'mbolo-panther-2d/amour', 'remove') as never);
+
+    await decrypt(fixture, incoming({ id: 'r1' }));
+    let summaries = await loadReactionSummaries(fixture.db, 'conv-1', 'me');
+    expect(summaries.get('m1')).toEqual([
+      { reaction: 'mbolo-panther-2d/amour', count: 1, mine: false },
+    ]);
+
+    await decrypt(fixture, incoming({ id: 'r2' }));
+    summaries = await loadReactionSummaries(fixture.db, 'conv-1', 'me');
+    expect(summaries.get('m1')?.[0]?.count).toBe(1);
+
+    await decrypt(fixture, incoming({ id: 'r3' }));
+    summaries = await loadReactionSummaries(fixture.db, 'conv-1', 'me');
+    expect(summaries.has('m1')).toBe(false);
+  });
+
+  it('ne rejoue pas un doublon et rejette une réaction mal formée sans bruit', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt.mockResolvedValueOnce(decryptedReaction('S1', 'm1') as never);
+    const first = await decrypt(fixture, incoming({ id: 'r1' }));
+    const duplicate = await decrypt(fixture, incoming({ id: 'r1' }));
+    expect(duplicate.reactionEvent).toEqual(first.reactionEvent);
+    expect(cryptoMock.secureDecrypt).toHaveBeenCalledTimes(1);
+
+    cryptoMock.secureDecrypt.mockResolvedValueOnce({
+      ...decrypted('S2'),
+      plaintext_b64: Buffer.from(
+        JSON.stringify({
+          v: 4,
+          kind: 'reaction',
+          targetId: 'm1',
+          reaction: 'texte libre',
+          action: 'add',
+        }),
+        'utf8',
+      ).toString('base64'),
+    } as never);
+    const malformed = await decrypt(fixture, incoming({ id: 'r2' }));
+    expect(malformed.hidden).toBe(true);
+    expect(malformed.unreadableReason).toBe('invalid_payload');
+    expect(malformed.reactionEvent).toBeUndefined();
+  });
+});
+
 /**
  * Lot A — protection P0 : un contenu **authentifié mais illisible** (le
  * déchiffrement Olm a réussi, le parsing échoue) doit être persisté comme
@@ -1011,7 +1116,7 @@ describe('message authentifié mais illisible — le ratchet avance quand même'
   it('test décisif : le message suivant reste déchiffrable après un contenu illisible', async () => {
     const fixture = await seeded();
     const state = ratchetMock((payload) =>
-      payload === 'ILLISIBLE' ? plainOf({ v: 4, kind: 'sticker' }) : plainOf({ v: 1, text: 'bonjour' }),
+      payload === 'ILLISIBLE' ? plainOf({ v: 6, kind: 'sticker' }) : plainOf({ v: 1, text: 'bonjour' }),
     );
 
     const first = await decrypt(fixture, incoming({ id: 'm1', payload: 'ILLISIBLE' }));

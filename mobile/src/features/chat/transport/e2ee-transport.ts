@@ -2,7 +2,8 @@ import type { E2eeAccountRow, E2eeDatabase, StoredE2eeMessage } from '@/features
 import type { RecentGif } from '@/features/media/GifPanel';
 import type { PersonalSticker } from '@/features/stickers/stickerLibrary';
 import type { VoiceNote } from '@/features/voice-notes/useVoiceRecorder';
-import type { Message, MessageReceipt } from '@/lib/types';
+import { isReactionRef } from '@/features/stickers/reactionRules';
+import type { Message, MessageReceipt, ReactionSummary } from '@/lib/types';
 import { MessageIndex } from '../model/message-index';
 import { storedMessageToView } from '../model/message-view';
 import type { E2eeTransportDeps, E2eeTransportOptions } from './deps';
@@ -20,7 +21,7 @@ import {
 
 const E2EE_CAPABILITIES: ChatCapabilities = {
   replies: true,
-  reactions: false,
+  reactions: true,
   deleteForEveryone: false,
   stickers: false,
   gifs: false,
@@ -65,6 +66,7 @@ export class E2eeTransport implements ChatTransport {
   private index = new MessageIndex<ChatMessageView>();
   private readonly stored = new Map<string, StoredE2eeMessage>();
   private receipts: Record<string, MessageReceipt[]> = {};
+  private reactions = new Map<string, ReactionSummary[]>();
   private handlers: ChatTransportHandlers | null = null;
   private cleanups: (() => void)[] = [];
   private ready = false;
@@ -91,6 +93,11 @@ export class E2eeTransport implements ChatTransport {
   async loadInitial(): Promise<ChatSnapshot> {
     const { db } = await this.credentials();
     const local = await this.deps.db.listLocalMessages(db, this.conversationId);
+    this.reactions = await this.deps.db.loadReactionSummaries(
+      db,
+      this.conversationId,
+      this.currentUser.id,
+    );
     for (const stored of local) {
       this.absorb(stored, false);
     }
@@ -320,8 +327,39 @@ export class E2eeTransport implements ChatTransport {
     await this.deps.socket.deleteMessage(this.token, this.conversationId, id, false);
   }
 
-  async toggleReaction(): Promise<void> {
-    throw new UnsupportedCapabilityError('reactions');
+  async toggleReaction(id: string, reaction: string): Promise<void> {
+    if (!this.capabilities.reactions) {
+      throw new UnsupportedCapabilityError('reactions');
+    }
+    const target = this.stored.get(id);
+    if (
+      !target ||
+      target.id === target.client_id ||
+      target.hidden === 1
+    ) {
+      return;
+    }
+    if (!isReactionRef(reaction)) return;
+    const active = this.reactions.get(id) ?? [];
+    const mine = active.some((entry) => entry.reaction === reaction && entry.mine);
+    const { db, account } = await this.credentials();
+    await this.deps.crypto.sendEncryptedReaction({
+      token: this.token,
+      db,
+      account,
+      conversation: this.summary,
+      currentUserId: this.currentUser.id,
+      currentUserName: this.currentUser.displayName,
+      targetId: id,
+      reaction,
+      action: mine ? 'remove' : 'add',
+    });
+    this.reactions = await this.deps.db.loadReactionSummaries(
+      db,
+      this.conversationId,
+      this.currentUser.id,
+    );
+    this.handlers?.onReaction(id, this.reactions.get(id) ?? []);
   }
 
   async markRead(ids?: string[]): Promise<void> {
@@ -384,6 +422,13 @@ export class E2eeTransport implements ChatTransport {
   private absorb(stored: StoredE2eeMessage, emit: boolean): ChatMessageView {
     const existed = this.stored.has(stored.id);
     this.stored.set(stored.id, stored);
+    if (stored.hidden === 1) {
+      return storedMessageToView(stored, {
+        currentUser: this.currentUser,
+        peer: this.peer,
+        state: 'none',
+      });
+    }
     const view = this.render(stored);
     if (emit && !existed) {
       this.handlers?.onMessage(view);
@@ -397,6 +442,7 @@ export class E2eeTransport implements ChatTransport {
       currentUser: this.currentUser,
       peer: this.peer,
       state: this.deliveryOf(stored),
+      reactions: this.reactions.get(stored.id) ?? [],
     });
     this.index.upsert(view);
     return view;
@@ -425,7 +471,22 @@ export class E2eeTransport implements ChatTransport {
           message,
           currentUserId: this.currentUser.id,
         });
-        this.absorb(result.stored, true);
+        if (result.reactionEvent) {
+          this.reactions = await this.deps.db.loadReactionSummaries(
+            db,
+            this.conversationId,
+            this.currentUser.id,
+          );
+          const target = this.stored.get(result.reactionEvent.targetId);
+          if (target) {
+            this.handlers?.onReaction(
+              target.id,
+              this.reactions.get(target.id) ?? [],
+            );
+          }
+        } else {
+          this.absorb(result.stored, true);
+        }
         const acked = this.deps.receipts.deliveredIds([result.stored]);
         if (acked.length > 0) this.reportDelivered(acked);
       } catch {

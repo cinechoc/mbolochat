@@ -18,6 +18,8 @@ import {
   type StoredE2eeMessage,
 } from './db';
 import {
+  buildReactionV4,
+  buildStickerV3,
   buildTextV1,
   decodeMediaMeta,
   encodeMediaMeta,
@@ -26,7 +28,9 @@ import {
   type EncryptedMedia,
   type ParsedPayload,
   type PayloadError,
+  type ReactionAction,
 } from './payload';
+import type { ReactionRef } from '../stickers/reactionRules';
 import {
   loadPersistedEnvelope,
   markEnvelopeSent,
@@ -318,14 +322,13 @@ export async function encryptEnvelope(input: {
   };
 }
 
-export async function sendEncryptedText(input: {
+export interface SendEncryptedContentInput {
   token: string;
   db: SQLiteDatabase;
   account: E2eeAccountRow;
   conversation: ConversationSummary;
   currentUserId: string;
   currentUserName: string;
-  text: string;
   allowKeyChange?: boolean;
   replyToId?: string | null;
   /** Identifiant client à réutiliser pour une reprise : même enveloppe, même
@@ -333,7 +336,25 @@ export async function sendEncryptedText(input: {
   clientId?: string;
   /** Reprise explicitement autorisée d'une enveloppe journalisée en échec. */
   resumeFailed?: boolean;
-}): Promise<SendResult> {
+}
+
+interface OutgoingContent {
+  body: string;
+  quoteId?: string | null;
+  stickerRef?: string | null;
+  hidden?: boolean;
+  contentKind?: string | null;
+  controlTarget?: string | null;
+  reaction?: string | null;
+  reactionAction?: string | null;
+}
+
+/** Envoie un contenu déjà sérialisé par l'un des builders ci-dessus. */
+async function sendEncryptedContent(
+  input: SendEncryptedContentInput,
+  plaintext: string,
+  content: OutgoingContent,
+): Promise<SendResult> {
   const clientId = input.clientId ?? newClientId();
   const encrypted = await encryptEnvelope({
     token: input.token,
@@ -341,12 +362,12 @@ export async function sendEncryptedText(input: {
     account: input.account,
     conversation: input.conversation,
     currentUserId: input.currentUserId,
-    plaintext: buildTextV1(input.text, input.replyToId ?? undefined),
+    plaintext,
     allowKeyChange: input.allowKeyChange ?? false,
     // L'identifiant client est décidé **avant** le chiffrement : c'est la clé du
     // journal d'envoi. Une reprise réutilise le même, donc la même enveloppe.
     clientId,
-    quoteId: input.replyToId ?? null,
+    quoteId: content.quoteId ?? null,
     resumeFailed: input.resumeFailed ?? false,
   });
   const provisional: StoredE2eeMessage = {
@@ -354,12 +375,18 @@ export async function sendEncryptedText(input: {
     conversation_id: input.conversation.id,
     sender_id: input.currentUserId,
     sender_name: input.currentUserName,
-    body: input.text,
+    body: content.body,
     created_at: new Date().toISOString(),
     client_id: clientId,
     mine: 1,
     media_meta: null,
-    quote_id: input.replyToId ?? null,
+    quote_id: content.quoteId ?? null,
+    sticker_ref: content.stickerRef ?? null,
+    hidden: content.hidden ? 1 : 0,
+    content_kind: content.contentKind ?? null,
+    control_target: content.controlTarget ?? null,
+    reaction: content.reaction ?? null,
+    reaction_action: content.reactionAction ?? null,
   };
   // La ligne provisoire est écrite avant l'envoi : un plantage entre les deux
   // ne doit pas rendre le message indéchiffrable et invisible.
@@ -392,6 +419,46 @@ export async function sendEncryptedText(input: {
     await deleteLocalMessage(input.db, clientId).catch(() => undefined);
     throw cause;
   }
+}
+
+export async function sendEncryptedText(
+  input: SendEncryptedContentInput & { text: string },
+): Promise<SendResult> {
+  return sendEncryptedContent(
+    input,
+    buildTextV1(input.text, input.replyToId ?? undefined),
+    { body: input.text, quoteId: input.replyToId ?? null },
+  );
+}
+
+export async function sendEncryptedSticker(
+  input: SendEncryptedContentInput & { stickerRef: string },
+): Promise<SendResult> {
+  return sendEncryptedContent(input, buildStickerV3(input.stickerRef), {
+    body: '',
+    stickerRef: input.stickerRef,
+  });
+}
+
+export async function sendEncryptedReaction(
+  input: SendEncryptedContentInput & {
+    targetId: string;
+    reaction: ReactionRef;
+    action: ReactionAction;
+  },
+): Promise<SendResult> {
+  return sendEncryptedContent(
+    input,
+    buildReactionV4(input.targetId, input.reaction, input.action),
+    {
+      body: '',
+      hidden: true,
+      contentKind: 'reaction',
+      controlTarget: input.targetId,
+      reaction: input.reaction,
+      reactionAction: input.action,
+    },
+  );
 }
 
 /** Résultat brut d'une ouverture : rien n'est encore écrit en base. */
@@ -611,6 +678,7 @@ async function finalizeUnreadable(
   media?: EncryptedMedia;
   stickerRef?: string;
   unreadableReason: PayloadError;
+  hidden: boolean;
   account: E2eeAccountRow;
   stored: StoredE2eeMessage;
   keyChanged: boolean;
@@ -628,6 +696,9 @@ async function finalizeUnreadable(
     quote_id: null,
     sticker_ref: null,
     unreadable_reason: reason,
+    hidden: 1,
+    content_kind: 'unknown',
+    raw_payload: opened.plaintextB64,
   };
   await persistIncoming({
     db,
@@ -643,6 +714,7 @@ async function finalizeUnreadable(
     media: undefined,
     stickerRef: undefined,
     unreadableReason: reason,
+    hidden: true,
     account: opened.account,
     stored,
     keyChanged: opened.keyChanged,
@@ -657,13 +729,14 @@ async function finalizeUnreadable(
  * avancé et le message ne sont jamais séparés. Un message déjà stocké ressort
  * tel quel, sans consommer de clé de ratchet une seconde fois.
  */
-export async function decryptIncoming(input: {
-  token: string;
-  db: SQLiteDatabase;
-  account: E2eeAccountRow;
-  message: Message;
-  currentUserId: string;
-}): Promise<{
+export interface IncomingReactionEvent {
+  targetId: string;
+  reaction: ReactionRef;
+  action: ReactionAction;
+  authorId: string;
+}
+
+export interface DecryptIncomingResult {
   text: string;
   media?: EncryptedMedia;
   /** Référence du sticker reçu (`v:3`), déjà validée par le parser. */
@@ -674,11 +747,39 @@ export async function decryptIncoming(input: {
    * un corps vide et ce motif : le ratchet, lui, a bien avancé.
    */
   unreadableReason?: PayloadError;
+  /** Ligne de contrôle masquée : aucune bulle ne doit être émise. */
+  hidden?: boolean;
+  reactionEvent?: IncomingReactionEvent;
   account: E2eeAccountRow;
   stored: StoredE2eeMessage;
   keyChanged: boolean;
-}> {
+}
+
+export async function decryptIncoming(input: {
+  token: string;
+  db: SQLiteDatabase;
+  account: E2eeAccountRow;
+  message: Message;
+  currentUserId: string;
+}): Promise<DecryptIncomingResult> {
   const message = input.message;
+
+  const reactionEventOf = (stored: StoredE2eeMessage): IncomingReactionEvent | undefined => {
+    if (
+      stored.content_kind !== 'reaction' ||
+      typeof stored.control_target !== 'string' ||
+      typeof stored.reaction !== 'string' ||
+      (stored.reaction_action !== 'add' && stored.reaction_action !== 'remove')
+    ) {
+      return undefined;
+    }
+    return {
+      targetId: stored.control_target,
+      reaction: stored.reaction as ReactionRef,
+      action: stored.reaction_action,
+      authorId: stored.sender_id,
+    };
+  };
 
   const replay = async () => {
     const existing = await loadLocalMessage(input.db, message.id);
@@ -689,6 +790,8 @@ export async function decryptIncoming(input: {
       media: existing.media_meta ? decodeMediaMeta(existing.media_meta) ?? undefined : undefined,
       stickerRef: existing.sticker_ref ?? undefined,
       unreadableReason: (existing.unreadable_reason as PayloadError | null) ?? undefined,
+      hidden: Boolean(existing.hidden),
+      reactionEvent: reactionEventOf(existing),
       account: input.account,
       stored: existing,
       keyChanged: false,
@@ -720,6 +823,15 @@ export async function decryptIncoming(input: {
       // stocker à part évite une bulle de texte vide.
       const body =
         parsed.kind === 'text' ? parsed.text : parsed.kind === 'media' ? parsed.caption : '';
+      const reactionEvent =
+        parsed.kind === 'reaction'
+          ? {
+              targetId: parsed.targetId,
+              reaction: parsed.reaction,
+              action: parsed.action,
+              authorId: message.sender.id,
+            }
+          : undefined;
       const stored: StoredE2eeMessage = {
         id: message.id,
         conversation_id: message.conversationId,
@@ -732,10 +844,15 @@ export async function decryptIncoming(input: {
         // Les clés du média ne vivent que dans la base chiffrée : c'est ici, et
         // nulle part ailleurs, qu'elles sont conservées pour une lecture ultérieure.
         media_meta: parsed.kind === 'media' ? encodeMediaMeta(parsed.media) : null,
-        quote_id: parsed.replyTo ?? null,
+        quote_id: 'replyTo' in parsed ? parsed.replyTo ?? null : null,
         // Référence validée par `parsePayload` : forme `pack/id` uniquement.
         // Rien d'autre n'en est tiré — ni URL, ni chemin, ni binaire.
         sticker_ref: parsed.kind === 'sticker' ? parsed.stickerRef : null,
+        hidden: parsed.kind === 'reaction' ? 1 : 0,
+        content_kind: parsed.kind === 'reaction' ? 'reaction' : null,
+        control_target: parsed.kind === 'reaction' ? parsed.targetId : null,
+        reaction: parsed.kind === 'reaction' ? parsed.reaction : null,
+        reaction_action: parsed.kind === 'reaction' ? parsed.action : null,
       };
       await persistIncoming({
         db: input.db,
@@ -751,6 +868,8 @@ export async function decryptIncoming(input: {
         text: body,
         media: parsed.kind === 'media' ? parsed.media : undefined,
         stickerRef: parsed.kind === 'sticker' ? parsed.stickerRef : undefined,
+        hidden: parsed.kind === 'reaction',
+        reactionEvent,
         account: opened.account,
         stored,
         keyChanged: opened.keyChanged,

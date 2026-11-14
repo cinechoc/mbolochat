@@ -1,6 +1,7 @@
 import { deleteDatabaseAsync, openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
+import type { ReactionSummary } from '@/lib/types';
 import { migrateE2eeSchema } from './schema';
 
 const DATABASE_NAME = 'mbolo-e2ee.db';
@@ -291,6 +292,17 @@ export interface StoredE2eeMessage {
   local_thumb_cipher_uri?: string | null;
   /** Identifiant serveur du blob de vignette, indépendant de `upload_id`. */
   thumb_upload_id?: string | null;
+  /** Ligne de contrôle : conservée pour l'idempotence, jamais affichée. */
+  hidden?: number | null;
+  /** `reaction`, `delete` ou `unknown` pour une ligne de contrôle. */
+  content_kind?: string | null;
+  /** Message visé par un événement de contrôle. */
+  control_target?: string | null;
+  /** Référence fermée de la réaction, jamais du texte libre. */
+  reaction?: string | null;
+  reaction_action?: string | null;
+  /** Contenu authentifié d'une version future, conservé en SQLCipher seulement. */
+  raw_payload?: string | null;
 }
 
 export async function saveLocalMessage(
@@ -311,14 +323,19 @@ export async function saveLocalMessageWith(
   await writer.runAsync(
     `INSERT INTO e2ee_messages
        (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
-        media_meta, quote_id, sticker_ref, unreadable_reason)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        media_meta, quote_id, sticker_ref, unreadable_reason, hidden, content_kind,
+        control_target, reaction, reaction_action, raw_payload)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        body = excluded.body,
        sticker_ref = COALESCE(excluded.sticker_ref, e2ee_messages.sticker_ref),
-       unreadable_reason = COALESCE(
-         excluded.unreadable_reason, e2ee_messages.unreadable_reason
-       )`,
+       unreadable_reason = COALESCE(excluded.unreadable_reason, e2ee_messages.unreadable_reason),
+       hidden = excluded.hidden,
+       content_kind = excluded.content_kind,
+       control_target = excluded.control_target,
+       reaction = excluded.reaction,
+       reaction_action = excluded.reaction_action,
+       raw_payload = COALESCE(excluded.raw_payload, e2ee_messages.raw_payload)`,
     message.id,
     message.conversation_id,
     message.sender_id,
@@ -331,6 +348,12 @@ export async function saveLocalMessageWith(
     message.quote_id ?? null,
     message.sticker_ref ?? null,
     message.unreadable_reason ?? null,
+    message.hidden ?? 0,
+    message.content_kind ?? null,
+    message.control_target ?? null,
+    message.reaction ?? null,
+    message.reaction_action ?? null,
+    message.raw_payload ?? null,
   );
 }
 
@@ -491,11 +514,75 @@ export async function listLocalMessages(
   limit = 200,
 ): Promise<StoredE2eeMessage[]> {
   return db.getAllAsync<StoredE2eeMessage>(
-    `SELECT * FROM e2ee_messages WHERE conversation_id = ?
+    `SELECT * FROM e2ee_messages WHERE conversation_id = ? AND COALESCE(hidden, 0) = 0
      ORDER BY created_at DESC LIMIT ?`,
     conversationId,
     limit,
   );
+}
+
+interface ReactionEventRow {
+  control_target: string;
+  sender_id: string;
+  reaction: string;
+  reaction_action: string;
+  created_at: string;
+  id: string;
+}
+
+/**
+ * Agrège les réactions d'une conversation depuis SQLCipher.
+ *
+ * L'ensemble `(cible, réaction, auteur)` rend les doublons inoffensifs : un
+ * `add` répété ne compte pas deux fois et `remove` retire seulement l'auteur
+ * concerné. Les événements dont la cible n'existe pas encore restent dans la
+ * map ; ils seront appliqués quand la cible arrivera.
+ */
+export async function loadReactionSummaries(
+  db: SQLiteDatabase,
+  conversationId: string,
+  currentUserId: string,
+): Promise<Map<string, ReactionSummary[]>> {
+  const rows = await db.getAllAsync<ReactionEventRow>(
+    `SELECT id, sender_id, control_target, reaction, reaction_action, created_at
+       FROM e2ee_messages
+      WHERE conversation_id = ? AND content_kind = 'reaction'
+      ORDER BY created_at ASC, id ASC`,
+    conversationId,
+  );
+  const active = new Map<string, Map<string, Set<string>>>();
+  for (const row of rows) {
+    if (
+      typeof row.control_target !== 'string' ||
+      typeof row.reaction !== 'string' ||
+      (row.reaction_action !== 'add' && row.reaction_action !== 'remove')
+    ) {
+      continue;
+    }
+    let byReaction = active.get(row.control_target);
+    if (!byReaction) {
+      byReaction = new Map();
+      active.set(row.control_target, byReaction);
+    }
+    let reactors = byReaction.get(row.reaction);
+    if (!reactors) {
+      reactors = new Set();
+      byReaction.set(row.reaction, reactors);
+    }
+    if (row.reaction_action === 'add') reactors.add(row.sender_id);
+    else reactors.delete(row.sender_id);
+  }
+
+  const result = new Map<string, ReactionSummary[]>();
+  for (const [targetId, byReaction] of active) {
+    const summaries: ReactionSummary[] = [];
+    for (const [reaction, reactors] of byReaction) {
+      if (reactors.size === 0) continue;
+      summaries.push({ reaction, count: reactors.size, mine: reactors.has(currentUserId) });
+    }
+    if (summaries.length > 0) result.set(targetId, summaries);
+  }
+  return result;
 }
 
 export async function searchLocalMessages(

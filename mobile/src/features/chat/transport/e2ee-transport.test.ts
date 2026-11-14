@@ -127,6 +127,7 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
     saveDraft: vi.fn(async () => undefined),
     loadDraft: vi.fn(async () => 'brouillon chiffré'),
     deleteLocalMessage: vi.fn(async () => undefined),
+    loadReactionSummaries: vi.fn(async () => new Map()),
   };
   const crypto = {
     sendEncryptedText: vi.fn(async () => ({
@@ -147,6 +148,22 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
         sender_id: 'me',
         sender_name: 'me',
         client_id: 'media-1',
+      }),
+    })),
+    sendEncryptedReaction: vi.fn(async () => ({
+      clientId: 'reaction-1',
+      serverMessage: serverMessage('reaction-1', '2026-01-01T00:00:11.000Z', {
+        sender: identity('me'),
+      }),
+      stored: stored('reaction-1', '2026-01-01T00:00:11.000Z', {
+        sender_id: 'me',
+        sender_name: 'me',
+        body: '',
+        hidden: 1,
+        content_kind: 'reaction',
+        control_target: 'a',
+        reaction: 'mbolo-panther-2d/amour',
+        reaction_action: 'add',
       }),
     })),
     decryptIncoming: vi.fn(async ({ message }: { message: Message }) => ({
@@ -309,6 +326,29 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
         caption: 'légende',
       }),
     );
+    await transport.dispose();
+  });
+
+  it('agrège les réactions et les envoie dans l’enveloppe Olm', async () => {
+    const fakes = createFakes(SEED);
+    fakes.db.loadReactionSummaries.mockResolvedValueOnce(
+      new Map([['a', [{ reaction: 'mbolo-panther-2d/amour', count: 1, mine: false }]]]),
+    );
+    const transport = new E2eeTransport(fakes.deps, options);
+    const snapshot = await transport.loadInitial();
+    expect(snapshot.messages.find((message) => message.id === 'a')?.reactions).toEqual([
+      { reaction: 'mbolo-panther-2d/amour', count: 1, mine: false },
+    ]);
+
+    await transport.toggleReaction('a', 'mbolo-panther-2d/amour');
+    expect(fakes.crypto.sendEncryptedReaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetId: 'a',
+        reaction: 'mbolo-panther-2d/amour',
+        action: 'add',
+      }),
+    );
+    expect(fakes.socketDeps.deleteMessage).not.toHaveBeenCalled();
     await transport.dispose();
   });
 

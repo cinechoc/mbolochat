@@ -22,7 +22,7 @@ export type E2eeSchemaDb = Pick<
 >;
 
 /** Version de schéma attendue par ce code. */
-export const E2EE_SCHEMA_VERSION = 6;
+export const E2EE_SCHEMA_VERSION = 7;
 
 const META_TABLE = 'e2ee_schema_meta';
 
@@ -402,6 +402,7 @@ const STEPS: { version: number; run: (db: E2eeSchemaDb) => Promise<void> }[] = [
   { version: 4, run: migrateToV4 },
   { version: 5, run: migrateToV5 },
   { version: 6, run: migrateToV6 },
+  { version: 7, run: migrateToV7 },
 ];
 
 async function readVersion(db: E2eeSchemaDb): Promise<number> {
@@ -486,6 +487,36 @@ async function migrateToV6(db: E2eeSchemaDb): Promise<void> {
   await db.withTransactionAsync(async () => {
     await addMissingColumns(db, 'e2ee_messages', [['unreadable_reason', 'TEXT']]);
     await stampVersion(db, 6);
+  });
+}
+
+/**
+ * Version 7 : événements de contrôle chiffrés (réactions aujourd'hui).
+ *
+ * Une réaction voyage dans une enveloppe Olm normale. Sa ligne locale doit donc
+ * exister pour l'idempotence et pour empêcher un second déchiffrement, mais elle
+ * ne doit jamais apparaître comme une bulle. Les colonnes nullables décrivent
+ * l'événement ; `raw_payload` conserve, uniquement dans SQLCipher, un contenu
+ * authentifié d'une version future afin qu'il ne soit pas perdu.
+ *
+ * Ajout pur : les messages existants gardent `hidden = 0` et `content_kind =
+ * NULL`, donc leur comportement visible ne change pas.
+ */
+async function migrateToV7(db: E2eeSchemaDb): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await addMissingColumns(db, 'e2ee_messages', [
+      ['hidden', 'INTEGER NOT NULL DEFAULT 0'],
+      ['content_kind', 'TEXT'],
+      ['control_target', 'TEXT'],
+      ['reaction', 'TEXT'],
+      ['reaction_action', 'TEXT'],
+      ['raw_payload', 'TEXT'],
+    ]);
+    await db.execAsync(`
+      CREATE INDEX IF NOT EXISTS e2ee_messages_reactions_idx
+        ON e2ee_messages (conversation_id, content_kind, control_target, created_at);
+    `);
+    await stampVersion(db, 7);
   });
 }
 

@@ -1,5 +1,6 @@
 import { fromByteArray, toByteArray } from 'base64-js';
 
+import { isReactionRef, type ReactionRef } from '../stickers/reactionRules';
 import { isValidStickerRef } from '../stickers/stickerRefRules';
 
 /**
@@ -55,7 +56,13 @@ export interface EncryptedMedia {
 export type ParsedPayload =
   | { kind: 'text'; text: string; replyTo?: string }
   | { kind: 'media'; media: EncryptedMedia; caption: string; replyTo?: string }
-  | { kind: 'sticker'; stickerRef: string; replyTo?: string };
+  | { kind: 'sticker'; stickerRef: string; replyTo?: string }
+  | {
+      kind: 'reaction';
+      targetId: string;
+      reaction: ReactionRef;
+      action: 'add' | 'remove';
+    };
 
 /**
  * Motifs d'un contenu **authentifié mais illisible**. Liste fermée : elle sert
@@ -129,6 +136,27 @@ export function buildStickerV3(stickerRef: string, replyTo?: string): string {
   );
 }
 
+export type ReactionAction = 'add' | 'remove';
+
+/** Identifiant serveur/local admissible dans une référence de contenu. */
+export function isValidControlTarget(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
+/** Sérialise le contenu `v:4` d'une réaction chiffrée. */
+export function buildReactionV4(
+  targetId: string,
+  reaction: ReactionRef,
+  action: ReactionAction,
+): string {
+  if (!isValidControlTarget(targetId) || !isReactionRef(reaction)) {
+    throw new InvalidPayloadError('invalid_payload');
+  }
+  return encodeText(
+    JSON.stringify({ v: 4, kind: 'reaction', targetId, reaction, action }),
+  );
+}
+
 function isBlob(value: unknown): value is EncryptedBlob {
   if (!value || typeof value !== 'object') return false;
   const blob = value as Record<string, unknown>;
@@ -151,6 +179,11 @@ function isMedia(value: unknown): value is EncryptedMedia {
   if (!isBlob(media.blob)) return false;
   if (media.thumb !== undefined && !isBlob(media.thumb)) return false;
   return true;
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
 /**
@@ -233,6 +266,23 @@ export function parsePayload(plaintextB64: string): ParsedPayload {
     return cited
       ? { kind: 'sticker', stickerRef: envelope.stickerRef, replyTo: cited }
       : { kind: 'sticker', stickerRef: envelope.stickerRef };
+  }
+  if (envelope.v === 4) {
+    if (
+      !hasExactKeys(envelope, ['v', 'kind', 'targetId', 'reaction', 'action']) ||
+      envelope.kind !== 'reaction' ||
+      !isValidControlTarget(envelope.targetId) ||
+      !isReactionRef(envelope.reaction) ||
+      (envelope.action !== 'add' && envelope.action !== 'remove')
+    ) {
+      throw new InvalidPayloadError('invalid_payload');
+    }
+    return {
+      kind: 'reaction',
+      targetId: envelope.targetId,
+      reaction: envelope.reaction,
+      action: envelope.action,
+    };
   }
   throw new InvalidPayloadError('unsupported_version');
 }

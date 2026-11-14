@@ -26,6 +26,8 @@ export const E2EE_DEPS: E2eeTransportDeps = {
   db: e2eeDb,
   crypto: {
     sendEncryptedText: e2eeText.sendEncryptedText,
+    sendEncryptedReaction: e2eeText.sendEncryptedReaction,
+    sendEncryptedSticker: e2eeText.sendEncryptedSticker,
     sendEncryptedMedia: e2eeMedia.sendEncryptedMedia,
     decryptIncoming: e2eeText.decryptIncoming,
   },

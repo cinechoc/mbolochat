@@ -81,8 +81,12 @@ export interface E2eeTransportDeps {
     | 'saveDraft'
     | 'loadDraft'
     | 'deleteLocalMessage'
+    | 'loadReactionSummaries'
   >;
-  crypto: Pick<E2eeTextModule, 'sendEncryptedText' | 'decryptIncoming'> &
+  crypto: Pick<
+    E2eeTextModule,
+    'sendEncryptedText' | 'sendEncryptedReaction' | 'sendEncryptedSticker' | 'decryptIncoming'
+  > &
     Pick<E2eeMediaModule, 'sendEncryptedMedia'>;
   receipts: Pick<
     E2eeReceiptsModule,

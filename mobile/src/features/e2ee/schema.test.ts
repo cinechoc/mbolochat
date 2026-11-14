@@ -798,3 +798,50 @@ describe('migrateE2eeSchema — v6 : motif des messages illisibles', () => {
     ).toEqual({ value: '5' });
   });
 });
+
+describe('migrateE2eeSchema — v7 : lignes de contrôle masquées', () => {
+  it('ajoute les colonnes sans rendre visibles les messages existants', async () => {
+    const db = adapter(legacyDatabase());
+    expect(await migrateE2eeSchema(db, 6)).toBe(6);
+
+    expect(await migrateE2eeSchema(db)).toBe(7);
+
+    const columns = await db.getAllAsync<{ name: string; notnull: number; dflt_value: unknown }>(
+      'PRAGMA table_info(e2ee_messages)',
+    );
+    const hidden = columns.find((column) => column.name === 'hidden');
+    expect(hidden).toBeDefined();
+    expect(hidden?.notnull).toBe(1);
+    expect(hidden?.dflt_value).toBe('0');
+    expect(
+      await db.getAllAsync<Record<string, unknown>>(
+        `SELECT id, hidden, content_kind, raw_payload FROM e2ee_messages ORDER BY id`,
+      ),
+    ).toEqual([
+      { id: 'msg-1', hidden: 0, content_kind: null, raw_payload: null },
+    ]);
+  });
+
+  it('accepte une ligne de contrôle et un payload brut dans SQLCipher', async () => {
+    const db = adapter(legacyDatabase());
+    await migrateE2eeSchema(db);
+    await db.runAsync(
+      `INSERT INTO e2ee_messages
+         (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
+          hidden, content_kind, control_target, reaction, reaction_action, raw_payload)
+       VALUES ('r1', 'conv-1', 'peer-1', 'Alice', '', '2026-01-02T00:00:00Z', NULL, 0,
+               1, 'reaction', 'msg-1', 'mbolo-panther-2d/amour', 'add', NULL)`,
+    );
+    expect(
+      await db.getFirstAsync<Record<string, unknown>>(
+        `SELECT hidden, content_kind, control_target, reaction_action
+           FROM e2ee_messages WHERE id = 'r1'`,
+      ),
+    ).toEqual({
+      hidden: 1,
+      content_kind: 'reaction',
+      control_target: 'msg-1',
+      reaction_action: 'add',
+    });
+  });
+});

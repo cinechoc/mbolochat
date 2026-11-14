@@ -1,6 +1,6 @@
 import type { StoredE2eeMessage } from '@/features/e2ee/db';
 import { decodeMediaMeta } from '@/features/e2ee/payload';
-import type { Message, SenderInfo } from '@/lib/types';
+import type { Message, ReactionSummary, SenderInfo } from '@/lib/types';
 import type {
   ChatAttachmentView,
   ChatDeliveryState,
@@ -99,6 +99,7 @@ export function storedMessageToView(
     currentUser: ChatIdentity;
     peer: ChatIdentity;
     state?: ChatDeliveryState;
+    reactions?: ReactionSummary[];
   },
 ): ChatMessageView {
   const mine = stored.mine === 1;
@@ -142,7 +143,7 @@ export function storedMessageToView(
     // La citation chiffrée est reconstruite depuis l'index local par l'écran :
     // seule la référence traverse la couche de données.
     quote: null,
-    reactions: [],
+    reactions: options.reactions ?? [],
     stickerRef: stored.sticker_ref ?? null,
     attachment,
     state: options.state ?? 'none',

@@ -2,18 +2,12 @@ import { io, type Socket } from 'socket.io-client';
 
 import { refreshAccessToken } from './api';
 import { API_URL } from './config';
+import { REACTION_REFS } from '@/features/stickers/reactionRules';
 import { getCachedAccessToken } from './token-storage';
 import type { ReactionSummary } from './types';
 
 /** Réactions proposées : stickers de la panthère Mbolo (liste fermée côté serveur). */
-export const REACTION_STICKERS = [
-  'mbolo-panther-2d/amour',
-  'mbolo-panther-2d/fou-rire',
-  'mbolo-panther-2d/pouce-leve',
-  'mbolo-panther-2d/choc',
-  'mbolo-panther-2d/tristesse',
-  'mbolo-panther-2d/colere',
-] as const;
+export const REACTION_STICKERS = REACTION_REFS;
 
 let socket: Socket | null = null;
 /** Un seul rafraîchissement de jeton à la fois, même si plusieurs
