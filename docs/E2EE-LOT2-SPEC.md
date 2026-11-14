@@ -96,4 +96,4 @@ par le QR au-delà de ce que le scan local permet de comparer.
 - Un ancien client traite `v:6` et `v:7` comme des contenus inconnus masqués :
   il n'affiche rien et continue à déchiffrer les messages suivants. Les `v:1` à
   `v:5` restent strictement inchangés.
-- Aucun ancien écran n'est supprimé dans ce lot ; B.3.6 reste hors périmètre.
+- B.3.6 a supprimé les anciens écrans après ce lot ; le transport classique et les groupes restent inchangés.

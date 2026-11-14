@@ -1,6 +1,6 @@
 # Checklist de validation sur appareil — fusion des conversations (Phase 5)
 
-Version 1.0 — 2026-11-13. À passer sur **Waydroid** (ou appareil réel) après chaque pas visible de la Phase 5, et obligatoirement avant B.3.6 (retrait des anciens écrans).
+Version 1.1 — 2026-11-14. Registre des validations sur **Waydroid** ou appareil réel. B.3.6 a été exécuté : les anciens écrans ont été retirés et les points appareil restants sont reportés.
 
 ## Prérequis
 
@@ -15,7 +15,7 @@ Version 1.0 — 2026-11-13. À passer sur **Waydroid** (ou appareil réel) aprè
 |---|---|---|---|---|
 | 1 | Envoi texte | A écrit « test clair », envoie ; couper le réseau, écrire un 2e message, rétablir | A écrit « test chiffré », envoie ; couper le réseau, écrire un 2e message, rétablir | Bulle immédiate, coche horloge puis envoyée ; reprise sans doublon |
 | 2 | Réception | B envoie pendant que A est sur l'écran ; puis A en arrière-plan, B envoie | Idem en chiffré | Message affiché une seule fois, ordre chronologique, pas de doublon au retour |
-| 3 | Pagination | Remonter au-delà de 30 messages (jeu de 200 messages via `perf-seed`) | Remonter dans l'historique local (> 50 messages) | Chargement sans doublon ni saut ; en chiffré, comportement actuel conservé |
+| 3 | Pagination | Remonter au-delà de 30 messages (jeu de 200 messages via `perf-seed`) | Remonter dans l'historique local (> 50 messages) | Chargement sans doublon ni saut ; en chiffré, pages locales de 50 |
 | 4 | Notes vocales | A enregistre 5 s, envoie ; B écoute | A enregistre 5 s, envoie ; B écoute | Lecture, waveform, durée, accusé ; en chiffré, clair libéré à la fermeture |
 | 5 | Images et vidéos | A envoie 3 photos (album), une vidéo, un PDF ; B ouvre chaque média | Idem en chiffré | Vignettes, visionneuse, document ; en chiffré, aucune fuite de clair (fichier temporaire supprimé) |
 | 6 | Réponses | Appui long → Répondre → envoyer ; taper la citation | Idem en chiffré | Citation correcte, saut vers l'original ; supprimé = « Message supprimé » |
@@ -67,15 +67,15 @@ Consigner la date, la build/commit, l'appareil, et joindre les captures des KO. 
 | 17 | Appels | `chat-screen.tsx` `headerRight` ; refus chiffré | Complet |
 | 18 | Sécurité d'écran | `hooks/use-chat-security.ts` + `model/media-leases.ts` | Complet |
 
-Scénario marqué manquant : pagination chiffrée (#3).
+Pagination locale par pages de 50 implémentée en clair et en chiffré ; elle n’a pas été rejouée sur appareil depuis ce changement.
 
 ## Résultats Waydroid — 2026-11-14
 
 Statuts utilisés : **OK**, **KO corrigé**, **KO ouvert**, **non vérifié**.
 
-- Branche : `refactor/phase-5-unification-chat`, code `1f67b73` sur `1987a15` et `95b597b` ; aucun push, B.3.6 non commencé.
+- Branche de référence : `master` locale, B.3.6 exécuté ; aucun push. Les validations ci-dessous datent de la phase de comparaison et ne couvrent pas les écrans supprimés.
 - Appareil : Waydroid `192.168.240.112:5555`, paquet `com.groupenzogho.mbolochat`, API `:3001` et Metro `:8081` actifs.
-- Drapeau unifié : **ON** pendant les comparaisons de la session B.3.5b, puis remis à **OFF**. Depuis la clôture B.3.5c, il est **activé par défaut** ; `/dev-flags` permet encore de revenir à l'ancien écran.
+- Drapeau unifié : **ON** pendant les comparaisons de la session B.3.5b. B.3.6 a supprimé le drapeau et les anciens écrans ; l’écran unifié est désormais l’unique écran.
 - Conversations : clair direct `b91f5c98-0d7f-4b7e-8041-e9338a9596b6` (« Test Demo »), groupe `50e68ebf-967a-4ced-8e69-44525329ca04` (« On boit où? »), chiffré direct `d84d01ea-0c70-49d6-aa3f-f72777f13bfc`.
 - Second compte clair : `alice.martin` / `password123` (client socket secondaire pour les réceptions).
 
@@ -149,3 +149,15 @@ Toutes les lignes de cette section sont **non vérifiées sur appareil, reporté
 | Suppression pour tous `v:5` | non vérifié sur appareil, reporté | `inbound.test.ts` (auteur, cible inconnue, tombstone, autre conversation, malformé) ; `e2ee-transport.test.ts` (envoi et vidage local) |
 | Types inconnus et contenus malformés | non vérifié sur appareil, reporté | `payload.test.ts` et `inbound.test.ts` (rejet silencieux, session Olm avancée, ligne masquée) |
 | Stickers personnels en chiffré | non pris en charge dans ce lot | Non applicable : le format `v:3` ne transporte que des références de catalogue. |
+
+## E2EE Lot 2 — confiance, éphémères et modification (2026-11-14)
+
+Aucune session Waydroid n’a été ouverte pour ce lot. Toutes les lignes sont **non vérifiées sur appareil, reportées** ; seuls les tests automatiques font foi.
+
+| Fonctionnalité | Statut appareil | Couverture automatique |
+|---|---|---|
+| Code de sécurité et QR | non vérifié sur appareil, reporté | `safetyNumber.test.ts` (même code des deux côtés, ordre indépendant, changement de clé) ; `schema.test.ts` (retour à non vérifié). |
+| Messages éphémères 24 h / 7 j | non vérifié sur appareil, reporté | `ephemeral.test.ts` (échéances, purge locale, conflit de versions) ; `inbound.test.ts` (événement sans échéance propre). |
+| Modification de texte 15 min / 5 révisions | non vérifié sur appareil, reporté | `edits.test.ts` (auteur, fenêtre, révisions, ordre inversé, message supprimé) ; `payload.test.ts` (round-trip et bornes). |
+| Réglage de l’indicateur de frappe | non vérifié sur appareil, reporté | `privacy.e2e-spec.ts` « coupe typing » : réglage `false`, aucun événement émis, puis retour à `true` vérifié. |
+| Revue de sécurité B4 | OK tests | Deux correctifs sûrs : garde de révision et aucune échéance sur les événements de contrôle. Aucun test appareil demandé. |
