@@ -1022,6 +1022,35 @@ describe('déchiffrement entrant — réactions v4', () => {
     expect(summaries.has('m1')).toBe(false);
   });
 
+  it('converge à horodatage égal quel que soit l’ordre add/remove', async () => {
+    const forward = await seeded();
+    await forward.handle.runAsync(
+      `INSERT INTO e2ee_messages
+         (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine)
+       VALUES ('m1', 'conv-1', 'peer-1', 'Pair', 'bonjour', '2026-01-01T00:00:00Z', NULL, 0)`,
+    );
+    cryptoMock.secureDecrypt
+      .mockResolvedValueOnce(decryptedReaction('S1', 'm1') as never)
+      .mockResolvedValueOnce(decryptedReaction('S2', 'm1', 'mbolo-panther-2d/amour', 'remove') as never);
+    await decrypt(forward, incoming({ id: 'r1' }));
+    await decrypt(forward, incoming({ id: 'r2' }));
+
+    const reverse = await seeded();
+    await reverse.handle.runAsync(
+      `INSERT INTO e2ee_messages
+         (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine)
+       VALUES ('m1', 'conv-1', 'peer-1', 'Pair', 'bonjour', '2026-01-01T00:00:00Z', NULL, 0)`,
+    );
+    cryptoMock.secureDecrypt
+      .mockResolvedValueOnce(decryptedReaction('S3', 'm1', 'mbolo-panther-2d/amour', 'remove') as never)
+      .mockResolvedValueOnce(decryptedReaction('S4', 'm1') as never);
+    await decrypt(reverse, incoming({ id: 'r1' }));
+    await decrypt(reverse, incoming({ id: 'r2' }));
+
+    expect(await loadReactionSummaries(forward.db, 'conv-1', 'me')).toEqual(new Map());
+    expect(await loadReactionSummaries(reverse.db, 'conv-1', 'me')).toEqual(new Map());
+  });
+
   it('ne rejoue pas un doublon et rejette une réaction mal formée sans bruit', async () => {
     const fixture = await seeded();
     cryptoMock.secureDecrypt.mockResolvedValueOnce(decryptedReaction('S1', 'm1') as never);

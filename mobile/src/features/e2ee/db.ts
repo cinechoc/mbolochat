@@ -592,11 +592,20 @@ export async function loadReactionSummaries(
   const rows = await db.getAllAsync<ReactionEventRow>(
     `SELECT id, sender_id, control_target, reaction, reaction_action, created_at
        FROM e2ee_messages
-      WHERE conversation_id = ? AND content_kind = 'reaction'
-      ORDER BY created_at ASC, rowid ASC`,
+      WHERE conversation_id = ? AND content_kind = 'reaction'`,
     conversationId,
   );
-  const active = new Map<string, Map<string, Set<string>>>();
+  // Une seule opération gagne par (cible, réaction, auteur) : la plus récente
+  // par `created_at`, et à horodatage égal le retrait l'emporte. Ce choix est
+  // indépendant de l'ordre d'arrivée sur les deux appareils.
+  interface Winner {
+    targetId: string;
+    reaction: string;
+    authorId: string;
+    action: 'add' | 'remove';
+    createdAt: string;
+  }
+  const winners = new Map<string, Winner>();
   for (const row of rows) {
     if (
       typeof row.control_target !== 'string' ||
@@ -606,18 +615,39 @@ export async function loadReactionSummaries(
     ) {
       continue;
     }
-    let byReaction = active.get(row.control_target);
+    const key = `${row.control_target}\u0000${row.reaction}\u0000${row.sender_id}`;
+    const previous = winners.get(key);
+    if (
+      !previous ||
+      row.created_at > previous.createdAt ||
+      (row.created_at === previous.createdAt &&
+        row.reaction_action === 'remove' &&
+        previous.action === 'add')
+    ) {
+      winners.set(key, {
+        targetId: row.control_target,
+        reaction: row.reaction,
+        authorId: row.sender_id,
+        action: row.reaction_action,
+        createdAt: row.created_at,
+      });
+    }
+  }
+
+  const active = new Map<string, Map<string, Set<string>>>();
+  for (const winner of winners.values()) {
+    if (winner.action !== 'add') continue;
+    let byReaction = active.get(winner.targetId);
     if (!byReaction) {
       byReaction = new Map();
-      active.set(row.control_target, byReaction);
+      active.set(winner.targetId, byReaction);
     }
-    let reactors = byReaction.get(row.reaction);
+    let reactors = byReaction.get(winner.reaction);
     if (!reactors) {
       reactors = new Set();
-      byReaction.set(row.reaction, reactors);
+      byReaction.set(winner.reaction, reactors);
     }
-    if (row.reaction_action === 'add') reactors.add(row.sender_id);
-    else reactors.delete(row.sender_id);
+    reactors.add(winner.authorId);
   }
 
   const result = new Map<string, ReactionSummary[]>();
