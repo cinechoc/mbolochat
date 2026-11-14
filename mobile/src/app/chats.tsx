@@ -545,10 +545,6 @@ export default function ChatsScreen() {
         setError(fr.e2eeChat.peerMissing);
         return;
       }
-      if (route.kind === 'e2ee') {
-        router.push({ pathname: '/e2ee-chat/[id]', params: route.params });
-        return;
-      }
       router.push({ pathname: '/chat/[id]', params: route.params });
     },
     [router, openRowId, user?.id],

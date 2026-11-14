@@ -12,18 +12,6 @@ import type { ConversationSummary, Gender } from '@/lib/types';
  */
 export type ChatRoute =
   | { kind: 'classic'; pathname: '/chat/[id]'; params: { id: string } }
-  | {
-      kind: 'e2ee';
-      pathname: '/e2ee-chat/[id]';
-      params: {
-        id: string;
-        peerId: string;
-        name: string;
-        username?: string;
-        avatarUrl?: string;
-        gender?: string;
-      };
-    }
   | { kind: 'blocked'; reason: 'peer_missing' };
 
 /** Correspondant d'une discussion directe, tel que le serveur le décrit. */
@@ -66,20 +54,9 @@ export function chatRouteFor(input: {
   }
   const peer = directPeerOf(conversation as ConversationSummary, currentUserId);
   if (!peer) return { kind: 'blocked', reason: 'peer_missing' };
-  return {
-    kind: 'e2ee',
-    pathname: '/e2ee-chat/[id]',
-    params: {
-      id: conversation.id,
-      peerId: peer.id,
-      name: peer.name,
-      ...(peer.username ? { username: peer.username } : {}),
-      // L'avatar n'est pas un secret : il sert l'en-tête et les bulles, comme
-      // dans la conversation claire. Absent, on retombe sur les initiales.
-      ...(peer.avatarUrl ? { avatarUrl: peer.avatarUrl } : {}),
-      ...(peer.gender ? { gender: peer.gender } : {}),
-    },
-  };
+  // L’écran unifié résout lui-même le transport chiffré : une seule route,
+  // aucun retour possible vers un écran clair.
+  return { kind: 'classic', pathname: '/chat/[id]', params: { id: conversation.id } };
 }
 
 /**

@@ -44,17 +44,13 @@ describe('chatRouteFor — la route suit le serveur, jamais l’apparence', () =
     expect(route).toEqual({ kind: 'classic', pathname: '/chat/[id]', params: { id: 'conv-1' } });
   });
 
-  it('une conversation chiffrée ouvre l’écran chiffré avec le vrai correspondant', () => {
+  it('une conversation chiffrée ouvre l’écran unifié, sans route distincte', () => {
     const route = chatRouteFor({
       conversation: conversation({ e2eeSince: '2026-01-02T00:00:00Z' }),
       currentUserId: 'me',
       e2eeEnabled: true,
     });
-    expect(route).toEqual({
-      kind: 'e2ee',
-      pathname: '/e2ee-chat/[id]',
-      params: { id: 'conv-1', peerId: 'peer-1', name: 'Pair Test', username: 'pair' },
-    });
+    expect(route).toEqual({ kind: 'classic', pathname: '/chat/[id]', params: { id: 'conv-1' } });
   });
 
   it('sans le drapeau E2EE du build, aucune redirection n’est inventée', () => {
