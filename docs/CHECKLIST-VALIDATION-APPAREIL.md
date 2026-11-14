@@ -68,3 +68,51 @@ Consigner la date, la build/commit, l'appareil, et joindre les captures des KO. 
 | 18 | Sécurité d'écran | `hooks/use-chat-security.ts` + `model/media-leases.ts` | Complet |
 
 Scénarios marqués manquants : pagination chiffrée (#3), indicateur de frappe chiffré (#10, volontairement absent), favori sticker classique (#14).
+
+## Résultats Waydroid — 2026-11-14
+
+Statuts utilisés : **OK**, **KO corrigé**, **KO ouvert**, **non vérifié**.
+
+- Branche : `refactor/phase-5-unification-chat`, code `1f67b73` sur `1987a15` et `95b597b` ; aucun push, B.3.6 non commencé.
+- Appareil : Waydroid `192.168.240.112:5555`, paquet `com.groupenzogho.mbolochat`, API `:3001` et Metro `:8081` actifs.
+- Drapeau unifié : **ON** pendant les comparaisons, puis remis à **OFF** et vérifié « Désactivé » en fin de session.
+- Conversations : clair direct `b91f5c98-0d7f-4b7e-8041-e9338a9596b6` (« Test Demo »), groupe `50e68ebf-967a-4ced-8e69-44525329ca04` (« On boit où? »), chiffré direct `d84d01ea-0c70-49d6-aa3f-f72777f13bfc`.
+- Second compte clair : `alice.martin` / `password123` (client socket secondaire pour les réceptions).
+
+### Mode clair, drapeau unifié activé
+
+| Scénario | Statut | Résultat observé |
+|---|---|---|
+| Conversation historique directe | OK | Historique, envoi, réception, réponse, réaction et suppression « pour tous » validés sur l'ancien écran. Les mêmes parcours sont OK sur l'écran unifié ; pour la suppression, la parité du menu est vérifiée mais l'action n'y a pas été rejouée. |
+| Groupes | OK | Affichage de « On boit où? », réception d'`alice.martin`, réponse et réaction. Envoi `UNIFIED_GROUP_20261114_0627` affiché une seule fois, état « Envoyé ». |
+| Envoi / réception / réponses / réactions | OK | Réception réelle `PEER_UNIFIED_20261114_0629` via socket secondaire, réponse `UNIFIED_REPLY_20261114_0631` avec citation correcte, réaction « Pouce levé » à 1. |
+| Suppression | OK | Suppression pour moi et « Retirer pour tous » exécutées sur l'ancien écran. Parité du menu vérifiée sur l'écran unifié : ancien et nouveau affichent les mêmes actions pour un message personnel. |
+| Notes vocales claires | OK | Enregistrement par appui maintenu, note `0:03`, envoi puis lecture réelle par ExoPlayer. |
+| Documents clairs | OK | PDF poussé dans `/sdcard/Download`, envoyé, affiché (`PDF · 1 Ko`) et ouvert page 1/1. |
+| Pagination longue claire | OK avec réserve | Conversation de 140 messages, remontée sur plusieurs écrans jusqu'au 28 octobre et avant, aucun doublon visible. Ralentissement puis `uiautomator` bloqué sur « idle state » ; application toujours active, aucun crash. |
+| Appels clairs | OK câblage / non vérifié | Le bouton vidéo ouvre bien l'écran d'appel ; Waydroid affiche ensuite « Caméra indisponible ». L'aboutissement réel de l'appel n'est pas vérifié. |
+
+### Écran unifié — KO et parité
+
+| Point | Statut | Détail |
+|---|---|---|
+| Doublon d'un envoi clair | KO corrigé | Doublon transitoire observé pour `UNIFIED_CLEAR_20261114_0625` (`clientId mwg0sxvv-6-4yd9dkn2`, message serveur `4af06a69-4b47-4ba7-9df7-afb51e11283f`), absent de l'ancien écran. Correctif `1f67b73` : l'upsert unifié remplace désormais une bulle optimiste par le message serveur de même `clientId` et retire tout doublon résiduel. Revérifié sur appareil avec `UNIFIED_DEDUP_FIX_20261114_0745` : une seule bulle. |
+| « Retirer pour tous » dans le groupe | OK | Fausse alerte : le menu du message personnel affiche bien « Supprimer pour moi » et « Retirer pour tous » sur l'écran unifié comme sur l'ancien. |
+| Bandeau « Historique en clair » | OK | Présent en direct et en groupe. |
+| Contamination entre conversations | OK | Aucune contamination en navigation normale par la liste. Le saut direct par deep link d'une conversation à l'autre reproduit aussi l'affichage croisé sur l'ancien écran : fausse alerte, non imputable à la fusion. |
+
+### Mode chiffré
+
+| Scénario | Statut | Résultat observé |
+|---|---|---|
+| Note vocale chiffrée | OK | Créée en `v1`, déchiffrée à la demande, affichée puis lue par ExoPlayer. |
+| Document chiffré | OK | Envoyé, rouvert après rechargement, PDF affiché page 1/1. |
+| Repli sur le cache SQLCipher et bandeau hors ligne | OK | Le mode reste `e2ee` avec le cache ; un résumé inconnu met l'écran en attente. Aucun basculement en clair. |
+| Fermeture du clair après lecture | OK dans le code et les tests / non vérifié sur disque | `openedDocumentRef` + `useFocusEffect` appellent `closeMedia` ; `mediaStore.test.ts` couvre le nettoyage. L'inspection directe du dossier privé est impossible sur Waydroid (`run-as` refusé). |
+| Envoi hors ligne chiffré | Erreur explicite, pas de file | `E2eeTransport.sendText` appelle uniquement `crypto.sendEncryptedText` et remonte l'échec ; aucun envoi clair, aucune outbox E2EE. Le compositeur se vide visuellement et le brouillon SQLCipher n'est pas restauré à l'écran : manque consigné dans `docs/BACKLOG-CHAT.md`. |
+
+### Non vérifié sur appareil
+
+- **« Reçu » / « Ouvert »** : non vérifié faute de deuxième client réel sur un téléphone. Couverture unitaire : `mobile/src/features/e2ee/receipts.test.ts` (états et fusion des accusés) et `mobile/src/features/chat/transport/e2ee-transport.test.ts` (mise à jour d'une bulle à l'arrivée de « Reçu » puis « Ouvert »). À refaire sur téléphone réel.
+- **TalkBack** : non vérifié sur appareil. Inventaire et renvois : `docs/ACCESSIBILITE-FUSION-CHAT.md` ; les libellés de coches sont portés par `mobile/src/features/chat/ui/message-receipt.tsx`. À faire sur téléphone réel.
+- **Appel clair de bout en bout** : non vérifié, Waydroid ne fournit pas de caméra fonctionnelle ; seul le câblage bouton → écran d'appel est validé.
