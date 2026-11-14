@@ -19,6 +19,9 @@ import {
   type OutgoingAsset,
 } from './types';
 
+const TYPING_THROTTLE_MS = 180;
+const TYPING_EXPIRY_MS = 4_000;
+
 const E2EE_CAPABILITIES: ChatCapabilities = {
   replies: true,
   reactions: true,
@@ -27,7 +30,7 @@ const E2EE_CAPABILITIES: ChatCapabilities = {
   gifs: false,
   forwarded: true,
   voice: true,
-  typing: false,
+  typing: true,
   calls: false,
   albums: false,
   groups: false,
@@ -72,6 +75,9 @@ export class E2eeTransport implements ChatTransport {
   private ready = false;
   private pendingAcks: string[] = [];
   private decryptChain: Promise<unknown> = Promise.resolve();
+  private typingTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastTypingSentAt = Number.NEGATIVE_INFINITY;
+  private lastTypingState: boolean | null = null;
 
   constructor(deps: E2eeTransportDeps, options: E2eeTransportOptions) {
     if (!options.summary.e2eeSince) {
@@ -184,8 +190,31 @@ export class E2eeTransport implements ChatTransport {
       }
       this.handlers?.onReceipts(payload.receipts);
     };
+    const onTyping = (payload: { conversationId?: string; userId?: string; typing?: boolean }) => {
+      if (
+        payload?.conversationId !== this.conversationId ||
+        !payload.userId ||
+        payload.userId === this.currentUser.id
+      ) {
+        return;
+      }
+      if (this.typingTimer) {
+        clearTimeout(this.typingTimer);
+        this.typingTimer = null;
+      }
+      if (payload.typing === false) {
+        this.handlers?.onTyping(null);
+        return;
+      }
+      this.handlers?.onTyping({ userId: payload.userId, text: '' });
+      this.typingTimer = setTimeout(() => {
+        this.typingTimer = null;
+        this.handlers?.onTyping(null);
+      }, TYPING_EXPIRY_MS);
+    };
     socket.on('message:new', onMessage);
     socket.on('receipt', onReceipt);
+    socket.on('typing', onTyping);
     const offConnection = this.deps.socket.onConnection((online) =>
       this.handlers?.onConnection(online),
     );
@@ -193,6 +222,7 @@ export class E2eeTransport implements ChatTransport {
     this.cleanups.push(() => {
       socket.off('message:new', onMessage);
       socket.off('receipt', onReceipt);
+      socket.off('typing', onTyping);
       offConnection();
     });
     return () => this.unsubscribe();
@@ -383,8 +413,24 @@ export class E2eeTransport implements ChatTransport {
     }
   }
 
-  setTyping(): void {
-    throw new UnsupportedCapabilityError('typing');
+  setTyping(active: boolean, _text?: string): void {
+    if (!this.capabilities.typing) {
+      throw new UnsupportedCapabilityError('typing');
+    }
+    const now = this.deps.clock();
+    if (
+      active &&
+      this.lastTypingState === true &&
+      now - this.lastTypingSentAt < TYPING_THROTTLE_MS
+    ) {
+      return;
+    }
+    if (this.lastTypingState === active) return;
+    this.lastTypingState = active;
+    this.lastTypingSentAt = now;
+    this.deps.socket.ensureSocket(this.token).then((socket) => {
+      socket.emit('typing', { conversationId: this.conversationId, typing: active });
+    }).catch(() => undefined);
   }
 
   saveDraft(text: string): void {
@@ -512,6 +558,10 @@ export class E2eeTransport implements ChatTransport {
   }
 
   private unsubscribe(): void {
+    if (this.typingTimer) {
+      clearTimeout(this.typingTimer);
+      this.typingTimer = null;
+    }
     for (const cleanup of this.cleanups.splice(0)) {
       cleanup();
     }

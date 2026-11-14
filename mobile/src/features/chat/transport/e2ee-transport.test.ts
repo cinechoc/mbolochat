@@ -223,7 +223,7 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
       handler(...args);
     }
   };
-  return { deps, db, crypto, api, socketDeps, cache, emitEvent, fakeDb };
+  return { deps, db, crypto, api, socket, socketDeps, cache, emitEvent, fakeDb };
 }
 
 runTransportContract({
@@ -444,6 +444,62 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     await transport.markRead(['a']);
     expect(fakes.api.markMessagesRead).toHaveBeenCalledWith('token', 'conversation-1', ['a']);
     await transport.dispose();
+  });
+
+  it('n’envoie jamais le texte de frappe et limite la fréquence', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new E2eeTransport(fakes.deps, options);
+    transport.setTyping(true, 'secret en cours');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakes.socketDeps.ensureSocket).toHaveBeenCalledTimes(1);
+    expect(fakes.socket.emit).toHaveBeenCalledWith('typing', {
+      conversationId: 'conversation-1',
+      typing: true,
+    });
+    expect(JSON.stringify(fakes.socket.emit.mock.calls)).not.toContain('secret en cours');
+
+    transport.setTyping(true, 'toujours secret');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakes.socket.emit).toHaveBeenCalledTimes(1);
+
+    transport.setTyping(false, 'secret final');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakes.socket.emit).toHaveBeenLastCalledWith('typing', {
+      conversationId: 'conversation-1',
+      typing: false,
+    });
+    await transport.dispose();
+  });
+
+  it('efface l’indicateur de frappe reçu après expiration', async () => {
+    vi.useFakeTimers();
+    const fakes = createFakes(SEED);
+    const transport = new E2eeTransport(fakes.deps, options);
+    const states: ({ userId: string; text: string } | null)[] = [];
+    const off = transport.subscribe({
+      onMessage: () => undefined,
+      onMessageRemoved: () => undefined,
+      onReceipts: () => undefined,
+      onReaction: () => undefined,
+      onTyping: (state) => states.push(state),
+      onConnection: () => undefined,
+      onConversationUpdated: () => undefined,
+      onConversationRemoved: () => undefined,
+      onError: () => undefined,
+      onFatal: () => undefined,
+    });
+    fakes.emitEvent('typing', {
+      conversationId: 'conversation-1',
+      userId: 'peer',
+      typing: true,
+      text: 'ne doit jamais être lu',
+    });
+    expect(states).toEqual([{ userId: 'peer', text: '' }]);
+    vi.advanceTimersByTime(4_000);
+    expect(states).toEqual([{ userId: 'peer', text: '' }, null]);
+    off();
+    await transport.dispose();
+    vi.useRealTimers();
   });
 
   it('transfère un texte uniquement vers une cible chiffrée directe', async () => {
