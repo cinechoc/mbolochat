@@ -207,7 +207,11 @@ export async function encryptEnvelope(input: {
       const knownKey =
         session?.peer_signing_key ??
         (await loadPeerSigningKey(input.db, peer.id, bundle.deviceId));
-      const rotated = Boolean(knownKey && knownKey !== bundle.signingKey);
+      const identityRotated = Boolean(
+        session && session.peer_identity_key !== bundle.identityKey,
+      );
+      const rotated =
+        identityRotated || Boolean(knownKey && knownKey !== bundle.signingKey);
       if (rotated && !input.allowKeyChange) {
         throw new E2eeKeyChangedError(peer.id, bundle.signingKey);
       }
@@ -487,6 +491,8 @@ interface OpenedInbound {
   accountChanged: boolean;
   session: E2eeSessionRow;
   keyChanged: boolean;
+  /** La clé publique d'identité du pair diffère de celle de la session connue. */
+  identityChanged: boolean;
   knownKey: string | null;
 }
 
@@ -545,6 +551,7 @@ async function attemptInbound(input: InboundInput, deviceId: string): Promise<In
           updated_at: nowIso(),
         },
         keyChanged: false,
+        identityChanged: false,
         knownKey,
       },
     };
@@ -563,6 +570,13 @@ async function openWithBundle(
 ): Promise<OpenedInbound> {
   const peerId = input.message.sender.id;
   const knownKey = await loadPeerSigningKey(input.db, peerId, bundle.deviceId);
+  // Le changement d'identité est detecte avant d'écrire la nouvelle session ;
+  // le signal existant `keyChanged` est réutilisé et étendu à cette clé.
+  const previous =
+    (await loadSession(input.db, peerId, bundle.deviceId)) ?? (await loadSession(input.db, peerId));
+  const identityChanged = Boolean(
+    previous && previous.peer_identity_key !== bundle.identityKey,
+  );
   // Consomme la prekey : le pickle de compte avance, il doit donc être
   // persisté en même temps que la session et le message.
   const inbound = await MboloCrypto.secureCreateInbound(
@@ -582,7 +596,9 @@ async function openWithBundle(
       peer_signing_key: bundle.signingKey,
       updated_at: nowIso(),
     },
-    keyChanged: Boolean(knownKey && knownKey !== bundle.signingKey),
+    keyChanged:
+      identityChanged || Boolean(knownKey && knownKey !== bundle.signingKey),
+    identityChanged,
     knownKey,
   };
 }
@@ -716,6 +732,7 @@ async function finalizeUnreadable(
     account: opened.accountChanged ? opened.account : null,
     message: stored,
     pinPeerKey: opened.keyChanged || !opened.knownKey,
+    identityChanged: opened.identityChanged,
   });
   return {
     text: '',
@@ -901,6 +918,7 @@ export async function decryptIncoming(input: {
         message: stored,
         // Le pair est épinglé dès qu'il change de clé, ou à la première vue.
         pinPeerKey: opened.keyChanged || !opened.knownKey,
+        identityChanged: opened.identityChanged,
         deletion: deleteTarget
           ? {
               targetId: deleteTarget,

@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
-import { ChevronDown, Phone, Star, StarOff, Video } from 'lucide-react-native';
+import { ChevronDown, Phone, ShieldCheck, Star, StarOff, Video } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
   Alert,
@@ -295,11 +295,31 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     Alert.alert(fr.chat.unified.callsUnavailableTitle, fr.chat.unified.callsUnavailableBody);
   }, []);
 
+  const directPeer = summary?.members.find((member) => member.id !== user?.id);
+
   const headerRight = useMemo(() => {
     if (!transport) return null;
+    const securityButton =
+      transport.mode === 'e2ee' && summary?.type === 'DIRECT' && directPeer ? (
+        <Pressable
+          onPress={() =>
+            router.push(
+              {
+                pathname: '/security-code',
+                params: { peerId: directPeer.id, conversationId },
+              } as never,
+            )
+          }
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={fr.e2eeChat.security.open}>
+          <ShieldCheck size={24} color={chat.headerText} />
+        </Pressable>
+      ) : null;
     if (!transport.capabilities.calls) {
       return (
         <View style={styles.headerActions}>
+          {securityButton}
           <Pressable
             onPress={showCallsUnavailable}
             hitSlop={8}
@@ -326,6 +346,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     const group = summary?.type === 'GROUP';
     return (
       <View style={styles.headerActions}>
+        {securityButton}
         <Pressable
           onPress={() =>
             group
@@ -356,7 +377,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
         </Pressable>
       </View>
     );
-  }, [transport, summary?.type, calls, conversationId, chat.headerText, showCallsUnavailable]);
+  }, [transport, summary?.type, directPeer, calls, conversationId, router, chat.headerText, showCallsUnavailable]);
 
   const copyMessage = useCallback(async (message: ChatMessageView) => {
     if (!(await copyToClipboard(message.body))) {

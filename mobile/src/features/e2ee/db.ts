@@ -255,6 +255,85 @@ export async function savePeerSigningKeyWith(
   );
 }
 
+export interface IdentityVerificationRow {
+  peer_user_id: string;
+  peer_identity_key: string;
+  fingerprint: string;
+  verified_at: string | null;
+  key_changed_at: string | null;
+  updated_at: string;
+}
+
+/** État local de vérification d'identité, lié à la clé publique courante. */
+export async function loadIdentityVerification(
+  db: SQLiteDatabase,
+  peerId: string,
+): Promise<IdentityVerificationRow | null> {
+  return db.getFirstAsync<IdentityVerificationRow>(
+    `SELECT peer_user_id, peer_identity_key, fingerprint, verified_at, key_changed_at, updated_at
+       FROM e2ee_identity_verifications WHERE peer_user_id = ?`,
+    peerId,
+  );
+}
+
+export async function markIdentityVerified(
+  db: SQLiteDatabase,
+  peerId: string,
+  peerIdentityKey: string,
+  fingerprint: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT INTO e2ee_identity_verifications
+       (peer_user_id, peer_identity_key, fingerprint, verified_at, key_changed_at, updated_at)
+     VALUES (?, ?, ?, ?, NULL, ?)
+     ON CONFLICT(peer_user_id) DO UPDATE SET
+       peer_identity_key = excluded.peer_identity_key,
+       fingerprint = excluded.fingerprint,
+       verified_at = excluded.verified_at,
+       key_changed_at = NULL,
+       updated_at = excluded.updated_at`,
+    peerId,
+    peerIdentityKey,
+    fingerprint,
+    now,
+    now,
+  );
+}
+
+/**
+ * Réutilise le signal de changement de clé déjà produit par le chemin entrant.
+ * La mise à jour est idempotente et n'efface jamais une vérification si la clé
+ * n'a pas changé.
+ */
+export async function notePeerIdentityChangedWith(
+  writer: SqlWriter,
+  peerId: string,
+  peerIdentityKey: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await writer.runAsync(
+    `INSERT INTO e2ee_identity_verifications
+       (peer_user_id, peer_identity_key, fingerprint, verified_at, key_changed_at, updated_at)
+     VALUES (?, ?, '', NULL, NULL, ?)
+     ON CONFLICT(peer_user_id) DO UPDATE SET
+       verified_at = CASE
+         WHEN e2ee_identity_verifications.peer_identity_key = excluded.peer_identity_key
+         THEN e2ee_identity_verifications.verified_at ELSE NULL END,
+       fingerprint = CASE
+         WHEN e2ee_identity_verifications.peer_identity_key = excluded.peer_identity_key
+         THEN e2ee_identity_verifications.fingerprint ELSE '' END,
+       key_changed_at = CASE
+         WHEN e2ee_identity_verifications.peer_identity_key = excluded.peer_identity_key
+         THEN e2ee_identity_verifications.key_changed_at ELSE excluded.updated_at END,
+       peer_identity_key = excluded.peer_identity_key,
+       updated_at = excluded.updated_at`,
+    peerId,
+    peerIdentityKey,
+    now,
+  );
+}
+
 /** Plafond du payload brut conservé pour un type futur : 16 Kio encodés. */
 export const MAX_UNKNOWN_PAYLOAD_CHARS = 16 * 1024;
 /** Nombre de payloads inconnus dont le brut est conservé par conversation. */

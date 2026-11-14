@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import {
+  notePeerIdentityChangedWith,
   pruneUnknownPayloadsWith,
   saveE2eeAccountWith,
   saveLocalMessageWith,
@@ -293,6 +294,8 @@ export interface PersistIncomingInput {
   message: StoredE2eeMessage;
   /** Épingler la clé de signature du pair (première vue ou changement). */
   pinPeerKey?: boolean;
+  /** Le pair a changé de clé d'identité : la vérification locale retombe. */
+  identityChanged?: boolean;
   /**
    * Événement de suppression pour tous : la tombstone, l'application à la
    * cible et l'avancement Olm sont écrits ensemble.
@@ -319,6 +322,13 @@ export async function persistIncoming(
       await addDeletionTombstone(tx, input.deletion);
     }
     await saveLocalMessageWith(tx, input.message);
+    if (input.identityChanged) {
+      await notePeerIdentityChangedWith(
+        tx,
+        input.message.sender_id,
+        input.session.peer_identity_key,
+      );
+    }
     if (input.message.content_kind === 'unknown') {
       await pruneUnknownPayloadsWith(tx, input.message.conversation_id);
     }

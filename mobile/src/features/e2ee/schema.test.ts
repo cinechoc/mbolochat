@@ -1,6 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 
+import {
+  loadIdentityVerification,
+  markIdentityVerified,
+  notePeerIdentityChangedWith,
+} from './db';
 import { E2EE_SCHEMA_VERSION, migrateE2eeSchema, type E2eeSchemaDb } from './schema';
 
 vi.mock('expo-sqlite', () => ({
@@ -804,7 +809,7 @@ describe('migrateE2eeSchema — v7 : lignes de contrôle masquées', () => {
     const db = adapter(legacyDatabase());
     expect(await migrateE2eeSchema(db, 6)).toBe(6);
 
-    expect(await migrateE2eeSchema(db)).toBe(8);
+    expect(await migrateE2eeSchema(db)).toBe(E2EE_SCHEMA_VERSION);
 
     const columns = await db.getAllAsync<{ name: string; notnull: number; dflt_value: unknown }>(
       'PRAGMA table_info(e2ee_messages)',
@@ -843,6 +848,35 @@ describe('migrateE2eeSchema — v7 : lignes de contrôle masquées', () => {
       control_target: 'msg-1',
       reaction_action: 'add',
     });
+  });
+});
+
+describe('migrateE2eeSchema — v9 : vérification d’identité', () => {
+  it('crée la table et remet l’état à non vérifié au changement de clé', async () => {
+    const db = adapter(legacyDatabase());
+    await migrateE2eeSchema(db);
+    expect(await tableNames(db)).toContain('e2ee_identity_verifications');
+    const handle = db as unknown as Parameters<typeof loadIdentityVerification>[0];
+
+    await markIdentityVerified(handle, 'peer-1', 'ident-v1', '1234567890');
+    expect(await loadIdentityVerification(handle, 'peer-1')).toMatchObject({
+      peer_identity_key: 'ident-v1',
+      fingerprint: '1234567890',
+      key_changed_at: null,
+    });
+    expect((await loadIdentityVerification(handle, 'peer-1'))?.verified_at).toBeTruthy();
+
+    await notePeerIdentityChangedWith(handle, 'peer-1', 'ident-v2');
+    expect(await loadIdentityVerification(handle, 'peer-1')).toMatchObject({
+      peer_identity_key: 'ident-v2',
+      fingerprint: '',
+      verified_at: null,
+    });
+    expect((await loadIdentityVerification(handle, 'peer-1'))?.key_changed_at).toBeTruthy();
+
+    await markIdentityVerified(handle, 'peer-1', 'ident-v2', 'abcdef');
+    await notePeerIdentityChangedWith(handle, 'peer-1', 'ident-v2');
+    expect((await loadIdentityVerification(handle, 'peer-1'))?.verified_at).toBeTruthy();
   });
 });
 

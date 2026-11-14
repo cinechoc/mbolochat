@@ -132,6 +132,9 @@ export const Motion = {
 /** Voile sombre derrière les feuilles et modales. */
 export const Scrim = 'rgba(0, 0, 0, 0.45)';
 
+/** Fond blanc fixe des QR codes : indispensable à la lecture par une caméra. */
+export const QrSurface = '#FFFFFF';
+
 /** Bouton : réduction d'échelle à l'appui. */
 export const PressScale = 0.97;
 

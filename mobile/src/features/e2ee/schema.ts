@@ -22,7 +22,7 @@ export type E2eeSchemaDb = Pick<
 >;
 
 /** Version de schéma attendue par ce code. */
-export const E2EE_SCHEMA_VERSION = 8;
+export const E2EE_SCHEMA_VERSION = 9;
 
 const META_TABLE = 'e2ee_schema_meta';
 
@@ -404,6 +404,7 @@ const STEPS: { version: number; run: (db: E2eeSchemaDb) => Promise<void> }[] = [
   { version: 6, run: migrateToV6 },
   { version: 7, run: migrateToV7 },
   { version: 8, run: migrateToV8 },
+  { version: 9, run: migrateToV9 },
 ];
 
 async function readVersion(db: E2eeSchemaDb): Promise<number> {
@@ -550,6 +551,30 @@ async function migrateToV8(db: E2eeSchemaDb): Promise<void> {
         ON e2ee_deletions (event_message_id);
     `);
     await stampVersion(db, 8);
+  });
+}
+
+/**
+ * Version 9 : vérification d'identité locale.
+ *
+ * La table ne stocke que des clés **publiques** et l'empreinte du code de
+ * sécurité. `verified_at` lie la vérification à la clé d'identité courante ;
+ * un changement de clé efface cette date et renseigne `key_changed_at`, sans
+ * supprimer la ligne afin que l'interface puisse afficher le bandeau.
+ */
+async function migrateToV9(db: E2eeSchemaDb): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS e2ee_identity_verifications (
+        peer_user_id TEXT PRIMARY KEY,
+        peer_identity_key TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        verified_at TEXT,
+        key_changed_at TEXT,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    await stampVersion(db, 9);
   });
 }
 
