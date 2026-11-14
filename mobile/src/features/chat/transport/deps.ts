@@ -62,6 +62,7 @@ type E2eeReceiptsModule = typeof import('@/features/e2ee/receipts');
 type E2eeDeletionModule = typeof import('@/features/e2ee/deletion');
 type E2eeDeletionFilesModule = typeof import('@/features/e2ee/deletionFiles');
 type E2eeEphemeralModule = typeof import('@/features/e2ee/ephemeral');
+type E2eeScheduledModule = typeof import('@/features/e2ee/scheduledQueue');
 
 /**
  * Dépendances injectables du transport chiffré. Les fonctions crypto sont
@@ -87,6 +88,8 @@ export interface E2eeTransportDeps {
     | 'deleteLocalMessage'
     | 'loadReactionSummaries'
     | 'loadConversationEphemeral'
+    | 'loadLocalMessage'
+    | 'retryScheduledMessage'
   >;
   crypto: Pick<
     E2eeTextModule,
@@ -102,6 +105,10 @@ export interface E2eeTransportDeps {
   deletion: Pick<E2eeDeletionModule, 'applyDeleteForAll'> &
     Pick<E2eeDeletionFilesModule, 'cleanupDeletedMedia'>;
   ephemeral: Pick<E2eeEphemeralModule, 'purgeExpiredMessages'>;
+  scheduled: Pick<
+    E2eeScheduledModule,
+    'enqueueScheduledText' | 'wakeScheduledQueue' | 'onScheduledEvent'
+  >;
   receipts: Pick<
     E2eeReceiptsModule,
     'mergeReceipts' | 'receiptState' | 'deliveredIds' | 'canReportDelivered'

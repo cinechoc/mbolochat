@@ -500,7 +500,9 @@ function MessageBody({
         )}
         {message.body ? (
           <>
-            {!capabilities.encrypted ? <LinkPreviewInText text={message.body} /> : null}
+            {!capabilities.encrypted || message.preview ? (
+              <LinkPreviewInText text={message.body} preview={message.preview} />
+            ) : null}
             <MessageText text={message.body} style={[styles.caption, { color: chat.primaryText }]} />
           </>
         ) : null}
@@ -546,7 +548,9 @@ function MessageBody({
   return swipe(
     <ChatBubble mine={message.mine}>
       {quote ? <QuoteBlock quote={quote} mine={message.mine} /> : null}
-      {!capabilities.encrypted ? <LinkPreviewInText text={message.body} /> : null}
+      {!capabilities.encrypted || message.preview ? (
+        <LinkPreviewInText text={message.body} preview={message.preview} />
+      ) : null}
       {message.unreadable ? (
         <ThemedText type="small" style={[styles.unreadable, { color: chat.secondaryText }]}>
           {fr.chat.unified.unreadableMessage}

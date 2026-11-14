@@ -1,8 +1,12 @@
+import type { EncryptedLinkPreview } from '@/features/e2ee/payload';
+
 export interface TextSendOptions {
   silent?: boolean;
   viewOnce?: boolean;
   /** Date ISO à laquelle l’outbox peut commencer l’envoi. */
   scheduledAt?: string | null;
+  /** Aperçu déjà résolu ; utilisé par l'enveloppe chiffrée, ignoré en clair. */
+  preview?: EncryptedLinkPreview | null;
 }
 
 export const MIN_SCHEDULE_DELAY_MS = 60_000;

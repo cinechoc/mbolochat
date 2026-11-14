@@ -91,7 +91,11 @@ const prekeyMessage: Message = {
 
 // Reproduce l'encodage de text.ts : encodeURIComponent → octets → base64.
 const plaintext = (text: string) => {
-  const encoded = encodeURIComponent(JSON.stringify({ v: 1, text }));
+  return plaintextJson({ v: 1, text });
+};
+
+const plaintextJson = (payload: unknown) => {
+  const encoded = encodeURIComponent(JSON.stringify(payload));
   let binary = '';
   for (let index = 0; index < encoded.length; index += 1) {
     if (encoded[index] === '%') {
@@ -181,6 +185,47 @@ describe('decryptIncoming — repli après changement de clé', () => {
       expect.objectContaining({
         session: expect.objectContaining({ session_pickle: 'advanced-session' }),
         message: expect.objectContaining({ id: 'msg-1', body: 'ok' }),
+      }),
+    );
+  });
+
+  it('persiste les options et l’aperçu reçus en v8', async () => {
+    dbMock.loadSession.mockResolvedValue(oldSession);
+    dbMock.loadPeerSigningKey.mockResolvedValue('peer-sign-1');
+    const preview = {
+      url: 'https://exemple.test/article',
+      host: 'exemple.test',
+      title: 'Article',
+      description: 'Résumé',
+    };
+    cryptoMock.secureDecrypt.mockResolvedValue({
+      session_pickle: 'advanced-session',
+      plaintext_b64: plaintextJson({
+        v: 8,
+        kind: 'text',
+        text: 'bonjour',
+        silent: true,
+        viewOnce: true,
+        preview,
+      }),
+    });
+
+    await decryptIncoming({
+      token: 't',
+      db: {} as never,
+      account,
+      message: { ...prekeyMessage, payloadType: 'normal' },
+      currentUserId: 'me',
+    });
+
+    expect(persistMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          body: 'bonjour',
+          silent: 1,
+          view_once: 1,
+          preview_json: JSON.stringify(preview),
+        }),
       }),
     );
   });

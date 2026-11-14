@@ -22,7 +22,7 @@ export type E2eeSchemaDb = Pick<
 >;
 
 /** Version de schéma attendue par ce code. */
-export const E2EE_SCHEMA_VERSION = 11;
+export const E2EE_SCHEMA_VERSION = 12;
 
 const META_TABLE = 'e2ee_schema_meta';
 
@@ -407,6 +407,7 @@ const STEPS: { version: number; run: (db: E2eeSchemaDb) => Promise<void> }[] = [
   { version: 9, run: migrateToV9 },
   { version: 10, run: migrateToV10 },
   { version: 11, run: migrateToV11 },
+  { version: 12, run: migrateToV12 },
 ];
 
 async function readVersion(db: E2eeSchemaDb): Promise<number> {
@@ -619,6 +620,31 @@ async function migrateToV11(db: E2eeSchemaDb): Promise<void> {
       ['edit_revision', 'INTEGER NOT NULL DEFAULT 0'],
     ]);
     await stampVersion(db, 11);
+  });
+}
+
+/**
+ * Version 12 : texte avancé et programmation locale.
+ *
+ * Toutes les valeurs restent dans SQLCipher. `scheduled_at` est la seule
+ * métadonnée de programmation : elle n'entre jamais dans l'enveloppe Olm ;
+ * `send_error` est un marqueur normalisé, jamais le message d'une exception.
+ */
+async function migrateToV12(db: E2eeSchemaDb): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await addMissingColumns(db, 'e2ee_messages', [
+      ['silent', 'INTEGER NOT NULL DEFAULT 0'],
+      ['view_once', 'INTEGER NOT NULL DEFAULT 0'],
+      ['preview_json', 'TEXT'],
+      ['scheduled_at', 'TEXT'],
+      ['send_error', 'TEXT'],
+    ]);
+    await db.execAsync(`
+      CREATE INDEX IF NOT EXISTS e2ee_messages_scheduled_idx
+        ON e2ee_messages (conversation_id, scheduled_at)
+        WHERE scheduled_at IS NOT NULL;
+    `);
+    await stampVersion(db, 12);
   });
 }
 

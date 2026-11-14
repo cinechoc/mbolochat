@@ -52,24 +52,53 @@ async function loadPreview(url: string, base: LinkPreview): Promise<LinkPreview>
   return promise;
 }
 
-export function LinkPreviewCard({
-  url,
-  compact = false,
-}: {
-  url: string;
-  compact?: boolean;
-}) {
-  return <LinkPreviewCardInner key={url} url={url} compact={compact} />;
+/** Aperçu déjà chargé, ou repli immédiat sans nouvelle requête réseau. */
+export function linkPreviewForSend(rawUrl: string): LinkPreview | null {
+  const base = fallbackLinkPreview(rawUrl);
+  if (!base) return null;
+  return cache.get(base.url) ?? base;
 }
 
-function LinkPreviewCardInner({ url, compact }: { url: string; compact: boolean }) {
+/** Attend les métadonnées distantes, pour un envoi explicite hors du rendu. */
+export async function resolveLinkPreview(rawUrl: string): Promise<LinkPreview | null> {
+  const base = fallbackLinkPreview(rawUrl);
+  if (!base) return null;
+  return loadPreview(base.url, base);
+}
+
+export function LinkPreviewCard({
+  url,
+  preview: provided,
+  compact = false,
+}: {
+  url?: string;
+  preview?: LinkPreview | null;
+  compact?: boolean;
+}) {
+  const preview = provided ?? null;
+  const key = preview ? `${preview.url}:${preview.title}` : (url ?? '');
+  return <LinkPreviewCardInner key={key} url={url} provided={preview} compact={compact} />;
+}
+
+function LinkPreviewCardInner({
+  url,
+  provided,
+  compact,
+}: {
+  url?: string;
+  provided: LinkPreview | null;
+  compact: boolean;
+}) {
   const theme = useTheme();
-  const base = useMemo(() => fallbackLinkPreview(url), [url]);
+  const base = useMemo(
+    () => provided ?? (url ? fallbackLinkPreview(url) : null),
+    [provided, url],
+  );
   const [preview, setPreview] = useState<LinkPreview | null>(base);
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
-    if (!base) return;
+    if (!base || provided) return;
     let active = true;
     void loadPreview(base.url, base).then((next) => {
       if (active) setPreview(next);
@@ -77,7 +106,7 @@ function LinkPreviewCardInner({ url, compact }: { url: string; compact: boolean 
     return () => {
       active = false;
     };
-  }, [base]);
+  }, [base, provided]);
 
   if (!preview) return null;
 
@@ -140,8 +169,15 @@ function LinkPreviewCardInner({ url, compact }: { url: string; compact: boolean 
   );
 }
 
-function LinkPreviewInText({ text }: { text: string }) {
+function LinkPreviewInText({
+  text,
+  preview,
+}: {
+  text: string;
+  preview?: Omit<LinkPreview, 'imageUrl'> & { imageUrl?: string | null } | null;
+}) {
   const url = useMemo(() => firstHttpUrl(text), [text]);
+  if (preview) return <LinkPreviewCard preview={{ ...preview, imageUrl: preview.imageUrl ?? null }} />;
   return url ? <LinkPreviewCard url={url} /> : null;
 }
 

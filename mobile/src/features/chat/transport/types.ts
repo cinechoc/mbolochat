@@ -1,4 +1,5 @@
 import type { E2eeInitFailure } from '@/features/e2ee/initState';
+import type { EncryptedLinkPreview } from '@/features/e2ee/payload';
 import type { RecentGif } from '@/features/media/GifPanel';
 import type { PersonalSticker } from '@/features/stickers/stickerLibrary';
 import type { VoiceNote } from '@/features/voice-notes/useVoiceRecorder';
@@ -38,7 +39,7 @@ export interface ChatCapabilities {
   encrypted: boolean;
   pagination: 'server' | 'local';
   receipts: 'ticks' | 'delivered-opened';
-  /** Programmation, envoi silencieux et lecture unique (mode clair uniquement). */
+  /** Programmation, envoi silencieux et lecture unique. */
   sendOptions: boolean;
 }
 
@@ -154,12 +155,14 @@ export interface ChatMessageView {
   quoteId: string | null;
   quote: MessageQuote | null;
   reactions: ReactionSummary[];
-  /** Envoi silencieux (mode clair). */
+  /** Envoi silencieux (les deux modes). */
   silent?: boolean;
   /** Lecture unique : contenu masqué jusqu’à ouverture. */
   viewOnce?: boolean;
   /** Date programme locale, seulement pour une bulle en attente. */
   scheduledAt?: string | null;
+  /** Aperçu de lien déjà validé, transmis dans l'enveloppe en mode chiffré. */
+  preview?: EncryptedLinkPreview | null;
   stickerRef: string | null;
   attachment: ChatAttachmentView | null;
   state: ChatDeliveryState;

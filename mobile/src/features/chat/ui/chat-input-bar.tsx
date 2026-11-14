@@ -141,7 +141,7 @@ export function ChatInputBar({
         sections={capabilities.stickers || capabilities.gifs ? undefined : ['emoji']}
         onSendText={onSendText}
         sendOptionsEnabled={capabilities.sendOptions && !editing}
-        linkPreviewsEnabled={!capabilities.encrypted}
+        linkPreviewsEnabled
         onSendSticker={(ref) => {
           if (!capabilities.stickers) return;
           onSendSticker(ref);

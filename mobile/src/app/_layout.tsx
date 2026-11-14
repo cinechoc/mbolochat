@@ -15,6 +15,10 @@ import { TextScaleProvider } from '@/lib/text-scale';
 import { ThemePreferenceProvider, useThemePreference } from '@/lib/theme-preference';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { E2eeBootstrapGate } from '@/features/e2ee/BootstrapGate';
+import {
+  drainScheduledQueue,
+  startE2eeScheduledQueue,
+} from '@/features/e2ee/scheduledQueue';
 import { CityAutoDetector } from '@/features/location/CityAutoDetector';
 import { drain } from '@/lib/outbox';
 import { configureNotificationHandler, subscribeToNotificationOpens } from '@/lib/push';
@@ -129,10 +133,22 @@ function ReliabilityLoop() {
     if (loading || !token || !user) {
       return;
     }
+    return startE2eeScheduledQueue({
+      token,
+      currentUserId: user.id,
+      currentUserName: user.displayName,
+    });
+  }, [loading, token, user]);
+
+  useEffect(() => {
+    if (loading || !token || !user) {
+      return;
+    }
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         void runSync(token, user.id);
         void drain(token);
+        void drainScheduledQueue();
       }
     });
     return () => subscription.remove();

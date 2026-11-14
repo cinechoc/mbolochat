@@ -1,5 +1,5 @@
 import type { StoredE2eeMessage } from '@/features/e2ee/db';
-import { decodeMediaMeta } from '@/features/e2ee/payload';
+import { decodeMediaMeta, decodePreviewMeta } from '@/features/e2ee/payload';
 import type { Message, ReactionSummary, SenderInfo } from '@/lib/types';
 import type {
   ChatAttachmentView,
@@ -89,6 +89,7 @@ export function classicMessageToView(
     silent: message.silent === true,
     viewOnce: message.viewOnce === true,
     scheduledAt: message.scheduledAt ?? null,
+    preview: null,
     stickerRef: message.stickerRef,
     attachment: classicAttachment(message),
     state: options.state ?? (mine ? 'sent' : 'none'),
@@ -110,6 +111,7 @@ export function storedMessageToView(
   const mine = stored.mine === 1;
   const media = stored.media_meta ? decodeMediaMeta(stored.media_meta) : null;
   const deleted = stored.deleted === 1;
+  const preview = deleted ? null : decodePreviewMeta(stored.preview_json);
   const sender = mine
     ? options.currentUser
     : {
@@ -152,9 +154,10 @@ export function storedMessageToView(
     // seule la référence traverse la couche de données.
     quote: null,
     reactions: deleted ? [] : options.reactions ?? [],
-    silent: false,
-    viewOnce: false,
-    scheduledAt: null,
+    silent: !deleted && stored.silent === 1,
+    viewOnce: !deleted && stored.view_once === 1,
+    scheduledAt: !deleted && mine ? stored.scheduled_at ?? null : null,
+    preview,
     stickerRef: deleted ? null : stored.sticker_ref ?? null,
     attachment,
     state: options.state ?? 'none',

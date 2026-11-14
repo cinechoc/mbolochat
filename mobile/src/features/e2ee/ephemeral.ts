@@ -39,6 +39,7 @@ export async function purgeExpiredMessages(
             SET body = '', media_meta = NULL, local_cipher_uri = NULL, upload_id = NULL,
                 local_thumb_cipher_uri = NULL, thumb_upload_id = NULL, sticker_ref = NULL,
                 quote_id = NULL, unreadable_reason = NULL, raw_payload = NULL,
+                preview_json = NULL, silent = 0, view_once = 0, scheduled_at = NULL,
                 deleted = 1, deleted_by = NULL
           WHERE id = ? AND deleted = 0`,
         row.id,

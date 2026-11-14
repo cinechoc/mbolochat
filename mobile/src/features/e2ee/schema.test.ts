@@ -166,6 +166,20 @@ describe('migrateE2eeSchema — base neuve', () => {
     expect(after?.value).toBe(before?.value);
     expect(await tableNames(db)).not.toContain('e2ee_sessions__v2');
   });
+
+  it('ajoute les colonnes du texte avancé avec des valeurs sûres par défaut', async () => {
+    const db = adapter(new DatabaseSync(':memory:'));
+    await migrateE2eeSchema(db);
+    const columns = await db.getAllAsync<{ name: string; dflt_value: string | null }>(
+      'PRAGMA table_info(e2ee_messages)',
+    );
+    const byName = new Map(columns.map((column) => [column.name, column.dflt_value]));
+    expect(byName.get('silent')).toBe('0');
+    expect(byName.get('view_once')).toBe('0');
+    expect(byName.has('preview_json')).toBe(true);
+    expect(byName.has('scheduled_at')).toBe(true);
+    expect(byName.has('send_error')).toBe(true);
+  });
 });
 
 describe('migrateE2eeSchema — base peuplée en version 1', () => {

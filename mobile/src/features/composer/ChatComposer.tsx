@@ -44,10 +44,11 @@ import { Glass } from '@/components/glass';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemePreference } from '@/lib/theme-preference';
 import { restoreFailedText } from './failed-text';
-import { LinkPreviewCard } from '../chat/ui/link-preview-card';
+import { LinkPreviewCard, linkPreviewForSend } from '../chat/ui/link-preview-card';
 import { SendOptionsSheet } from '../chat/ui/send-options-sheet';
 import { firstHttpUrl } from '../chat/model/link-preview';
 import type { TextSendOptions } from '../chat/model/send-options';
+import type { EncryptedLinkPreview } from '@/features/e2ee/payload';
 import { fr } from '@/i18n/fr';
 
 export type ComposerTheme = PanelTheme & {
@@ -297,14 +298,28 @@ export function ChatComposer({
     sendingRef.current = true;
     commit('', 0);
     try {
-      await onSendText(value, options);
+      const url = linkPreviewsEnabled ? firstHttpUrl(value) : null;
+      const preview = url ? linkPreviewForSend(url) : null;
+      const encryptedPreview: EncryptedLinkPreview | undefined = preview
+        ? {
+            url: preview.url,
+            host: preview.host,
+            title: preview.title,
+            description: preview.description,
+            ...(preview.imageUrl ? { imageUrl: preview.imageUrl } : {}),
+          }
+        : undefined;
+      await onSendText(
+        value,
+        encryptedPreview ? { ...options, preview: encryptedPreview } : options,
+      );
     } catch {
       const restored = restoreFailedText(textRef.current, value);
       commit(restored, restored.length);
     } finally {
       sendingRef.current = false;
     }
-  }, [commit, onSendText]);
+  }, [commit, linkPreviewsEnabled, onSendText]);
 
   const handleSend = useCallback(() => void runSend(), [runSend]);
   const handleSendSilent = useCallback(() => void runSend({ silent: true }), [runSend]);

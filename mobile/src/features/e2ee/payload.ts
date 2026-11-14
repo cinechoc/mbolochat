@@ -53,8 +53,24 @@ export interface EncryptedMedia {
   thumb?: EncryptedBlob;
 }
 
+/** Aperçu de lien transmis dans l'enveloppe Olm, jamais au serveur. */
+export interface EncryptedLinkPreview {
+  url: string;
+  host: string;
+  title: string;
+  description: string;
+  imageUrl?: string;
+}
+
 export type ParsedPayload =
-  | { kind: 'text'; text: string; replyTo?: string }
+  | {
+      kind: 'text';
+      text: string;
+      replyTo?: string;
+      silent?: true;
+      viewOnce?: true;
+      preview?: EncryptedLinkPreview;
+    }
   | { kind: 'media'; media: EncryptedMedia; caption: string; replyTo?: string }
   | { kind: 'sticker'; stickerRef: string; replyTo?: string }
   | {
@@ -109,6 +125,91 @@ export function decodeText(value: string): string {
  * absence préserve le format historique `{v:1,text}` au bit près. */
 export function buildTextV1(text: string, replyTo?: string): string {
   return encodeText(JSON.stringify(replyTo ? { v: 1, text, replyTo } : { v: 1, text }));
+}
+
+export const MAX_TEXT_V8_LENGTH = 4_000;
+export const MAX_PREVIEW_URL_LENGTH = 2_048;
+export const MAX_PREVIEW_HOST_LENGTH = 253;
+export const MAX_PREVIEW_TITLE_LENGTH = 90;
+export const MAX_PREVIEW_DESCRIPTION_LENGTH = 180;
+
+function isHttpUrl(value: unknown, maxLength: number): value is string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > maxLength) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      parsed.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isBoundedText(value: unknown, maxLength: number, allowEmpty = true): value is string {
+  return typeof value === 'string' && value.length <= maxLength && (allowEmpty || value.length > 0);
+}
+
+/** Valide un aperçu reçu avant tout usage. Les clés sont fermées. */
+export function isEncryptedLinkPreview(value: unknown): value is EncryptedLinkPreview {
+  if (!value || typeof value !== 'object') return false;
+  const preview = value as Record<string, unknown>;
+  const keys = ['url', 'host', 'title', 'description'];
+  if (Object.hasOwn(preview, 'imageUrl')) keys.push('imageUrl');
+  if (!hasExactKeys(preview, keys)) return false;
+  return (
+    isHttpUrl(preview.url, MAX_PREVIEW_URL_LENGTH) &&
+    isBoundedText(preview.host, MAX_PREVIEW_HOST_LENGTH, false) &&
+    isBoundedText(preview.title, MAX_PREVIEW_TITLE_LENGTH) &&
+    isBoundedText(preview.description, MAX_PREVIEW_DESCRIPTION_LENGTH) &&
+    (preview.imageUrl === undefined ||
+      isHttpUrl(preview.imageUrl, MAX_PREVIEW_URL_LENGTH))
+  );
+}
+
+export interface TextV8Options {
+  replyTo?: string;
+  silent?: boolean;
+  viewOnce?: boolean;
+  preview?: EncryptedLinkPreview | null;
+}
+
+/**
+ * Sérialise un texte riche en `v:8`. Le format `v:1` reste utilisé quand aucun
+ * champ supplémentaire n'est présent, afin de ne pas changer les octets des
+ * messages historiques.
+ */
+export function buildTextV8(text: string, options: TextV8Options = {}): string {
+  if (
+    typeof text !== 'string' ||
+    text.length < 1 ||
+    text.length > MAX_TEXT_V8_LENGTH ||
+    (options.replyTo !== undefined && !isValidControlTarget(options.replyTo)) ||
+    (options.silent !== undefined && options.silent !== true) ||
+    (options.viewOnce !== undefined && options.viewOnce !== true) ||
+    (options.preview != null && !isEncryptedLinkPreview(options.preview))
+  ) {
+    throw new InvalidPayloadError('invalid_payload');
+  }
+  const payload: Record<string, unknown> = { v: 8, kind: 'text', text };
+  if (options.replyTo) payload.replyTo = options.replyTo;
+  if (options.silent === true) payload.silent = true;
+  if (options.viewOnce === true) payload.viewOnce = true;
+  if (options.preview) payload.preview = options.preview;
+  return encodeText(JSON.stringify(payload));
+}
+
+/** Relit un aperçu stocké dans SQLCipher, ou `null` s'il est absent/illisible. */
+export function decodePreviewMeta(raw: string | null | undefined): EncryptedLinkPreview | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return isEncryptedLinkPreview(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Sérialise le contenu `v:2` d'un média chiffré. */
@@ -377,6 +478,36 @@ export function parsePayload(plaintextB64: string): ParsedPayload {
       targetId: envelope.targetId,
       revision: envelope.revision,
       text: envelope.text,
+    };
+  }
+  if (envelope.v === 8) {
+    const allowed = [
+      'v',
+      'kind',
+      'text',
+      ...(Object.hasOwn(envelope, 'replyTo') ? ['replyTo'] : []),
+      ...(Object.hasOwn(envelope, 'silent') ? ['silent'] : []),
+      ...(Object.hasOwn(envelope, 'viewOnce') ? ['viewOnce'] : []),
+      ...(Object.hasOwn(envelope, 'preview') ? ['preview'] : []),
+    ];
+    if (
+      !hasExactKeys(envelope, allowed) ||
+      envelope.kind !== 'text' ||
+      !isBoundedText(envelope.text, MAX_TEXT_V8_LENGTH, false) ||
+      (envelope.replyTo !== undefined && !isValidControlTarget(envelope.replyTo)) ||
+      (envelope.silent !== undefined && envelope.silent !== true) ||
+      (envelope.viewOnce !== undefined && envelope.viewOnce !== true) ||
+      (envelope.preview !== undefined && !isEncryptedLinkPreview(envelope.preview))
+    ) {
+      throw new InvalidPayloadError('invalid_payload');
+    }
+    return {
+      kind: 'text',
+      text: envelope.text,
+      ...(typeof envelope.replyTo === 'string' ? { replyTo: envelope.replyTo } : {}),
+      ...(envelope.silent === true ? { silent: true as const } : {}),
+      ...(envelope.viewOnce === true ? { viewOnce: true as const } : {}),
+      ...(isEncryptedLinkPreview(envelope.preview) ? { preview: envelope.preview } : {}),
     };
   }
   throw new InvalidPayloadError('unsupported_version');

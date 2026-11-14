@@ -11,6 +11,7 @@ import {
   loadLocalMessage,
   loadPeerSigningKey,
   loadSession,
+  markLocalMessageSendError,
   MAX_UNKNOWN_PAYLOAD_CHARS,
   renameLocalMessage,
   saveConversationEphemeral,
@@ -28,11 +29,14 @@ import {
   buildReactionV4,
   buildStickerV3,
   buildTextV1,
+  buildTextV8,
   decodeMediaMeta,
   encodeMediaMeta,
   InvalidPayloadError,
+  isEncryptedLinkPreview,
   parsePayload,
   type EncryptedMedia,
+  type EncryptedLinkPreview,
   type EphemeralTtl,
   type ParsedPayload,
   type PayloadError,
@@ -352,6 +356,8 @@ export interface SendEncryptedContentInput {
   clientId?: string;
   /** Reprise explicitement autorisée d'une enveloppe journalisée en échec. */
   resumeFailed?: boolean;
+  /** Un envoi programmé conserve sa ligne locale en échec pour réessai. */
+  retainOnFailure?: boolean;
 }
 
 interface OutgoingContent {
@@ -364,6 +370,10 @@ interface OutgoingContent {
   reaction?: string | null;
   reactionAction?: string | null;
   editRevision?: number | null;
+  silent?: boolean;
+  viewOnce?: boolean;
+  previewJson?: string | null;
+  scheduledAt?: string | null;
   /** Les messages visibles reçoivent l'échéance éphémère courante. */
   applyEphemeral?: boolean;
 }
@@ -418,6 +428,10 @@ async function sendEncryptedContent(
     reaction_action: content.reactionAction ?? null,
     edit_revision: content.editRevision ?? 0,
     expires_at: expiresAt,
+    silent: content.silent ? 1 : 0,
+    view_once: content.viewOnce ? 1 : 0,
+    preview_json: content.previewJson ?? null,
+    scheduled_at: content.scheduledAt ?? null,
   };
   // La ligne provisoire est écrite avant l'envoi : un plantage entre les deux
   // ne doit pas rendre le message indéchiffrable et invisible.
@@ -445,20 +459,54 @@ async function sendEncryptedContent(
     const stored: StoredE2eeMessage = { ...provisional, id: serverMessage.id, created_at: serverMessage.createdAt };
     return { clientId, serverMessage, stored };
   } catch (cause) {
-    // Message local retiré, **enveloppe conservée** : une reprise avec le même
-    // clientId repartira exactement du même E, sans faire avancer l'état Olm.
-    await deleteLocalMessage(input.db, clientId).catch(() => undefined);
+    if (input.retainOnFailure) {
+      // Envoi programmé : la ligne et son clair restent dans SQLCipher pour un
+      // réessai explicite. Aucun message d'exception (potentiellement porteur
+      // de données) n'est persisté.
+      await markLocalMessageSendError(input.db, clientId).catch(() => undefined);
+    } else {
+      // Message local retiré, **enveloppe conservée** : une reprise avec le même
+      // clientId repartira exactement du même E, sans faire avancer l'état Olm.
+      await deleteLocalMessage(input.db, clientId).catch(() => undefined);
+    }
     throw cause;
   }
 }
 
 export async function sendEncryptedText(
-  input: SendEncryptedContentInput & { text: string },
+  input: SendEncryptedContentInput & {
+    text: string;
+    silent?: boolean;
+    viewOnce?: boolean;
+    preview?: EncryptedLinkPreview | null;
+    /** Métadonnée locale d'un envoi programmé ; jamais sérialisée en `v:8`. */
+    scheduledAt?: string | null;
+  },
 ): Promise<SendResult> {
+  // Un aperçu mal formé ne bloque jamais un texte : il est omis, comme le fait
+  // déjà l'affichage en clair quand les métadonnées distantes échouent.
+  const preview =
+    input.preview && isEncryptedLinkPreview(input.preview) ? input.preview : undefined;
+  const rich = input.silent === true || input.viewOnce === true || Boolean(preview);
   return sendEncryptedContent(
     input,
-    buildTextV1(input.text, input.replyToId ?? undefined),
-    { body: input.text, quoteId: input.replyToId ?? null, applyEphemeral: true },
+    rich
+      ? buildTextV8(input.text, {
+          replyTo: input.replyToId ?? undefined,
+          silent: input.silent,
+          viewOnce: input.viewOnce,
+          preview,
+        })
+      : buildTextV1(input.text, input.replyToId ?? undefined),
+    {
+      body: input.text,
+      quoteId: input.replyToId ?? null,
+      silent: input.silent === true,
+      viewOnce: input.viewOnce === true,
+      previewJson: preview ? JSON.stringify(preview) : null,
+      scheduledAt: input.scheduledAt ?? null,
+      applyEphemeral: true,
+    },
   );
 }
 
@@ -1044,6 +1092,10 @@ export async function decryptIncoming(input: {
         reaction,
         reaction_action: reactionAction,
         edit_revision: editRevision,
+        silent: parsed.kind === 'text' && parsed.silent === true ? 1 : 0,
+        view_once: parsed.kind === 'text' && parsed.viewOnce === true ? 1 : 0,
+        preview_json:
+          parsed.kind === 'text' && parsed.preview ? JSON.stringify(parsed.preview) : null,
         // Les événements de contrôle ne portent jamais d'échéance : seuls les
         // messages visibles (texte, média, sticker) expirent.
         expires_at:
@@ -1140,6 +1192,9 @@ export async function decryptIncoming(input: {
             media_meta: null,
             quote_id: null,
             sticker_ref: null,
+            silent: 0,
+            view_once: 0,
+            preview_json: null,
             deleted: 1,
             deleted_by: message.sender.id,
           }

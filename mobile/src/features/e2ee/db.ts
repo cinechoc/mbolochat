@@ -476,6 +476,16 @@ export interface StoredE2eeMessage {
   edited_at?: string | null;
   /** Numéro de la dernière modification appliquée (0 = jamais modifiée). */
   edit_revision?: number | null;
+  /** Envoi silencieux demandé par l'auteur (`v:8`). */
+  silent?: number | null;
+  /** Lecture unique demandée par l'auteur (`v:8`). */
+  view_once?: number | null;
+  /** Aperçu de lien validé, sérialisé en JSON dans SQLCipher uniquement. */
+  preview_json?: string | null;
+  /** Échéance locale d'une programmation ; jamais transmise dans l'enveloppe. */
+  scheduled_at?: string | null;
+  /** Marqueur normalisé d'échec d'envoi (`send_failed`), jamais le texte de l'erreur. */
+  send_error?: string | null;
   /** Ordre d'insertion SQLite, utilisé uniquement comme départage de pagination. */
   rowid?: number;
 }
@@ -500,8 +510,8 @@ export async function saveLocalMessageWith(
        (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
         media_meta, quote_id, sticker_ref, unreadable_reason, hidden, content_kind,
         control_target, reaction, reaction_action, raw_payload, expires_at, deleted, deleted_by,
-        edited_at, edit_revision)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        edited_at, edit_revision, silent, view_once, preview_json, scheduled_at, send_error)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        body = CASE
          WHEN e2ee_messages.content_kind IS NULL
@@ -519,7 +529,12 @@ export async function saveLocalMessageWith(
        deleted = CASE WHEN e2ee_messages.deleted = 1 THEN 1 ELSE excluded.deleted END,
        deleted_by = COALESCE(e2ee_messages.deleted_by, excluded.deleted_by),
        edited_at = COALESCE(excluded.edited_at, e2ee_messages.edited_at),
-       edit_revision = MAX(e2ee_messages.edit_revision, excluded.edit_revision)`,
+       edit_revision = MAX(e2ee_messages.edit_revision, excluded.edit_revision),
+       silent = excluded.silent,
+       view_once = excluded.view_once,
+       preview_json = COALESCE(excluded.preview_json, e2ee_messages.preview_json),
+       scheduled_at = COALESCE(e2ee_messages.scheduled_at, excluded.scheduled_at),
+       send_error = excluded.send_error`,
     message.id,
     message.conversation_id,
     message.sender_id,
@@ -543,6 +558,11 @@ export async function saveLocalMessageWith(
     message.deleted_by ?? null,
     message.edited_at ?? null,
     message.edit_revision ?? 0,
+    message.silent ?? 0,
+    message.view_once ?? 0,
+    message.preview_json ?? null,
+    message.scheduled_at ?? null,
+    message.send_error ?? null,
   );
 }
 
@@ -553,10 +573,32 @@ export async function renameLocalMessage(
   serverId: string,
 ): Promise<void> {
   await db.runAsync(
-    'UPDATE e2ee_messages SET id = ?, client_id = ? WHERE id = ?',
+    'UPDATE e2ee_messages SET id = ?, client_id = ?, send_error = NULL WHERE id = ?',
     serverId,
     clientId,
     clientId,
+  );
+}
+
+/** Pose un échec normalisé sur un envoi programmé, sans perdre son contenu. */
+export async function markLocalMessageSendError(
+  db: SQLiteDatabase,
+  id: string,
+  error = 'send_failed',
+): Promise<void> {
+  await db.runAsync('UPDATE e2ee_messages SET send_error = ? WHERE id = ?', error, id);
+}
+
+/** Remet un envoi programmé en attente immédiate après une action utilisateur. */
+export async function retryScheduledMessage(
+  db: SQLiteDatabase,
+  id: string,
+  scheduledAt: string,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE e2ee_messages SET send_error = NULL, scheduled_at = ? WHERE id = ?',
+    scheduledAt,
+    id,
   );
 }
 
@@ -695,6 +737,46 @@ export async function loadLocalMessage(
   id: string,
 ): Promise<StoredE2eeMessage | null> {
   return db.getFirstAsync<StoredE2eeMessage>('SELECT * FROM e2ee_messages WHERE id = ?', id);
+}
+
+/**
+ * Envois programmés arrivés à échéance pour cet utilisateur. `id = client_id`
+ * distingue une ligne encore dans la file d'un message acquitté et renommé.
+ */
+export async function listDueScheduledMessages(
+  db: SQLiteDatabase,
+  currentUserId: string,
+  dueAt: string,
+  limit = 20,
+): Promise<StoredE2eeMessage[]> {
+  return db.getAllAsync<StoredE2eeMessage>(
+    `SELECT rowid AS rowid, * FROM e2ee_messages
+      WHERE sender_id = ? AND mine = 1
+        AND scheduled_at IS NOT NULL AND scheduled_at <= ?
+        AND send_error IS NULL
+        AND client_id IS NOT NULL AND id = client_id
+      ORDER BY scheduled_at ASC, rowid ASC
+      LIMIT ?`,
+    currentUserId,
+    dueAt,
+    limit,
+  );
+}
+
+/** Prochaine échéance encore en attente, ou `null` si la file est vide. */
+export async function nextScheduledMessageAt(
+  db: SQLiteDatabase,
+  currentUserId: string,
+): Promise<string | null> {
+  const row = await db.getFirstAsync<{ scheduled_at: string | null }>(
+    `SELECT scheduled_at FROM e2ee_messages
+      WHERE sender_id = ? AND mine = 1
+        AND scheduled_at IS NOT NULL AND send_error IS NULL
+        AND client_id IS NOT NULL AND id = client_id
+      ORDER BY scheduled_at ASC LIMIT 1`,
+    currentUserId,
+  );
+  return row?.scheduled_at ?? null;
 }
 
 /**

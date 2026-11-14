@@ -6,12 +6,15 @@ import {
   buildReactionV4,
   buildStickerV3,
   buildTextV1,
+  buildTextV8,
+  decodePreviewMeta,
   decodeMediaMeta,
   decodeText,
   encodeMediaMeta,
   encodeText,
   InvalidPayloadError,
   parsePayload,
+  type EncryptedLinkPreview,
   type EncryptedMedia,
 } from './payload';
 
@@ -64,6 +67,68 @@ describe('parsePayload — texte v1', () => {
   it('transporte replyTo quand une réponse cite un message', () => {
     const parsed = parsePayload(buildTextV1('bonjour', 'msg-42'));
     expect(parsed).toEqual({ kind: 'text', text: 'bonjour', replyTo: 'msg-42' });
+  });
+});
+
+describe('parsePayload — texte avancé v8', () => {
+  const preview: EncryptedLinkPreview = {
+    url: 'https://exemple.test/article',
+    host: 'exemple.test',
+    title: 'Un article',
+    description: 'Résumé court',
+    imageUrl: 'https://exemple.test/cover.jpg',
+  };
+
+  it('fait l’aller-retour des options et de l’aperçu', () => {
+    expect(
+      parsePayload(
+        buildTextV8('bonjour', {
+          replyTo: 'message-42',
+          silent: true,
+          viewOnce: true,
+          preview,
+        }),
+      ),
+    ).toEqual({
+      kind: 'text',
+      text: 'bonjour',
+      replyTo: 'message-42',
+      silent: true,
+      viewOnce: true,
+      preview,
+    });
+  });
+
+  it('n’ajoute jamais scheduledAt et omet les options absentes', () => {
+    const json = decodeText(buildTextV8('salut', { silent: true }));
+    expect(json).toBe('{"v":8,"kind":"text","text":"salut","silent":true}');
+    expect(json).not.toContain('scheduledAt');
+  });
+
+  it('rejette les champs hors contrat, les options fausses et les URL non HTTP', () => {
+    const bad = [
+      { v: 8, kind: 'text', text: 'ok', scheduledAt: '2026-11-15T00:00:00Z' },
+      { v: 8, kind: 'text', text: 'ok', silent: false },
+      { v: 8, kind: 'text', text: 'ok', viewOnce: 'oui' },
+      { v: 8, kind: 'text', text: '' },
+      { v: 8, kind: 'text', text: 'ok', replyTo: '../secret' },
+      {
+        v: 8,
+        kind: 'text',
+        text: 'ok',
+        preview: { ...preview, url: 'file:///secret' },
+      },
+      { v: 8, kind: 'text', text: 'ok', preview: { ...preview, extra: true } },
+    ];
+    for (const payload of bad) {
+      expect(() => parsePayload(encodeText(JSON.stringify(payload)))).toThrow(InvalidPayloadError);
+    }
+  });
+
+  it('refuse un aperçu stocké invalide', () => {
+    expect(decodePreviewMeta(JSON.stringify(preview))).toEqual(preview);
+    expect(decodePreviewMeta('{ pas du json')).toBeNull();
+    expect(decodePreviewMeta(JSON.stringify({ ...preview, url: 'javascript:alert(1)' }))).toBeNull();
   });
 });
 
@@ -154,8 +219,8 @@ describe('parsePayload — suppression v5', () => {
 
 describe('parsePayload — refus', () => {
   it('rejette une version inconnue au lieu de la deviner', () => {
-    // Toutes les versions publiées sont reconnues : la prochaine est v8.
-    const future = encodeText(JSON.stringify({ v: 8, kind: 'media' }));
+    // Toutes les versions publiées sont reconnues : la prochaine est v9.
+    const future = encodeText(JSON.stringify({ v: 9, kind: 'media' }));
     expect(() => parsePayload(future)).toThrow(InvalidPayloadError);
     try {
       parsePayload(future);
@@ -302,14 +367,14 @@ describe('parsePayload — sticker v3', () => {
   });
 
   it('rejette toujours une version inconnue', () => {
-    const future = encodeText(JSON.stringify({ v: 8, kind: 'sticker', stickerRef: REF }));
+    const future = encodeText(JSON.stringify({ v: 9, kind: 'sticker', stickerRef: REF }));
     expect(() => parsePayload(future)).toThrow(InvalidPayloadError);
     try {
       parsePayload(future);
     } catch (error) {
       expect((error as InvalidPayloadError).reason).toBe('unsupported_version');
     }
-    expect(() => parsePayload(encodeText(JSON.stringify({ v: 8, stickerRef: REF })))).toThrow(
+    expect(() => parsePayload(encodeText(JSON.stringify({ v: 9, stickerRef: REF })))).toThrow(
       InvalidPayloadError,
     );
   });
@@ -398,13 +463,13 @@ describe('motifs d’un contenu illisible', () => {
   };
 
   it('classe une version future en unsupported_version', () => {
-    for (const version of [8, 99]) {
+    for (const version of [9, 99]) {
       expect(reasonOf(encodeText(JSON.stringify({ v: version, text: 'futur' })))).toBe(
         'unsupported_version',
       );
     }
     // Une version sans contenu exploitable reste « non prise en charge ».
-    expect(reasonOf(encodeText(JSON.stringify({ v: 8 })))).toBe('unsupported_version');
+    expect(reasonOf(encodeText(JSON.stringify({ v: 9 })))).toBe('unsupported_version');
   });
 
   it('classe un JSON invalide en invalid_payload', () => {
@@ -432,7 +497,7 @@ describe('motifs d’un contenu illisible', () => {
   it('n’expose dans le motif aucune donnée du payload', () => {
     const marqueur = 'SECRET-DU-PAYLOAD-7';
     // Le message d'exception est le motif normalisé, rien d'autre.
-    const reason = reasonOf(encodeText(JSON.stringify({ v: 8, text: marqueur })));
+    const reason = reasonOf(encodeText(JSON.stringify({ v: 9, text: marqueur })));
     expect(reason).toBe('unsupported_version');
     expect(String(reason)).not.toContain(marqueur);
   });

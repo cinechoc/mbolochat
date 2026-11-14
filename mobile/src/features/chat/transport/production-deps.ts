@@ -4,6 +4,7 @@ import * as e2eeDeletionFiles from '@/features/e2ee/deletionFiles';
 import * as e2eeEphemeral from '@/features/e2ee/ephemeral';
 import * as e2eeMedia from '@/features/e2ee/media';
 import * as e2eeReceipts from '@/features/e2ee/receipts';
+import * as e2eeScheduled from '@/features/e2ee/scheduledQueue';
 import * as e2eeText from '@/features/e2ee/text';
 import { api } from '@/lib/api';
 import { cache } from '@/lib/cache';
@@ -39,6 +40,7 @@ export const E2EE_DEPS: E2eeTransportDeps = {
   },
   deletion: { ...e2eeDeletion, ...e2eeDeletionFiles },
   ephemeral: e2eeEphemeral,
+  scheduled: e2eeScheduled,
   receipts: e2eeReceipts,
   clock: () => Date.now(),
 };

@@ -274,6 +274,17 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
     cleanupDeletedMedia: vi.fn(async () => undefined),
   };
   const cache = { patchConversation: vi.fn() };
+  const scheduled = {
+    enqueueScheduledText: vi.fn(async () => stored('scheduled-1', '2026-01-01T00:00:13.000Z', {
+      mine: 1,
+      sender_id: 'me',
+      sender_name: 'me',
+      client_id: 'scheduled-1',
+      scheduled_at: '2026-01-01T01:00:00.000Z',
+    })),
+    wakeScheduledQueue: vi.fn(),
+    onScheduledEvent: vi.fn(() => () => undefined),
+  };
   const deps: E2eeTransportDeps = {
     api: api as unknown as E2eeTransportDeps['api'],
     socket: socketDeps as unknown as E2eeTransportDeps['socket'],
@@ -282,6 +293,7 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
     receipts: receipts as unknown as E2eeTransportDeps['receipts'],
     deletion: deletion as unknown as E2eeTransportDeps['deletion'],
     ephemeral: { purgeExpiredMessages: vi.fn(async () => []) },
+    scheduled: scheduled as unknown as E2eeTransportDeps['scheduled'],
     cache: cache as unknown as E2eeTransportDeps['cache'],
     clock: () => 0,
   };
@@ -290,7 +302,7 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
       handler(...args);
     }
   };
-  return { deps, db, crypto, api, socket, socketDeps, deletion, cache, emitEvent, fakeDb };
+  return { deps, db, crypto, api, socket, socketDeps, deletion, cache, scheduled, emitEvent, fakeDb };
 }
 
 runTransportContract({
@@ -352,6 +364,41 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
       expect.objectContaining({ text: 'secret', currentUserId: 'me' }),
     );
     expect(clearUpload).not.toHaveBeenCalled();
+    await transport.dispose();
+  });
+
+  it('transmet les options et l’aperçu au chiffrement sans les exposer au serveur', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new E2eeTransport(fakes.deps, options);
+    const preview = {
+      url: 'https://exemple.test/article',
+      host: 'exemple.test',
+      title: 'Article',
+      description: 'Résumé',
+      imageUrl: 'https://exemple.test/cover.jpg',
+    };
+    await transport.sendText('secret', null, { silent: true, viewOnce: true, preview });
+    expect(fakes.crypto.sendEncryptedText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'secret',
+        silent: true,
+        viewOnce: true,
+        preview,
+      }),
+    );
+    expect(transport.capabilities.sendOptions).toBe(true);
+    await transport.dispose();
+  });
+
+  it('programme localement sans chiffrer ni envoyer avant l’échéance', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new E2eeTransport(fakes.deps, options);
+    const scheduledAt = new Date(Date.now() + 120_000).toISOString();
+    await transport.sendText('plus tard', null, { scheduledAt });
+    expect(fakes.scheduled.enqueueScheduledText).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'plus tard', scheduledAt }),
+    );
+    expect(fakes.crypto.sendEncryptedText).not.toHaveBeenCalled();
     await transport.dispose();
   });
 

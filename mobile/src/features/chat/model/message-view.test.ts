@@ -200,6 +200,34 @@ describe('storedMessageToView', () => {
     );
     expect(view.stickerRef).toBe('mbolo/merci');
   });
+
+  it('restitue les options et l’aperçu stockés dans SQLCipher', () => {
+    const preview = {
+      url: 'https://exemple.test/article',
+      host: 'exemple.test',
+      title: 'Article',
+      description: 'Résumé',
+    };
+    const view = storedMessageToView(
+      stored({
+        id: 's5',
+        mine: 1,
+        body: 'https://exemple.test/article',
+        silent: 1,
+        view_once: 1,
+        preview_json: JSON.stringify(preview),
+        scheduled_at: '2026-01-01T01:00:00.000Z',
+      }),
+      { currentUser: me, peer, state: 'pending' },
+    );
+    expect(view).toMatchObject({
+      silent: true,
+      viewOnce: true,
+      preview,
+      scheduledAt: '2026-01-01T01:00:00.000Z',
+      state: 'pending',
+    });
+  });
 });
 
 describe('identityOf', () => {

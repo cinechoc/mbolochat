@@ -7,7 +7,7 @@ import { isEphemeralTtl } from '@/features/e2ee/payload';
 import type { Message, MessageReceipt, ReactionSummary } from '@/lib/types';
 import { MessageIndex } from '../model/message-index';
 import { storedMessageToView } from '../model/message-view';
-import type { TextSendOptions } from '../model/send-options';
+import { normalizedSendOptions, type TextSendOptions } from '../model/send-options';
 import type { E2eeTransportDeps, E2eeTransportOptions } from './deps';
 import {
   PlaintextConversationError,
@@ -43,7 +43,7 @@ const E2EE_CAPABILITIES: ChatCapabilities = {
   encrypted: true,
   pagination: 'local',
   receipts: 'delivered-opened',
-  sendOptions: false,
+  sendOptions: true,
 };
 
 interface ReceiptPayload {
@@ -105,6 +105,7 @@ export class E2eeTransport implements ChatTransport {
 
   async loadInitial(): Promise<ChatSnapshot> {
     const { db } = await this.credentials();
+    this.deps.scheduled.wakeScheduledQueue();
     await this.sweepExpired();
     const local = await this.deps.db.listLocalMessages(db, this.conversationId);
     this.reactions = await this.deps.db.loadReactionSummaries(
@@ -262,6 +263,21 @@ export class E2eeTransport implements ChatTransport {
       offConnection();
       clearInterval(expiryTimer);
     });
+    this.cleanups.push(
+      this.deps.scheduled.onScheduledEvent((event) => {
+        if (event.conversationId !== this.conversationId) return;
+        const existed = this.stored.has(event.previousId);
+        if (event.type === 'sent' && event.previousId !== event.stored.id) {
+          this.stored.delete(event.previousId);
+          this.index.remove(event.previousId);
+          if (existed) this.handlers?.onMessageRemoved(event.previousId, false);
+        }
+        this.absorb(event.stored, true);
+        if (event.type === 'failed' && existed) {
+          this.handlers?.onMessage(this.render(event.stored));
+        }
+      }),
+    );
     return () => this.unsubscribe();
   }
 
@@ -278,13 +294,30 @@ export class E2eeTransport implements ChatTransport {
     replyToId: string | null,
     options?: TextSendOptions,
   ): Promise<void> {
-    if (options) {
-      throw new UnsupportedCapabilityError('sendOptions');
-    }
     if (!this.capabilities.replies) {
       throw new UnsupportedCapabilityError('replies');
     }
+    const normalized = normalizedSendOptions(options);
+    const preview = options?.preview ?? undefined;
     const { db, account } = await this.credentials();
+    if (normalized?.scheduledAt) {
+      const stored = await this.deps.scheduled.enqueueScheduledText({
+        token: this.token,
+        currentUserId: this.currentUser.id,
+        currentUserName: this.currentUser.displayName,
+        db,
+        conversation: this.summary,
+        text,
+        replyToId,
+        scheduledAt: normalized.scheduledAt,
+        silent: normalized.silent,
+        viewOnce: normalized.viewOnce,
+        preview,
+      });
+      this.absorb(stored, true);
+      void this.deps.db.saveDraft(db, this.conversationId, '').catch(() => undefined);
+      return;
+    }
     const result = await this.deps.crypto.sendEncryptedText({
       token: this.token,
       db,
@@ -294,6 +327,9 @@ export class E2eeTransport implements ChatTransport {
       currentUserName: this.currentUser.displayName,
       text,
       replyToId,
+      silent: normalized?.silent,
+      viewOnce: normalized?.viewOnce,
+      preview,
     });
     this.absorb(result.stored, true);
     void this.deps.db.saveDraft(db, this.conversationId, '').catch(() => undefined);
@@ -443,6 +479,12 @@ export class E2eeTransport implements ChatTransport {
   }
 
   async deleteMessage(id: string, forEveryone: boolean): Promise<void> {
+    const pending = this.stored.get(id);
+    if (pending && pending.client_id === pending.id) {
+      if (forEveryone) return;
+      await this.removePendingMessage(id);
+      return;
+    }
     if (forEveryone) {
       const target = this.stored.get(id);
       if (
@@ -484,6 +526,10 @@ export class E2eeTransport implements ChatTransport {
           quote_id: null,
           unreadable_reason: null,
           raw_payload: null,
+          preview_json: null,
+          silent: 0,
+          view_once: 0,
+          scheduled_at: null,
           deleted: 1,
           deleted_by: this.currentUser.id,
         };
@@ -504,13 +550,17 @@ export class E2eeTransport implements ChatTransport {
 
   async consumeViewOnce(id: string): Promise<void> {
     const { db } = await this.credentials();
+    const target = this.stored.get(id);
+    const pending = target !== undefined && target.client_id === target.id;
     this.stored.delete(id);
     this.index.remove(id);
     await this.deps.db.deleteLocalMessage(db, id).catch(() => undefined);
     this.handlers?.onMessageRemoved(id, false);
-    void this.deps.socket
-      .deleteMessage(this.token, this.conversationId, id, false)
-      .catch(() => undefined);
+    if (!pending) {
+      void this.deps.socket
+        .deleteMessage(this.token, this.conversationId, id, false)
+        .catch(() => undefined);
+    }
   }
 
   async toggleReaction(id: string, reaction: string): Promise<void> {
@@ -636,6 +686,10 @@ export class E2eeTransport implements ChatTransport {
           quote_id: null,
           unreadable_reason: null,
           raw_payload: null,
+          preview_json: null,
+          silent: 0,
+          view_once: 0,
+          scheduled_at: null,
           deleted: 1,
           deleted_by: null,
         };
@@ -653,12 +707,37 @@ export class E2eeTransport implements ChatTransport {
       .catch(() => undefined);
   }
 
-  retry(): void {
-    throw new Error('La reprise chiffrée n’est pas disponible dans ce mode.');
+  retry(id: string): void {
+    void this.retryScheduled(id);
   }
 
-  async discard(): Promise<void> {
-    // Aucun message chiffré n'attend dans une file locale : rien à jeter.
+  async discard(id: string): Promise<void> {
+    const { db } = await this.credentials();
+    const row = this.stored.get(id) ?? (await this.deps.db.loadLocalMessage(db, id));
+    if (!row || row.client_id !== id) return;
+    await this.removePendingMessage(id);
+  }
+
+  private async removePendingMessage(id: string): Promise<void> {
+    const { db } = await this.credentials();
+    await this.deps.db.deleteLocalMessage(db, id).catch(() => undefined);
+    this.stored.delete(id);
+    this.index.remove(id);
+    this.handlers?.onMessageRemoved(id, false);
+    this.deps.scheduled.wakeScheduledQueue();
+  }
+
+  private async retryScheduled(id: string): Promise<void> {
+    const { db } = await this.credentials();
+    const row = this.stored.get(id) ?? (await this.deps.db.loadLocalMessage(db, id));
+    if (!row || row.client_id !== id || !row.scheduled_at) return;
+    const now = new Date().toISOString();
+    await this.deps.db.retryScheduledMessage(db, id, now);
+    const pending: StoredE2eeMessage = { ...row, scheduled_at: now, send_error: null };
+    this.stored.set(id, pending);
+    this.index.upsert(this.render(pending));
+    this.handlers?.onMessage(this.render(pending));
+    this.deps.scheduled.wakeScheduledQueue();
   }
 
   private async credentials(): Promise<{
@@ -726,6 +805,10 @@ export class E2eeTransport implements ChatTransport {
 
   private deliveryOf(stored: StoredE2eeMessage): ChatMessageView['state'] {
     if (stored.mine !== 1) return 'none';
+    if (stored.send_error) return 'failed';
+    if (stored.client_id && stored.client_id === stored.id && stored.scheduled_at) {
+      return 'pending';
+    }
     const state = this.deps.receipts.receiptState(
       this.receipts[stored.id],
       this.currentUser.id,
