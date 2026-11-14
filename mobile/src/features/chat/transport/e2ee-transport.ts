@@ -19,7 +19,7 @@ import {
   type OutgoingAsset,
 } from './types';
 
-const TYPING_THROTTLE_MS = 180;
+const TYPING_REFRESH_MS = 2_500;
 const TYPING_EXPIRY_MS = 4_000;
 
 const E2EE_CAPABILITIES: ChatCapabilities = {
@@ -384,6 +384,7 @@ export class E2eeTransport implements ChatTransport {
         this.db ?? db,
         id,
         this.currentUser.id,
+        this.conversationId,
       );
       await this.deps.deletion.cleanupDeletedMedia(this.db ?? db, result.refs);
       if (result.applied) {
@@ -479,14 +480,15 @@ export class E2eeTransport implements ChatTransport {
       throw new UnsupportedCapabilityError('typing');
     }
     const now = this.deps.clock();
-    if (
-      active &&
-      this.lastTypingState === true &&
-      now - this.lastTypingSentAt < TYPING_THROTTLE_MS
-    ) {
+    // Un état actif est renvoyé périodiquement pour rester visible avant
+    // l'expiration côté pair ; un état déjà faux n'est jamais répété.
+    if (active) {
+      if (this.lastTypingState === true && now - this.lastTypingSentAt < TYPING_REFRESH_MS) {
+        return;
+      }
+    } else if (this.lastTypingState === false) {
       return;
     }
-    if (this.lastTypingState === active) return;
     this.lastTypingState = active;
     this.lastTypingSentAt = now;
     this.deps.socket.ensureSocket(this.token).then((socket) => {

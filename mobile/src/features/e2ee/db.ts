@@ -2,6 +2,7 @@ import { deleteDatabaseAsync, openDatabaseAsync, type SQLiteDatabase } from 'exp
 
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
 import type { ReactionSummary } from '@/lib/types';
+import { isReactionRef } from '../stickers/reactionRules';
 import { migrateE2eeSchema } from './schema';
 
 const DATABASE_NAME = 'mbolo-e2ee.db';
@@ -555,7 +556,7 @@ export async function loadReactionSummaries(
     `SELECT id, sender_id, control_target, reaction, reaction_action, created_at
        FROM e2ee_messages
       WHERE conversation_id = ? AND content_kind = 'reaction'
-      ORDER BY created_at ASC, id ASC`,
+      ORDER BY created_at ASC, rowid ASC`,
     conversationId,
   );
   const active = new Map<string, Map<string, Set<string>>>();
@@ -563,6 +564,7 @@ export async function loadReactionSummaries(
     if (
       typeof row.control_target !== 'string' ||
       typeof row.reaction !== 'string' ||
+      !isReactionRef(row.reaction) ||
       (row.reaction_action !== 'add' && row.reaction_action !== 'remove')
     ) {
       continue;

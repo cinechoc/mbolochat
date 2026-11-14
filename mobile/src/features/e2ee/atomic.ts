@@ -323,9 +323,15 @@ export async function persistIncoming(
         tx,
         input.message.id,
         input.message.sender_id,
+        input.message.conversation_id,
       );
       if (tombstoned) {
-        result.deletion = await applyDeleteForAll(tx, input.message.id, input.message.sender_id);
+        result.deletion = await applyDeleteForAll(
+          tx,
+          input.message.id,
+          input.message.sender_id,
+          input.message.conversation_id,
+        );
       }
     }
     if (input.deletion) {
@@ -333,6 +339,7 @@ export async function persistIncoming(
         tx,
         input.deletion.targetId,
         input.deletion.authorId,
+        input.message.conversation_id,
       );
     }
     await saveSessionWith(tx, input.session);

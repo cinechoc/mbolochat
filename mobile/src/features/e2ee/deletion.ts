@@ -17,22 +17,25 @@ export async function applyDeleteForAll(
   db: SQLiteDatabase,
   targetId: string,
   authorId: string,
+  conversationId: string,
 ): Promise<DeleteForAllResult> {
   const row = await db.getFirstAsync<{
     sender_id: string;
     deleted: number;
+    content_kind: string | null;
     local_cipher_uri: string | null;
     upload_id: string | null;
     local_thumb_cipher_uri: string | null;
     thumb_upload_id: string | null;
   }>(
-    `SELECT sender_id, deleted, local_cipher_uri, upload_id,
+    `SELECT sender_id, deleted, content_kind, local_cipher_uri, upload_id,
             local_thumb_cipher_uri, thumb_upload_id
-       FROM e2ee_messages WHERE id = ?`,
+       FROM e2ee_messages WHERE id = ? AND conversation_id = ?`,
     targetId,
+    conversationId,
   );
   if (!row) return { exists: false, applied: false, refs: null };
-  if (row.sender_id !== authorId || row.deleted === 1) {
+  if (row.sender_id !== authorId || row.deleted === 1 || row.content_kind !== null) {
     return { exists: true, applied: false, refs: null };
   }
   const refs: LocalMediaRefs = {
@@ -75,12 +78,17 @@ export async function hasDeletionTombstone(
   db: SQLiteDatabase,
   targetId: string,
   authorId: string,
+  conversationId: string,
 ): Promise<boolean> {
   const row = await db.getFirstAsync<{ present: number }>(
-    `SELECT 1 AS present FROM e2ee_deletions
-      WHERE target_id = ? AND author_id = ? LIMIT 1`,
+    `SELECT 1 AS present
+       FROM e2ee_deletions d
+       JOIN e2ee_messages event ON event.id = d.event_message_id
+      WHERE d.target_id = ? AND d.author_id = ? AND event.conversation_id = ?
+      LIMIT 1`,
     targetId,
     authorId,
+    conversationId,
   );
   return Boolean(row);
 }

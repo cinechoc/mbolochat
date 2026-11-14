@@ -106,7 +106,7 @@ const plaintext = (text: string) => {
 beforeEach(() => {
   vi.clearAllMocks();
   dbMock.loadE2eeAccount.mockResolvedValue(null);
-  persistMock.mockResolvedValue(undefined as never);
+  persistMock.mockResolvedValue({});
 });
 
 describe('decryptIncoming — repli après changement de clé', () => {

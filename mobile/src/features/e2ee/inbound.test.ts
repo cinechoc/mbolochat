@@ -969,6 +969,24 @@ describe('déchiffrement entrant — réactions v4', () => {
     expect(summaries.has('m1')).toBe(false);
   });
 
+  it('respecte l’ordre d’arrivée à horodatage égal, pas l’ordre lexical des identifiants', async () => {
+    const fixture = await seeded();
+    await fixture.handle.runAsync(
+      `INSERT INTO e2ee_messages
+         (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine)
+       VALUES ('m1', 'conv-1', 'peer-1', 'Pair', 'bonjour', '2026-01-01T00:00:00Z', NULL, 0)`,
+    );
+    cryptoMock.secureDecrypt
+      .mockResolvedValueOnce(decryptedReaction('S1', 'm1') as never)
+      .mockResolvedValueOnce(decryptedReaction('S2', 'm1', 'mbolo-panther-2d/amour', 'remove') as never);
+
+    await decrypt(fixture, incoming({ id: 'z-reaction' }));
+    await decrypt(fixture, incoming({ id: 'a-reaction' }));
+
+    const summaries = await loadReactionSummaries(fixture.db, 'conv-1', 'me');
+    expect(summaries.has('m1')).toBe(false);
+  });
+
   it('ne rejoue pas un doublon et rejette une réaction mal formée sans bruit', async () => {
     const fixture = await seeded();
     cryptoMock.secureDecrypt.mockResolvedValueOnce(decryptedReaction('S1', 'm1') as never);
@@ -1080,6 +1098,28 @@ describe('déchiffrement entrant — suppression pour tous v5', () => {
     ).toEqual([{ body: '', deleted: 1 }]);
     expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([
       { session_pickle: 'S2' },
+    ]);
+  });
+
+  it('n’applique ni immédiatement ni par tombstone une suppression d’une autre conversation', async () => {
+    const fixture = await seeded();
+    await seedTarget(fixture);
+    cryptoMock.secureDecrypt
+      .mockResolvedValueOnce(decryptedDelete('S1', 'm1') as never)
+      .mockResolvedValueOnce(decryptedDelete('S2', 'future-message') as never)
+      .mockResolvedValueOnce(decrypted('S3', 'arrive après') as never);
+
+    const immediate = await decrypt(fixture, incoming({ id: 'd1', conversationId: 'conv-2' }));
+    expect(immediate.deletionEvent).toMatchObject({ targetId: 'm1', applied: false });
+    expect(read(fixture, `SELECT body, deleted FROM e2ee_messages WHERE id = 'm1'`)).toEqual([
+      { body: 'secret', deleted: 0 },
+    ]);
+
+    await decrypt(fixture, incoming({ id: 'd2', conversationId: 'conv-2' }));
+    const target = await decrypt(fixture, incoming({ id: 'future-message', conversationId: 'conv-1' }));
+    expect(target.stored).toMatchObject({ body: 'arrive après' });
+    expect(read(fixture, `SELECT deleted FROM e2ee_messages WHERE id = 'future-message'`)).toEqual([
+      { deleted: 0 },
     ]);
   });
 

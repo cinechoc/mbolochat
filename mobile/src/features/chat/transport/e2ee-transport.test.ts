@@ -422,7 +422,12 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     expect(fakes.crypto.sendEncryptedDelete).toHaveBeenCalledWith(
       expect.objectContaining({ targetId: 'a' }),
     );
-    expect(fakes.deletion.applyDeleteForAll).toHaveBeenCalledWith(expect.anything(), 'a', 'me');
+    expect(fakes.deletion.applyDeleteForAll).toHaveBeenCalledWith(
+      expect.anything(),
+      'a',
+      'me',
+      'conversation-1',
+    );
     expect(removed).toContainEqual({ id: 'a', forEveryone: true });
     expect(fakes.socketDeps.deleteMessage).not.toHaveBeenCalled();
     off();
@@ -544,6 +549,26 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     expect(fakes.socket.emit).toHaveBeenLastCalledWith('typing', {
       conversationId: 'conversation-1',
       typing: false,
+    });
+    await transport.dispose();
+  });
+
+  it('rafraîchit la frappe active avant l’expiration côté pair', async () => {
+    const fakes = createFakes(SEED);
+    let now = 0;
+    fakes.deps.clock = () => now;
+    const transport = new E2eeTransport(fakes.deps, options);
+    transport.setTyping(true, 'secret');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakes.socket.emit).toHaveBeenCalledTimes(1);
+
+    now = 2_500;
+    transport.setTyping(true, 'secret');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fakes.socket.emit).toHaveBeenCalledTimes(2);
+    expect(fakes.socket.emit).toHaveBeenLastCalledWith('typing', {
+      conversationId: 'conversation-1',
+      typing: true,
     });
     await transport.dispose();
   });
