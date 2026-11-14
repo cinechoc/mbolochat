@@ -69,7 +69,7 @@ export interface E2eeTransportDeps {
   api: Pick<ApiModule['api'], 'listMessages' | 'listReceipts' | 'markMessagesRead'>;
   socket: Pick<
     SocketModule,
-    'connectSocket' | 'ensureSocket' | 'reportDelivered' | 'deleteMessage'
+    'connectSocket' | 'ensureSocket' | 'onConnection' | 'reportDelivered' | 'deleteMessage'
   >;
   db: Pick<
     E2eeDbModule,

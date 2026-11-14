@@ -66,7 +66,10 @@ export const fr = {
       groupCallVoice: 'Appel vocal de groupe',
       members: (count: number) => `${count} membres`,
       jumpToLatest: 'Retourner aux derniers messages',
-      offline: 'Hors ligne — les messages partiront au retour du réseau',      callsUnavailableTitle: 'Appels pas encore chiffrés',
+      offline: 'Hors ligne — les messages partiront au retour du réseau',
+      offlineEncrypted:
+        'Hors ligne — les messages chiffrés ne seront pas envoyés automatiquement',
+      callsUnavailableTitle: 'Appels pas encore chiffrés',
       callsUnavailableBody:
         'Cette conversation est chiffrée : aucun appel non chiffré ne peut être lancé.',
       messageOptions: 'Options du message',

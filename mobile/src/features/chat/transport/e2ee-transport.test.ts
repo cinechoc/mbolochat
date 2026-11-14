@@ -178,6 +178,10 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
   const socketDeps = {
     connectSocket: vi.fn(() => socket as never),
     ensureSocket: vi.fn(async () => socket as never),
+    onConnection: vi.fn((listener: (online: boolean) => void) => {
+      listener(true);
+      return () => undefined;
+    }),
     reportDelivered: vi.fn(),
     deleteMessage: vi.fn(async () => undefined),
   };
@@ -233,6 +237,16 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     ).toThrow(PlaintextConversationError);
   });
 
+  it('restitue l’historique local si le chargement serveur échoue', async () => {
+    const fakes = createFakes(SEED);
+    fakes.api.listMessages.mockRejectedValueOnce(new Error('hors ligne'));
+    const transport = new E2eeTransport(fakes.deps, options);
+    const snapshot = await transport.loadInitial();
+    expect(snapshot.messages.map((message) => message.id)).toEqual(['a', 'b']);
+    expect(fakes.crypto.decryptIncoming).not.toHaveBeenCalled();
+    await transport.dispose();
+  });
+
   it('déchiffre les messages serveur inconnus au chargement', async () => {
     const unknown = serverMessage('c', '2026-01-01T00:00:03.000Z');
     const fakes = createFakes(SEED, [unknown]);
@@ -252,6 +266,21 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
       expect.objectContaining({ text: 'secret', currentUserId: 'me' }),
     );
     expect(clearUpload).not.toHaveBeenCalled();
+    await transport.dispose();
+  });
+
+  it('remonte l’échec hors ligne sans repli clair ni effacement du brouillon', async () => {
+    const fakes = createFakes(SEED);
+    fakes.crypto.sendEncryptedText.mockRejectedValueOnce(
+      new Error('Connexion au serveur impossible. Vérifie ta connexion.'),
+    );
+    const transport = new E2eeTransport(fakes.deps, options);
+    await expect(transport.sendText('secret hors ligne', null)).rejects.toThrow(
+      'Connexion au serveur impossible',
+    );
+    expect(fakes.crypto.sendEncryptedText).toHaveBeenCalledTimes(1);
+    expect(fakes.db.saveDraft).not.toHaveBeenCalled();
+    expect(transport.mode).toBe('e2ee');
     await transport.dispose();
   });
 
@@ -281,12 +310,87 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     await transport.dispose();
   });
 
-  it('déclare « Reçu » sans jamais rétrograder une lecture connue', async () => {
+  it('applique les accusés chargés après les messages locaux', async () => {
     const fakes = createFakes(SEED);
-    const transport = new E2eeTransport(fakes.deps, options);
-    await transport.loadInitial();
+    fakes.api.listReceipts.mockResolvedValue([
+      {
+        messageId: 'a',
+        userId: 'peer',
+        deliveredAt: '2026-01-01T00:00:03.000Z',
+        readAt: '2026-01-01T00:00:04.000Z',
+      },
+    ] as never);
+    const transport = new E2eeTransport(fakes.deps, { ...options, isPeerOnline: () => true });
     const snapshot = await transport.loadInitial();
-    expect(snapshot.receipts).toEqual({});
+    expect(snapshot.messages.find((message) => message.id === 'a')?.state).toBe('read');
+    await transport.dispose();
+  });
+
+  it('propage l’état de connexion au bandeau hors ligne', async () => {
+    const fakes = createFakes(SEED);
+    fakes.socketDeps.onConnection.mockImplementationOnce((listener) => {
+      listener(false);
+      return () => undefined;
+    });
+    const transport = new E2eeTransport(fakes.deps, options);
+    const states: boolean[] = [];
+    const off = transport.subscribe({
+      onMessage: () => undefined,
+      onMessageRemoved: () => undefined,
+      onReceipts: () => undefined,
+      onReaction: () => undefined,
+      onTyping: () => undefined,
+      onConnection: (online) => states.push(online),
+      onConversationUpdated: () => undefined,
+      onConversationRemoved: () => undefined,
+      onError: () => undefined,
+      onFatal: () => undefined,
+    });
+    expect(states).toEqual([false]);
+    off();
+    await transport.dispose();
+  });
+
+  it('met à jour une bulle à l’arrivée de « Reçu » puis « Ouvert »', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new E2eeTransport(fakes.deps, { ...options, isPeerOnline: () => true });
+    await transport.loadInitial();
+    const received: ChatMessageView[] = [];
+    const off = transport.subscribe({
+      onMessage: (message) => received.push(message),
+      onMessageRemoved: () => undefined,
+      onReceipts: () => undefined,
+      onReaction: () => undefined,
+      onTyping: () => undefined,
+      onConnection: () => undefined,
+      onConversationUpdated: () => undefined,
+      onConversationRemoved: () => undefined,
+      onError: () => undefined,
+      onFatal: () => undefined,
+    });
+    fakes.emitEvent('receipt', {
+      receipts: [
+        {
+          messageId: 'a',
+          userId: 'peer',
+          deliveredAt: '2026-01-01T00:00:03.000Z',
+          readAt: null,
+        },
+      ],
+    });
+    expect(received[received.length - 1]).toMatchObject({ id: 'a', state: 'delivered' });
+    fakes.emitEvent('receipt', {
+      receipts: [
+        {
+          messageId: 'a',
+          userId: 'peer',
+          deliveredAt: '2026-01-01T00:00:03.000Z',
+          readAt: '2026-01-01T00:00:04.000Z',
+        },
+      ],
+    });
+    expect(received[received.length - 1]).toMatchObject({ id: 'a', state: 'read' });
+    off();
     await transport.dispose();
   });
 

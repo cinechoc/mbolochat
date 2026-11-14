@@ -122,6 +122,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   const [online, setOnline] = useState(true);
   const [focused, setFocused] = useState(false);
   const [replyTo, setReplyTo] = useState<MessageQuote | null>(null);
+  const replyToId = replyTo?.id ?? null;
   const [menuFor, setMenuFor] = useState<ChatMessageView | null>(null);
   const [seenFor, setSeenFor] = useState<ChatMessageView | null>(null);
   const [infoFor, setInfoFor] = useState<ChatMessageView | null>(null);
@@ -475,10 +476,13 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
 
   const sendText = useCallback(
     (text: string) => {
-      void transport?.sendText(text, replyTo?.id ?? null);
-      setReplyTo(null);
+      if (!transport) return;
+      void transport
+        .sendText(text, replyToId)
+        .then(() => setReplyTo(null))
+        .catch(() => Alert.alert(fr.e2eeChat.error, fr.chat.unified.failedToSend));
     },
-    [transport, replyTo?.id],
+    [transport, replyToId],
   );
 
   const sendAttachments = useCallback(
@@ -487,25 +491,30 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
       if (files.rejected.length > 0) {
         Alert.alert(fr.chat.picker.filesIgnored(files.rejected.length), files.rejected[0].reason);
       }
-      for (const file of files.files) {
-        await transport.sendMedia(
-          {
-            uri: file.uri,
-            kind: file.kind === 'video' ? 'video' : file.kind === 'file' ? 'file' : 'image',
-            mime: file.mime,
-            name: file.name,
-            size: file.size,
-            width: file.width ?? null,
-            height: file.height ?? null,
-            durationMs: file.durationMs ?? null,
-          },
-          '',
-          replyTo?.id ?? null,
-        );
+      try {
+        for (const file of files.files) {
+          await transport.sendMedia(
+            {
+              uri: file.uri,
+              kind: file.kind === 'video' ? 'video' : file.kind === 'file' ? 'file' : 'image',
+              mime: file.mime,
+              name: file.name,
+              size: file.size,
+              width: file.width ?? null,
+              height: file.height ?? null,
+              durationMs: file.durationMs ?? null,
+            },
+            '',
+            replyToId,
+          );
+        }
+      } catch {
+        Alert.alert(fr.e2eeChat.error, fr.e2eeChat.mediaSendFailed);
+        return;
       }
       setReplyTo(null);
     },
-    [transport, replyTo?.id],
+    [transport, replyToId],
   );
 
   const pickPhotos = useCallback(() => {
@@ -540,11 +549,11 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
           durationMs: null,
         },
         '',
-        replyTo?.id ?? null,
+        replyToId,
       );
       setReplyTo(null);
-    })();
-  }, [transport, replyTo?.id]);
+    })().catch(() => Alert.alert(fr.e2eeChat.error, fr.e2eeChat.mediaSendFailed));
+  }, [transport, replyToId]);
 
   const pickFiles = useCallback(() => {
     void pickDocuments()
@@ -691,178 +700,194 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
         { backgroundColor: chat.screen },
         keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
       ]}>
-      <BlurTarget ref={blurTargetRef} style={styles.flex}>
-        <ChatHeaderBar
-            title={title}
-            subtitle={subtitle}
-            mode={mode}
-            presenceUserId={summary?.type === 'DIRECT' && other ? other.id : undefined}
-            avatar={
-              isGroup && summary ? (
-                <Avatar
-                  name={title}
-                  uri={summary.avatarUrl}
-                  emoji={summary.emoji}
-                  color={summary.color}
-                  variant="group"
-                  size={34}
-                />
-              ) : undefined
-            }
-            onPressTitle={onPressTitle}
-            right={headerRight}
-            blurTarget={blurTargetRef}
-          />
-          <ChatSecurityBanner mode={mode} />
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-            onLayout={(event) => setChatAreaHeight(event.nativeEvent.layout.height)}
-            style={styles.flex}>
-            <ChatMessageList
-              rows={rows}
-              listRef={scroll.listRef}
-              currentUser={currentUser}
-              isGroup={Boolean(isGroup)}
-              capabilities={transport?.capabilities ?? EMPTY_CAPABILITIES}
-              chat={chat}
-              bubbleStyle={bubbleStyle}
-              windowWidth={windowWidth}
-              token={token}
-              resolveQuote={quoteResolver}
-              seenByCountFor={seenByCountFor}
-              onReply={handleReply}
-              onLongPress={setMenuFor}
-              onRetry={handleRetry}
-              onDiscard={handleDiscard}
-              onOpenMedia={openMedia}
-              onOpenAlbum={handleOpenAlbum}
-              onToggleReaction={handleToggleReaction}
-              onPressAvatar={openProfile}
-              onSeenBy={setSeenFor}
-              onScroll={scroll.onScroll}
-              onEndReached={onEndReached}
-              emptyComponent={
-                ready ? (
-                  <ChatEmptyState
-                    avatar={
-                      <Avatar
-                        name={title}
-                        uri={isGroup ? summary?.avatarUrl : other?.avatarUrl}
-                        emoji={isGroup ? summary?.emoji : null}
-                        color={isGroup ? summary?.color : null}
-                        variant={isGroup ? 'group' : 'user'}
-                        gender={isGroup ? null : other?.gender}
-                        size={72}
-                      />
-                    }
-                    title={
-                      isGroup
-                        ? fr.chat.unified.emptyGroupTitle
-                        : fr.chat.unified.emptyDirectTitle
-                    }
-                    text={
-                      isGroup
-                        ? fr.chat.unified.emptyGroupText
-                        : fr.chat.unified.emptyDirectText
-                    }
-                    suggestions={
-                      isGroup
-                        ? fr.chat.unified.emptyGroupSuggestions
-                        : fr.chat.unified.emptySuggestions
-                    }
-                    onSuggestion={(value) => sendText(value)}
-                  />
-                ) : null
-              }
-              viewabilityConfig={mode === 'e2ee' ? READ_VIEWABILITY_CONFIG : undefined}
-              onViewableItemsChanged={mode === 'e2ee' ? onViewableItemsChanged : undefined}
+      <ChatHeaderBar
+        title={title}
+        subtitle={subtitle}
+        mode={mode}
+        presenceUserId={summary?.type === 'DIRECT' && other ? other.id : undefined}
+        avatar={
+          isGroup && summary ? (
+            <Avatar
+              name={title}
+              uri={summary.avatarUrl}
+              emoji={summary.emoji}
+              color={summary.color}
+              variant="group"
+              size={34}
             />
-            {!online ? (
-              <ThemedText
-                type="small"
-                style={[styles.banner, { color: theme.accent }]}
-                accessibilityLiveRegion="polite">
-                {fr.chat.unified.offline}
-              </ThemedText>
-            ) : null}
-            {error ? (
-              <ThemedText
-                type="small"
-                style={[styles.banner, { color: theme.error }]}
-                accessibilityLiveRegion="polite">
-                {error}
-              </ThemedText>
-            ) : null}
-            {typingName ? (
-              <ThemedText
-                type="small"
-                themeColor="textSecondary"
-                style={styles.typing}
-                accessibilityLiveRegion="polite">
-                {fr.chat.unified.typing(typingName)}
-              </ThemedText>
-            ) : null}
-            {scroll.showJump ? (
-              <Pressable
-                onPress={scroll.jumpToBottom}
-                accessibilityRole="button"
-                accessibilityLabel={fr.chat.unified.jumpToLatest}
-                style={[styles.jump, { backgroundColor: theme.backgroundElement }]}>
-                <ChevronDown size={24} color={theme.accent} />
-              </Pressable>
-            ) : null}
-            {transport ? (
-              <ChatInputBar
-                transport={transport}
-                capabilities={transport.capabilities}
-                composerTheme={{
-                  inputBg: chat.input,
-                  inputText: chat.primaryText,
-                  placeholder: chat.inputPlaceholder,
-                  panelBg: chat.composer,
-                  text: chat.primaryText,
-                  subtle: chat.secondaryText,
-                  icon: chat.composerIcon,
-                  border: chat.border,
-                  accent: chat.send,
-                  accentText: chat.sendText,
-                  sendBg: chat.send,
-                }}
-                blurTarget={blurTargetRef}
-                replyTo={replyTo}
-                onCancelReply={() => setReplyTo(null)}
-                blockedText={blockedText}
-                bottomInset={insets.bottom}
-                availableHeight={chatAreaHeight > 0 ? chatAreaHeight : undefined}
-                mentionCandidates={
-                  isGroup && summary
-                    ? summary.members
-                        .filter((member) => member.id !== user.id)
-                        .map((member) => ({
-                          id: member.id,
-                          username: member.username,
-                          displayName: member.displayName,
-                        }))
-                    : undefined
-                }
-                recentGifs={[]}
-                onSendText={sendText}
-                onSendSticker={(ref) => void transport.sendSticker(ref)}
-                onSendPersonalSticker={(sticker) => void transport.sendPersonalSticker(sticker)}
-                onSendGif={(gif) => void transport.sendGif(gif)}
-                onSendVoice={(note) => void transport.sendVoice(note)}
-                onPickPhotos={pickPhotos}
-                onPickCamera={pickCamera}
-                onPickDocuments={pickFiles}
-                onVoicePermissionDenied={() =>
-                  Alert.alert(fr.chat.picker.micDeniedTitle, fr.chat.picker.micDeniedBody)
-                }
-                onVoiceError={() => Alert.alert(fr.e2eeChat.error, fr.e2eeChat.mediaSendFailed)}
-              />
-            ) : null}
-          </KeyboardAvoidingView>
+          ) : undefined
+        }
+        onPressTitle={onPressTitle}
+        right={headerRight}
+        blurTarget={blurTargetRef}
+      />
+      <ChatSecurityBanner mode={mode} />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        onLayout={(event) => setChatAreaHeight(event.nativeEvent.layout.height)}
+        style={styles.flex}>
+        <BlurTarget ref={blurTargetRef} style={styles.flex}>
+          <ChatMessageList
+            rows={rows}
+            listRef={scroll.listRef}
+            currentUser={currentUser}
+            isGroup={Boolean(isGroup)}
+            capabilities={transport?.capabilities ?? EMPTY_CAPABILITIES}
+            chat={chat}
+            bubbleStyle={bubbleStyle}
+            windowWidth={windowWidth}
+            token={token}
+            resolveQuote={quoteResolver}
+            seenByCountFor={seenByCountFor}
+            onReply={handleReply}
+            onLongPress={setMenuFor}
+            onRetry={handleRetry}
+            onDiscard={handleDiscard}
+            onOpenMedia={openMedia}
+            onOpenAlbum={handleOpenAlbum}
+            onToggleReaction={handleToggleReaction}
+            onPressAvatar={openProfile}
+            onSeenBy={setSeenFor}
+            onScroll={scroll.onScroll}
+            onEndReached={onEndReached}
+            emptyComponent={
+              ready ? (
+                <ChatEmptyState
+                  avatar={
+                    <Avatar
+                      name={title}
+                      uri={isGroup ? summary?.avatarUrl : other?.avatarUrl}
+                      emoji={isGroup ? summary?.emoji : null}
+                      color={isGroup ? summary?.color : null}
+                      variant={isGroup ? 'group' : 'user'}
+                      gender={isGroup ? null : other?.gender}
+                      size={72}
+                    />
+                  }
+                  title={
+                    isGroup
+                      ? fr.chat.unified.emptyGroupTitle
+                      : fr.chat.unified.emptyDirectTitle
+                  }
+                  text={
+                    isGroup
+                      ? fr.chat.unified.emptyGroupText
+                      : fr.chat.unified.emptyDirectText
+                  }
+                  suggestions={
+                    isGroup
+                      ? fr.chat.unified.emptyGroupSuggestions
+                      : fr.chat.unified.emptySuggestions
+                  }
+                  onSuggestion={(value) => sendText(value)}
+                />
+              ) : null
+            }
+            viewabilityConfig={mode === 'e2ee' ? READ_VIEWABILITY_CONFIG : undefined}
+            onViewableItemsChanged={mode === 'e2ee' ? onViewableItemsChanged : undefined}
+          />
         </BlurTarget>
+        {!online ? (
+          <ThemedText
+            type="small"
+            style={[styles.banner, { color: theme.accent }]}
+            accessibilityLiveRegion="polite">
+            {mode === 'e2ee' ? fr.chat.unified.offlineEncrypted : fr.chat.unified.offline}
+          </ThemedText>
+        ) : null}
+        {error ? (
+          <ThemedText
+            type="small"
+            style={[styles.banner, { color: theme.error }]}
+            accessibilityLiveRegion="polite">
+            {error}
+          </ThemedText>
+        ) : null}
+        {typingName ? (
+          <ThemedText
+            type="small"
+            themeColor="textSecondary"
+            style={styles.typing}
+            accessibilityLiveRegion="polite">
+            {fr.chat.unified.typing(typingName)}
+          </ThemedText>
+        ) : null}
+        {scroll.showJump ? (
+          <Pressable
+            onPress={scroll.jumpToBottom}
+            accessibilityRole="button"
+            accessibilityLabel={fr.chat.unified.jumpToLatest}
+            style={[styles.jump, { backgroundColor: theme.backgroundElement }]}>
+            <ChevronDown size={24} color={theme.accent} />
+          </Pressable>
+        ) : null}
+        {transport ? (
+          <ChatInputBar
+            transport={transport}
+            capabilities={transport.capabilities}
+            composerTheme={{
+              inputBg: chat.input,
+              inputText: chat.primaryText,
+              placeholder: chat.inputPlaceholder,
+              panelBg: chat.composer,
+              text: chat.primaryText,
+              subtle: chat.secondaryText,
+              icon: chat.composerIcon,
+              border: chat.border,
+              accent: chat.send,
+              accentText: chat.sendText,
+              sendBg: chat.send,
+            }}
+            blurTarget={blurTargetRef}
+            replyTo={replyTo}
+            onCancelReply={() => setReplyTo(null)}
+            blockedText={blockedText}
+            bottomInset={insets.bottom}
+            availableHeight={chatAreaHeight > 0 ? chatAreaHeight : undefined}
+            mentionCandidates={
+              isGroup && summary
+                ? summary.members
+                    .filter((member) => member.id !== user.id)
+                    .map((member) => ({
+                      id: member.id,
+                      username: member.username,
+                      displayName: member.displayName,
+                    }))
+                : undefined
+            }
+            recentGifs={[]}
+            onSendText={sendText}
+            onSendSticker={(ref) =>
+              void transport
+                .sendSticker(ref)
+                .catch(() => Alert.alert(fr.e2eeChat.error, fr.chat.unified.failedToSend))
+            }
+            onSendPersonalSticker={(sticker) =>
+              void transport
+                .sendPersonalSticker(sticker)
+                .catch(() => Alert.alert(fr.e2eeChat.error, fr.chat.unified.failedToSend))
+            }
+            onSendGif={(gif) =>
+              void transport
+                .sendGif(gif)
+                .catch(() => Alert.alert(fr.e2eeChat.error, fr.chat.unified.failedToSend))
+            }
+            onSendVoice={(note) =>
+              void transport
+                .sendVoice(note)
+                .catch(() => Alert.alert(fr.e2eeChat.error, fr.e2eeChat.mediaSendFailed))
+            }
+            onPickPhotos={pickPhotos}
+            onPickCamera={pickCamera}
+            onPickDocuments={pickFiles}
+            onVoicePermissionDenied={() =>
+              Alert.alert(fr.chat.picker.micDeniedTitle, fr.chat.picker.micDeniedBody)
+            }
+            onVoiceError={() => Alert.alert(fr.e2eeChat.error, fr.e2eeChat.mediaSendFailed)}
+          />
+        ) : null}
+      </KeyboardAvoidingView>
 
       <ActionSheet
         visible={menuFor !== null}

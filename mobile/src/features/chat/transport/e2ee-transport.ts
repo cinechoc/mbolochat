@@ -98,10 +98,24 @@ export class E2eeTransport implements ChatTransport {
       .listReceipts(this.token, this.conversationId)
       .catch(() => [] as MessageReceipt[]);
     this.receipts = this.deps.receipts.mergeReceipts(this.receipts, knownReceipts);
+    // Les messages locaux ont été absorbés avant l'arrivée des accusés : il
+    // faut recalculer leur état pour afficher « Reçu » ou « Ouvert » dès le
+    // chargement, sans attendre un nouvel événement socket.
+    for (const stored of this.stored.values()) {
+      this.render(stored);
+    }
 
-    const history = await this.deps.api.listMessages(this.token, this.conversationId, {
-      limit: 50,
-    });
+    // Le serveur peut être indisponible alors que SQLCipher contient déjà
+    // l'historique. Dans ce cas on rend le snapshot local au lieu de perdre
+    // l'écran ; la reconnexion socket apportera les messages manquants.
+    let history: Message[] = [];
+    try {
+      history = await this.deps.api.listMessages(this.token, this.conversationId, {
+        limit: 50,
+      });
+    } catch {
+      history = [];
+    }
     const known = await this.deps.db.knownMessageKeys(db, this.conversationId);
     for (const message of history) {
       if (message.encryption !== 'v1') continue;
@@ -147,14 +161,32 @@ export class E2eeTransport implements ChatTransport {
     const onReceipt = (payload: ReceiptPayload) => {
       if (!Array.isArray(payload?.receipts) || payload.receipts.length === 0) return;
       this.receipts = this.deps.receipts.mergeReceipts(this.receipts, payload.receipts);
+      // L'accusé modifie l'état de la bulle elle-même : `onReceipts` ne sert
+      // qu'aux compteurs « Vu par ». Sans cet upsert, une coche « Reçu » ou
+      // « Ouvert » n'apparaîtrait qu'après un rechargement complet.
+      const refreshed = new Set<string>();
+      for (const receipt of payload.receipts) {
+        if (typeof receipt?.messageId !== 'string' || refreshed.has(receipt.messageId)) {
+          continue;
+        }
+        refreshed.add(receipt.messageId);
+        const stored = this.stored.get(receipt.messageId);
+        if (stored) {
+          this.handlers?.onMessage(this.render(stored));
+        }
+      }
       this.handlers?.onReceipts(payload.receipts);
     };
     socket.on('message:new', onMessage);
     socket.on('receipt', onReceipt);
+    const offConnection = this.deps.socket.onConnection((online) =>
+      this.handlers?.onConnection(online),
+    );
     void this.deps.socket.ensureSocket(this.token).catch(() => undefined);
     this.cleanups.push(() => {
       socket.off('message:new', onMessage);
       socket.off('receipt', onReceipt);
+      offConnection();
     });
     return () => this.unsubscribe();
   }
@@ -347,15 +379,21 @@ export class E2eeTransport implements ChatTransport {
   private absorb(stored: StoredE2eeMessage, emit: boolean): ChatMessageView {
     const existed = this.stored.has(stored.id);
     this.stored.set(stored.id, stored);
+    const view = this.render(stored);
+    if (emit && !existed) {
+      this.handlers?.onMessage(view);
+    }
+    return view;
+  }
+
+  /** Recalcule la vue d'un message déjà connu, sans le signaler comme nouveau. */
+  private render(stored: StoredE2eeMessage): ChatMessageView {
     const view = storedMessageToView(stored, {
       currentUser: this.currentUser,
       peer: this.peer,
       state: this.deliveryOf(stored),
     });
     this.index.upsert(view);
-    if (emit && !existed) {
-      this.handlers?.onMessage(view);
-    }
     return view;
   }
 
