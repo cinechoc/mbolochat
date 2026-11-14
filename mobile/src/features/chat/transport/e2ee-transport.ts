@@ -292,7 +292,7 @@ export class E2eeTransport implements ChatTransport {
       throw new Error('Transfert refusé : la cible doit être une conversation chiffrée directe.');
     }
     const { db, account } = await this.credentials();
-    await this.deps.crypto.sendEncryptedText({
+    const result = await this.deps.crypto.sendEncryptedText({
       token: this.token,
       db,
       account,
@@ -300,6 +300,11 @@ export class E2eeTransport implements ChatTransport {
       currentUserId: this.currentUser.id,
       currentUserName: this.currentUser.displayName,
       text,
+    });
+    this.deps.cache.patchConversation({
+      ...target,
+      lastMessage: result.serverMessage,
+      updatedAt: result.serverMessage.createdAt,
     });
   }
 

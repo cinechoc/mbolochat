@@ -759,6 +759,7 @@ function LegacyE2eeChatScreen() {
           cause instanceof Error ? cause.message : '',
         );
       }
+      throw cause;
     } finally {
       setSending(false);
     }
@@ -1405,7 +1406,7 @@ function LegacyE2eeChatScreen() {
           key={composerKey}
           blurTarget={blurTargetRef}
           initialText={draft}
-          onSendText={(value) => void sendText(value)}
+          onSendText={(value) => sendText(value)}
           // Les stickers et GIF ne sont pas encore envoyés en chiffré : les
           // onglets correspondants ne sont pas proposés (aucune fausse
           // promesse), et ces rappels ne peuvent pas être atteints.

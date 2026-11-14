@@ -72,6 +72,8 @@ export const fr = {
       callsUnavailableTitle: 'Appels pas encore chiffrés',
       callsUnavailableBody:
         'Cette conversation est chiffrée : aucun appel non chiffré ne peut être lancé.',
+      callCheckFailed:
+        'Impossible de vérifier le chiffrement de cette conversation. Aucun appel ne sera lancé.',
       messageOptions: 'Options du message',
       deletedMessage: 'Message supprimé',
       unreadableMessage: 'Message non pris en charge. Mets ton application à jour.',

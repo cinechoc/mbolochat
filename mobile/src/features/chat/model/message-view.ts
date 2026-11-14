@@ -43,6 +43,8 @@ function classicAttachment(message: Message): ChatAttachmentView | null {
     width: attachment.width ?? null,
     height: attachment.height ?? null,
     durationMs: attachment.duration ?? null,
+    stickerId: attachment.stickerId ?? null,
+    stickerPackId: attachment.stickerPackId ?? null,
     stickerName: attachment.stickerName ?? null,
     giphy:
       attachment.type === 'GIF'
@@ -119,6 +121,8 @@ export function storedMessageToView(
         width: media.width ?? null,
         height: media.height ?? null,
         durationMs: media.duration ?? null,
+        stickerId: null,
+        stickerPackId: null,
         stickerName: null,
         giphy: null,
       }

@@ -21,6 +21,7 @@ export const CLASSIC_DEPS: ClassicTransportDeps = {
 
 export const E2EE_DEPS: E2eeTransportDeps = {
   api,
+  cache,
   socket,
   db: e2eeDb,
   crypto: {

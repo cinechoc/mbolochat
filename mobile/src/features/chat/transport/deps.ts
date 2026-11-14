@@ -67,6 +67,7 @@ type E2eeReceiptsModule = typeof import('@/features/e2ee/receipts');
  */
 export interface E2eeTransportDeps {
   api: Pick<ApiModule['api'], 'listMessages' | 'listReceipts' | 'markMessagesRead'>;
+  cache: Pick<CacheModule['cache'], 'patchConversation'>;
   socket: Pick<
     SocketModule,
     'connectSocket' | 'ensureSocket' | 'onConnection' | 'reportDelivered' | 'deleteMessage'

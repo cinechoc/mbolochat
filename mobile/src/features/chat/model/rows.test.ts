@@ -49,6 +49,8 @@ const image = (id: string, createdAt: string, senderId = 'peer', body = ''): Cha
       width: 100,
       height: 100,
       durationMs: null,
+      stickerId: null,
+      stickerPackId: null,
       stickerName: null,
       giphy: null,
     },

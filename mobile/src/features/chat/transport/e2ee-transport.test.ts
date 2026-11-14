@@ -191,12 +191,14 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
     deliveredIds,
     canReportDelivered,
   };
+  const cache = { patchConversation: vi.fn() };
   const deps: E2eeTransportDeps = {
     api: api as unknown as E2eeTransportDeps['api'],
     socket: socketDeps as unknown as E2eeTransportDeps['socket'],
     db: db as unknown as E2eeTransportDeps['db'],
     crypto: crypto as unknown as E2eeTransportDeps['crypto'],
     receipts: receipts as unknown as E2eeTransportDeps['receipts'],
+    cache: cache as unknown as E2eeTransportDeps['cache'],
     clock: () => 0,
   };
   const emitEvent = (event: string, ...args: unknown[]) => {
@@ -204,7 +206,7 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
       handler(...args);
     }
   };
-  return { deps, db, crypto, api, socketDeps, emitEvent, fakeDb };
+  return { deps, db, crypto, api, socketDeps, cache, emitEvent, fakeDb };
 }
 
 runTransportContract({
@@ -411,6 +413,13 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     await transport.forwardText(target, 'à transférer');
     expect(fakes.crypto.sendEncryptedText).toHaveBeenCalledWith(
       expect.objectContaining({ text: 'à transférer', conversation: target }),
+    );
+    expect(fakes.cache.patchConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'target-1',
+        lastMessage: expect.objectContaining({ id: 'sent-1' }),
+        updatedAt: '2026-01-01T00:00:09.000Z',
+      }),
     );
     await expect(
       transport.forwardText(summary({ id: 'target-2', e2eeSince: null }), 'interdit'),

@@ -42,6 +42,7 @@ import { Radii, Type, type ThemePalette, type ThemeScheme } from '@/constants/th
 import { Glass } from '@/components/glass';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemePreference } from '@/lib/theme-preference';
+import { restoreFailedText } from './failed-text';
 
 export type ComposerTheme = PanelTheme & {
   inputBg: string;
@@ -75,7 +76,7 @@ export function composerThemeFor(theme: ThemePalette, scheme: ThemeScheme): Comp
 type Panel = 'none' | 'emoji' | 'plus';
 
 type Props = {
-  onSendText: (text: string) => void;
+  onSendText: (text: string) => void | Promise<void>;
   /** Référence « pack/sticker » à envoyer comme message sticker. */
   onSendSticker: (ref: string) => void;
   /** Sticker personnel : l'image locale est importée puis envoyée comme sticker. */
@@ -267,11 +268,20 @@ export function ChatComposer({
     commit(result.text, result.cursor);
   }, [commit]);
 
-  const handleSend = useCallback(() => {
+  const sendingRef = useRef(false);
+  const handleSend = useCallback(async () => {
     const value = textRef.current.trim();
-    if (!value) return;
-    onSendText(value);
+    if (!value || sendingRef.current) return;
+    sendingRef.current = true;
     commit('', 0);
+    try {
+      await onSendText(value);
+    } catch {
+      const restored = restoreFailedText(textRef.current, value);
+      commit(restored, restored.length);
+    } finally {
+      sendingRef.current = false;
+    }
   }, [commit, onSendText]);
 
   const handleSelectionChange = useCallback(

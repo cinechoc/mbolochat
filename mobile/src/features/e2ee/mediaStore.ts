@@ -4,6 +4,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
 import { refreshAccessToken } from '@/lib/token-refresh';
+import { isUnauthorizedDownload } from './downloadError';
 import { API_URL } from '@/lib/config';
 import {
   isDurableMediaReferenced,
@@ -166,15 +167,6 @@ export interface OpenForViewInput {
   blob: EncryptedBlob;
   /** Type MIME du clair, pour nommer le fichier déchiffré. */
   mime: string;
-}
-
-/**
- * Un refus 401 sur un téléchargement direct signifie que l'access token a
- * expiré : la couche API le rafraîchit, puis on rejoue une seule fois. Les
- * autres échecs (réseau, 404) ne doivent pas déclencher de refresh.
- */
-function isUnauthorizedDownload(cause: unknown): boolean {
-  return cause instanceof Error && /status:\s*401\b/.test(cause.message);
 }
 
 async function downloadCiphertext(

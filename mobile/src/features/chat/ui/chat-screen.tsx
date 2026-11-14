@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
-import { ChevronDown, Phone, Video } from 'lucide-react-native';
+import { ChevronDown, Phone, Star, StarOff, Video } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
   Alert,
@@ -50,6 +50,13 @@ import { getPresenceRecord } from '@/features/presence/presenceStore';
 import { REACTION_STICKERS, onConnection } from '@/lib/socket';
 import { StickerView } from '@/features/stickers/StickerView';
 import { findSticker } from '@/features/stickers/stickerPacks';
+import {
+  receivedStickerId,
+  receivedStickerSeed,
+  saveReceivedSticker,
+  toggleStickerFavorite,
+} from '@/features/stickers/stickerLibrary';
+import { useStickerLibrary } from '@/features/stickers/useStickerLibrary';
 import { copyToClipboard } from '@/lib/clipboard';
 import { conversationTitle } from '@/lib/format';
 import type { ConversationSummary, MessageQuote, MessageReceipt } from '@/lib/types';
@@ -119,6 +126,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   const theme = useTheme();
   const chat = useChatColors();
   const calls = useCalls();
+  const stickerLibrary = useStickerLibrary();
   const [online, setOnline] = useState(true);
   const [focused, setFocused] = useState(false);
   const [replyTo, setReplyTo] = useState<MessageQuote | null>(null);
@@ -380,9 +388,94 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     [token, conversationId],
   );
 
+  type StickerMenuTarget =
+    | { kind: 'catalog'; key: string }
+    | { kind: 'personal'; key: string }
+    | {
+        kind: 'received';
+        key: string;
+        attachment: NonNullable<ChatMessageView['attachment']>;
+        saved: boolean;
+      };
+
+  const stickerMenuTarget = useMemo<StickerMenuTarget | null>(() => {
+    const message = menuFor;
+    if (!message) return null;
+    if (message.type === 'sticker' && message.stickerRef && findSticker(message.stickerRef)) {
+      return { kind: 'catalog', key: message.stickerRef };
+    }
+    const attachment = message.attachment;
+    if (attachment?.type !== 'STICKER' || !attachment.url) return null;
+    const local =
+      message.mine && attachment.stickerId
+        ? stickerLibrary.personal.find((sticker) => sticker.id === attachment.stickerId)
+        : undefined;
+    if (local) {
+      return { kind: 'personal', key: local.id };
+    }
+    const key = receivedStickerId(
+      receivedStickerSeed({
+        stickerPackId: attachment.stickerPackId ?? undefined,
+        stickerId: attachment.stickerId ?? undefined,
+        url: attachment.url,
+      }),
+    );
+    return {
+      kind: 'received',
+      key,
+      attachment,
+      saved: stickerLibrary.personal.some((sticker) => sticker.id === key),
+    };
+  }, [menuFor, stickerLibrary.personal]);
+
+  const stickerIsFavorite = stickerMenuTarget
+    ? stickerLibrary.favorites.includes(stickerMenuTarget.key)
+    : false;
+
+  const toggleStickerFromMenu = useCallback(async () => {
+    const target = stickerMenuTarget;
+    if (!target) return;
+    setMenuFor(null);
+    try {
+      if (target.kind === 'received' && !target.saved) {
+        await saveReceivedSticker({
+          url: mediaUrl(target.attachment.url as string),
+          name: target.attachment.stickerName ?? target.attachment.name ?? undefined,
+          mime: target.attachment.mime ?? undefined,
+          width: target.attachment.width ?? undefined,
+          height: target.attachment.height ?? undefined,
+          seed: receivedStickerSeed({
+            stickerPackId: target.attachment.stickerPackId ?? undefined,
+            stickerId: target.attachment.stickerId ?? undefined,
+            url: target.attachment.url as string,
+          }),
+        });
+        Alert.alert(fr.chat.sticker.addedTitle, fr.chat.sticker.addedBody);
+        return;
+      }
+      const added = await toggleStickerFavorite(target.key);
+      if (added) {
+        Alert.alert(fr.chat.sticker.addedTitle, fr.chat.sticker.addedBody);
+      }
+    } catch (favoriteError) {
+      Alert.alert(
+        fr.chat.sticker.unavailableTitle,
+        favoriteError instanceof Error ? favoriteError.message : fr.chat.sticker.unavailableBody,
+      );
+    }
+  }, [stickerMenuTarget]);
+
   const extraActions = useMemo<SheetAction[]>(() => {
     if (!menuFor || !transport) return [];
     const actions: SheetAction[] = [];
+    if (!transport.capabilities.encrypted && stickerMenuTarget) {
+      actions.push({
+        key: 'sticker-favorite',
+        label: stickerIsFavorite ? fr.chat.menu.removeFavorite : fr.chat.menu.addFavorite,
+        icon: stickerIsFavorite ? StarOff : Star,
+        onPress: () => void toggleStickerFromMenu(),
+      });
+    }
     if (
       transport.capabilities.forwarded &&
       menuFor.body &&
@@ -403,7 +496,14 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
       });
     }
     return actions;
-  }, [menuFor, transport, openForward]);
+  }, [
+    menuFor,
+    transport,
+    openForward,
+    stickerMenuTarget,
+    stickerIsFavorite,
+    toggleStickerFromMenu,
+  ]);
 
   const menuActions = useChatActions({
     message: menuFor,
@@ -475,12 +575,15 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   );
 
   const sendText = useCallback(
-    (text: string) => {
+    async (text: string) => {
       if (!transport) return;
-      void transport
-        .sendText(text, replyToId)
-        .then(() => setReplyTo(null))
-        .catch(() => Alert.alert(fr.e2eeChat.error, fr.chat.unified.failedToSend));
+      try {
+        await transport.sendText(text, replyToId);
+        setReplyTo(null);
+      } catch (error) {
+        Alert.alert(fr.e2eeChat.error, fr.chat.unified.failedToSend);
+        throw error;
+      }
     },
     [transport, replyToId],
   );

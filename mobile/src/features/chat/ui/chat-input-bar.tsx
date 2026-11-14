@@ -25,7 +25,7 @@ export interface ChatInputBarProps {
   availableHeight?: number;
   mentionCandidates?: { id: string; username: string; displayName: string }[];
   recentGifs: RecentGif[];
-  onSendText: (text: string) => void;
+  onSendText: (text: string) => void | Promise<void>;
   onSendSticker: (ref: string) => void;
   onSendPersonalSticker: (sticker: PersonalSticker) => void;
   onSendGif: (gif: RecentGif) => void;
@@ -112,10 +112,7 @@ export function ChatInputBar({
         bottomInset={bottomInset}
         availableHeight={availableHeight}
         sections={capabilities.stickers || capabilities.gifs ? undefined : ['emoji']}
-        onSendText={(text) => {
-          onSendText(text);
-          remount();
-        }}
+        onSendText={onSendText}
         onSendSticker={(ref) => {
           if (!capabilities.stickers) return;
           onSendSticker(ref);

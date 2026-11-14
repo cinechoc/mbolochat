@@ -28,6 +28,8 @@ import { buildIceServers, ensureIceServers, type IceServerConfig } from '@/lib/i
 import { onConnection, connectSocket } from '@/lib/socket';
 import { useAuth } from '@/lib/auth-context';
 import { getAppPreferences } from '@/lib/app-preferences';
+import { api } from '@/lib/api';
+import { fr } from '@/i18n/fr';
 import * as Haptics from 'expo-haptics';
 import { setSpeakerphone, startCallAudio, stopCallAudio } from './audioRoute';
 import { startIncomingRing, startOutgoingRing, stopRing } from './ringtone';
@@ -40,6 +42,7 @@ import {
 } from './engine/PeerStats';
 import { IDLE_SPEAKING, updateSpeaking, type SpeakingState } from './engine/speaking';
 import { interpretVideoToggleAck } from './engine/videoPolicy';
+import { guardDirectCall } from './directCallGuard';
 import {
   VIDEO_TUNING,
   decideVideoTier,
@@ -941,6 +944,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const startCall = useCallback(
     async (conversationId: string, options?: { video?: boolean }) => {
       if (statusRef.current !== 'idle' || !token) {
+        return;
+      }
+      let summary;
+      try {
+        summary = await api.getConversation(token, conversationId);
+      } catch {
+        Alert.alert(fr.e2eeChat.error, fr.chat.unified.callCheckFailed);
+        return;
+      }
+      if (guardDirectCall(summary) === 'encrypted') {
+        Alert.alert(fr.e2eeChat.callsUnavailableTitle, fr.e2eeChat.callsUnavailableBody);
         return;
       }
       const media = getMedia();

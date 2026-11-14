@@ -104,6 +104,10 @@ export interface ChatAttachmentView {
   width: number | null;
   height: number | null;
   durationMs: number | null;
+  /** Identifiant local d'un sticker personnel, null pour un sticker reçu. */
+  stickerId: string | null;
+  /** Pack d'origine d'un sticker personnel. */
+  stickerPackId: string | null;
   stickerName: string | null;
   giphy: {
     giphyId: string | null;
