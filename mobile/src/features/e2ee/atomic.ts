@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import {
+  pruneUnknownPayloadsWith,
   saveE2eeAccountWith,
   saveLocalMessageWith,
   savePeerSigningKeyWith,
@@ -318,6 +319,9 @@ export async function persistIncoming(
       await addDeletionTombstone(tx, input.deletion);
     }
     await saveLocalMessageWith(tx, input.message);
+    if (input.message.content_kind === 'unknown') {
+      await pruneUnknownPayloadsWith(tx, input.message.conversation_id);
+    }
     if (input.message.hidden !== 1) {
       const tombstoned = await hasDeletionTombstone(
         tx,

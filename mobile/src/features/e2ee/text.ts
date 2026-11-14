@@ -10,6 +10,7 @@ import {
   loadLocalMessage,
   loadPeerSigningKey,
   loadSession,
+  MAX_UNKNOWN_PAYLOAD_CHARS,
   renameLocalMessage,
   saveLocalMessage,
   savePeerSigningKey,
@@ -702,7 +703,10 @@ async function finalizeUnreadable(
     unreadable_reason: reason,
     hidden: 1,
     content_kind: 'unknown',
-    raw_payload: opened.plaintextB64,
+    // Un contenu futur trop volumineux n'est jamais conservé brut : la ligne
+    // masquée suffit à l'idempotence et à l'avancement Olm.
+    raw_payload:
+      opened.plaintextB64.length <= MAX_UNKNOWN_PAYLOAD_CHARS ? opened.plaintextB64 : null,
   };
   await persistIncoming({
     db,

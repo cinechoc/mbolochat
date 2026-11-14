@@ -117,7 +117,10 @@ langue, la longueur ni le contenu du message.
   après une suppression est écrite puis immédiatement vidée dans la même transaction.
 - Doublon : l’identifiant serveur unique empêche de rejouer l’événement ; l’agrégat
   de réactions reste idempotent même si un pair renvoie plusieurs fois la même action.
-- Type inconnu : version future ou `kind` inconnu masqué, payload brut conservé en
-  SQLCipher, message suivant déchiffrable car la session a avancé.
+- Type inconnu : version future ou `kind` inconnu masqué. Le payload brut n’est
+  conservé en SQLCipher que s’il fait au plus 16 Kio, pour les 20 contenus inconnus
+  les plus récents de la conversation ; les plus anciens sont élagués et une
+  suppression pour tous efface le brut. Le message suivant reste déchiffrable car
+  la session a avancé.
 - Un client ancien qui ignore `v:4` ou `v:5` ne doit pas casser : il les traite comme
   des contenus illisibles masqués. Les `v:1` à `v:3` restent strictement identiques.

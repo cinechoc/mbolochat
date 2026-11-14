@@ -35,7 +35,11 @@ export async function applyDeleteForAll(
     conversationId,
   );
   if (!row) return { exists: false, applied: false, refs: null };
-  if (row.sender_id !== authorId || row.deleted === 1 || row.content_kind !== null) {
+  // Les lignes de contrôle (réaction, suppression) ne sont jamais des cibles.
+  // Un contenu de type inconnu, lui, reste un message : sa suppression doit
+  // aussi purger le payload brut conservé dans SQLCipher.
+  const deletable = row.content_kind === null || row.content_kind === 'unknown';
+  if (row.sender_id !== authorId || row.deleted === 1 || !deletable) {
     return { exists: true, applied: false, refs: null };
   }
   const refs: LocalMediaRefs = {

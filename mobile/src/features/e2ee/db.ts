@@ -255,6 +255,34 @@ export async function savePeerSigningKeyWith(
   );
 }
 
+/** Plafond du payload brut conservé pour un type futur : 16 Kio encodés. */
+export const MAX_UNKNOWN_PAYLOAD_CHARS = 16 * 1024;
+/** Nombre de payloads inconnus dont le brut est conservé par conversation. */
+export const MAX_UNKNOWN_PAYLOADS_PER_CONVERSATION = 20;
+
+/**
+ * Élague les payloads inconnus les plus anciens au-delà du plafond. Les lignes
+ * restent (idempotence, avancement Olm) ; seul le brut est retiré, dans la même
+ * transaction que l'arrivée du nouveau message.
+ */
+export async function pruneUnknownPayloadsWith(
+  writer: SqlWriter,
+  conversationId: string,
+): Promise<void> {
+  await writer.runAsync(
+    `UPDATE e2ee_messages SET raw_payload = NULL
+      WHERE id IN (
+        SELECT id FROM e2ee_messages
+         WHERE conversation_id = ? AND content_kind = 'unknown'
+           AND raw_payload IS NOT NULL
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT -1 OFFSET ?
+      )`,
+    conversationId,
+    MAX_UNKNOWN_PAYLOADS_PER_CONVERSATION,
+  );
+}
+
 export interface StoredE2eeMessage {
   id: string;
   conversation_id: string;

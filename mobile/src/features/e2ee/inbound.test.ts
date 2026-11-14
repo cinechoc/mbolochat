@@ -5,7 +5,15 @@ import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
 import { api } from '@/lib/api';
 import type { Message } from '@/lib/types';
 import { persistIncoming } from './atomic';
-import { listLocalMessages, listLocalMessagesBefore, loadReactionSummaries, type E2eeAccountRow } from './db';
+import {
+  listLocalMessages,
+  listLocalMessagesBefore,
+  loadReactionSummaries,
+  MAX_UNKNOWN_PAYLOAD_CHARS,
+  MAX_UNKNOWN_PAYLOADS_PER_CONVERSATION,
+  type E2eeAccountRow,
+  type E2eeSessionRow,
+} from './db';
 import * as socketModule from '@/lib/socket';
 import { migrateE2eeSchema } from './schema';
 import { decryptEnvelope, decryptIncoming } from './text';
@@ -1120,6 +1128,37 @@ describe('déchiffrement entrant — suppression pour tous v5', () => {
     ]);
   });
 
+  it('purge le payload d’un contenu inconnu supprimé par son auteur', async () => {
+    const fixture = await seeded();
+    await fixture.handle.runAsync(
+      `INSERT INTO e2ee_messages
+         (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
+          hidden, content_kind, raw_payload)
+       VALUES ('u1', 'conv-1', 'peer-1', 'Pair', '', '2026-01-01T00:00:00Z', NULL, 0,
+               1, 'unknown', 'contenu-futur')`,
+    );
+    cryptoMock.secureDecrypt.mockResolvedValueOnce(decryptedDelete('S1', 'u1') as never);
+
+    const result = await decrypt(fixture, incoming({ id: 'd1' }));
+
+    expect(result.deletionEvent).toMatchObject({ applied: true, targetId: 'u1' });
+    expect(
+      read(
+        fixture,
+        `SELECT raw_payload, deleted, deleted_by, hidden, content_kind
+           FROM e2ee_messages WHERE id = 'u1'`,
+      ),
+    ).toEqual([
+      {
+        raw_payload: null,
+        deleted: 1,
+        deleted_by: 'peer-1',
+        hidden: 1,
+        content_kind: 'unknown',
+      },
+    ]);
+  });
+
   it('ignore une suppression demandée par un autre auteur', async () => {
     const fixture = await seeded([
       { peer: 'peer-1', device: 'dev-1', pickle: 'S0' },
@@ -1274,7 +1313,8 @@ describe('message authentifié mais illisible — le ratchet avance quand même'
     expect(result.text).toBe('');
     expect(result.media).toBeUndefined();
     expect(result.stickerRef).toBeUndefined();
-    // Rien du payload n'est conservé : le message est un marqueur, pas un contenu.
+    // Le brut reste en SQLCipher, borné, pour un client futur ; l'affichage
+    // ne voit qu'un marqueur.
     expect(messageRow(fixture, 'm1')).toEqual([
       {
         body: '',
@@ -1370,6 +1410,82 @@ describe('message authentifié mais illisible — le ratchet avance quand même'
     const retried = await decrypt(fixture, incoming({ id: 'm1', payload: 'X' }));
     expect(retried.text).toBe('X');
     expect(state.current).toBe('S0+1');
+  });
+
+  it('conserve le payload inconnu sous le plafond de taille', async () => {
+    const fixture = await seeded();
+    const payload = plainOf({ v: 99, kind: 'future', texte: 'gardé' });
+    cryptoMock.secureDecrypt.mockResolvedValue(unreadableOf('S1', payload) as never);
+
+    const result = await decrypt(fixture, incoming({ id: 'm1' }));
+
+    expect(result.unreadableReason).toBe('unsupported_version');
+    expect(read(fixture, 'SELECT raw_payload FROM e2ee_messages WHERE id = ?', 'm1')).toEqual([
+      { raw_payload: payload },
+    ]);
+  });
+
+  it('ne conserve jamais un payload inconnu au-delà du plafond', async () => {
+    const fixture = await seeded();
+    const payload = plainOf({ v: 99, blob: 'x'.repeat(MAX_UNKNOWN_PAYLOAD_CHARS) });
+    expect(payload.length).toBeGreaterThan(MAX_UNKNOWN_PAYLOAD_CHARS);
+    cryptoMock.secureDecrypt.mockResolvedValue(unreadableOf('S1', payload) as never);
+
+    const result = await decrypt(fixture, incoming({ id: 'm1' }));
+
+    expect(result.unreadableReason).toBe('unsupported_version');
+    expect(read(fixture, 'SELECT raw_payload FROM e2ee_messages WHERE id = ?', 'm1')).toEqual([
+      { raw_payload: null },
+    ]);
+  });
+
+  it('élague les payloads inconnus les plus anciens et garde les lignes', async () => {
+    const fixture = await seeded();
+    const storedSession: E2eeSessionRow = {
+      peer_user_id: 'peer-1',
+      peer_device_id: 'dev-1',
+      session_pickle: 'S0',
+      peer_identity_key: 'peer-ident',
+      peer_signing_key: 'peer-sign',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+    const total = MAX_UNKNOWN_PAYLOADS_PER_CONVERSATION + 2;
+    for (let index = 0; index < total; index += 1) {
+      await persistIncoming({
+        db: fixture.db,
+        session: storedSession,
+        message: {
+          id: `u${index}`,
+          conversation_id: 'conv-1',
+          sender_id: 'peer-1',
+          sender_name: 'Pair',
+          body: '',
+          created_at: `2026-01-01T00:00:${String(index).padStart(2, '0')}Z`,
+          client_id: null,
+          mine: 0,
+          media_meta: null,
+          quote_id: null,
+          hidden: 1,
+          content_kind: 'unknown',
+          raw_payload: `payload-${index}`,
+        },
+      });
+    }
+
+    expect(read(fixture, 'SELECT COUNT(*) AS total FROM e2ee_messages')).toEqual([
+      { total: total },
+    ]);
+    expect(
+      read(
+        fixture,
+        `SELECT id FROM e2ee_messages WHERE raw_payload IS NOT NULL
+          ORDER BY created_at, rowid`,
+      ),
+    ).toEqual(
+      Array.from({ length: MAX_UNKNOWN_PAYLOADS_PER_CONVERSATION }, (_, offset) => ({
+        id: `u${offset + 2}`,
+      })),
+    );
   });
 
   it('reconnaît le doublon d’un message illisible sans rejouer le ratchet', async () => {
