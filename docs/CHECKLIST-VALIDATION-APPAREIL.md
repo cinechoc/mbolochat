@@ -19,14 +19,14 @@ Version 1.0 — 2026-11-13. À passer sur **Waydroid** (ou appareil réel) aprè
 | 4 | Notes vocales | A enregistre 5 s, envoie ; B écoute | A enregistre 5 s, envoie ; B écoute | Lecture, waveform, durée, accusé ; en chiffré, clair libéré à la fermeture |
 | 5 | Images et vidéos | A envoie 3 photos (album), une vidéo, un PDF ; B ouvre chaque média | Idem en chiffré | Vignettes, visionneuse, document ; en chiffré, aucune fuite de clair (fichier temporaire supprimé) |
 | 6 | Réponses | Appui long → Répondre → envoyer ; taper la citation | Idem en chiffré | Citation correcte, saut vers l'original ; supprimé = « Message supprimé » |
-| 7 | Réactions | Appui long → réaction panthère ; B réagit au même message | N/A (non supporté) | Compteur et état « mine » corrects ; en chiffré, section absente |
-| 8 | Suppression | A supprime pour moi, puis pour tous un message envoyé | A supprime pour moi un message | Clair : disparition locale / « Message supprimé » chez B. Chiffré : disparition locale, aucune option « pour tous » |
+| 7 | Réactions | Appui long → réaction panthère ; B réagit au même message | Appui long → réaction panthère ; B réagit au même message (v:4) | Compteur et état « mine » corrects dans les deux modes ; validation chiffrée non vérifiée sur appareil |
+| 8 | Suppression | A supprime pour moi, puis pour tous un message envoyé | A supprime pour moi, puis pour tous un message envoyé (v:5) | Clair : disparition locale / « Message supprimé » chez B. Chiffré : contenu vidé et mention honnête ; non vérifié sur appareil |
 | 9 | Accusés de lecture | A envoie, B ouvre la conversation ; groupe : « Vu par N » | A envoie, B est en ligne / hors ligne / ouvre l'écran | Clair : simple/double coche puis bleue, Vu par. Chiffré : « Reçu » si B en ligne, « Ouvert » seulement si la bulle est réellement visible (50 %, 400 ms) |
-| 10 | Indicateur de frappe | A tape dans une conversation claire, B regarde | N/A | « B est en train d'écrire… » puis disparition ; absent en chiffré |
+| 10 | Indicateur de frappe | A tape dans une conversation claire, B regarde | A tape dans une conversation chiffrée, B regarde | « B est en train d’écrire… » puis disparition ; en chiffré, aucun texte transmis ; non vérifié sur appareil |
 | 11 | Brouillon | A tape sans envoyer, quitte, revient | A tape sans envoyer, quitte, revient | Clair : texte restauré. Chiffré : texte restauré depuis SQLCipher ; vérifier qu'aucun brouillon clair n'existe (fichier AsyncStorage) |
 | 12 | Défilement | Remonter, recevoir un message : pastille de retour, compteur | Remonter, recevoir un message ; **vérifier la nouvelle liste inversée** | Pas de saut, pastille et compteur corrects ; en chiffré, pas de retour forcé en bas |
 | 13 | État de connexion | Couper le réseau : bandeau hors ligne ; rétablir | Couper le réseau, revenir | Bandeau clair ; en chiffré, aucun envoi optimiste, accusés en attente |
-| 14 | Menus | Appui long sur texte, photo, vocal, sticker | Appui long sur texte, média, sticker | Actions filtrées par mode ; « Retirer pour tous » absent en chiffré ; transfert texte chiffré → cible chiffrée uniquement |
+| 14 | Menus | Appui long sur texte, photo, vocal, sticker | Appui long sur texte, média, sticker | Actions filtrées par mode ; « Retirer pour tous » disponible en chiffré (v:5) ; transfert texte chiffré → cible chiffrée uniquement |
 | 15 | Accessibilité | TalkBack : parcourir liste, coches, boutons d'envoi, erreurs | TalkBack : parcourir, en-tête, appels inertes, erreurs | Tout est annoncé, ordre logique, aucune action sans libellé |
 | 16 | Groupes, rôles, mentions | Groupe : rôle admin/membre, `whoCanSend=admins`, mention `@` | N/A (1:1 uniquement) | Permissions respectées, mentions proposées, aucun groupe chiffré |
 | 17 | Appels | Appel vocal/vidéo 1:1, puis groupe | Icônes d'appel | Clair : appel abouti. Chiffré : alerte explicite, aucun appel lancé |
@@ -54,10 +54,10 @@ Consigner la date, la build/commit, l'appareil, et joindre les captures des KO. 
 | 4 | Notes vocales | `chat-message-row.tsx` `VoiceMessageBubble` ; `e2ee-transport.ts` `sendVoice` | Complet |
 | 5 | Images/vidéos/documents | `chat-message-row.tsx` `MessageBody` ; `chat-screen.tsx` `openMedia` + `model/media-leases.ts` | Complet |
 | 6 | Réponses | `chat-screen.tsx` `quoteOfView` ; `chat-message-row.tsx` `QuoteBlock` | Complet |
-| 7 | Réactions | `model/chat-actions.ts` + `chat-message-row.tsx` `ReactionChips` ; capacité `reactions` | Clair uniquement |
-| 8 | Suppression | `chat-screen.tsx` `menuActions` → `transport.deleteMessage` | Complet |
+| 7 | Réactions | `model/chat-actions.ts` + `chat-message-row.tsx` `ReactionChips` ; capacité `reactions`, chiffré `v:4` | Complet, non vérifié appareil |
+| 8 | Suppression | `chat-screen.tsx` `menuActions` → `transport.deleteMessage` ; chiffré `v:5` et tombstone SQLCipher | Complet, non vérifié appareil |
 | 9 | Accusés | `chat-message-row.tsx` `ReceiptBadge` ; `e2ee-transport.ts` `deliveryOf` | Complet |
-| 10 | Frappe | `chat-screen.tsx` bandeau + `use-chat-messages.ts` `typing` | Clair seulement |
+| 10 | Frappe | `chat-screen.tsx` bandeau + `use-chat-messages.ts` `typing` ; chiffré : événement éphémère sans texte | Complet, non vérifié appareil |
 | 11 | Brouillon | `use-chat-draft.ts` + `model/draft-buffer.ts` ; transport `saveDraft/loadDraft` | Complet |
 | 12 | Défilement | `use-chat-scroll.ts` + `model/scroll-state.ts` ; liste inversée les deux modes | Complet, **à vérifier appareil** |
 | 13 | Connexion | `use-chat-messages.ts` `online` + bandeau `chat-screen.tsx` | Complet |
@@ -67,7 +67,7 @@ Consigner la date, la build/commit, l'appareil, et joindre les captures des KO. 
 | 17 | Appels | `chat-screen.tsx` `headerRight` ; refus chiffré | Complet |
 | 18 | Sécurité d'écran | `hooks/use-chat-security.ts` + `model/media-leases.ts` | Complet |
 
-Scénarios marqués manquants : pagination chiffrée (#3), indicateur de frappe chiffré (#10, volontairement absent).
+Scénario marqué manquant : pagination chiffrée (#3).
 
 ## Résultats Waydroid — 2026-11-14
 
@@ -136,3 +136,16 @@ Statuts utilisés : **OK**, **KO corrigé**, **KO ouvert**, **non vérifié**.
 | « Supprimer pour tous » sur l'écran unifié | non vérifié sur appareil, reporté | Le drapeau a été ouvert, puis Waydroid a déclenché un ANR au rechargement. Le service Android `activity` a ensuite disparu ; `am start` répond `Can't find service: activity` et `force-stop` renvoie `Surface DEAD_OBJECT`. Aucun message de test n'a été supprimé. |
 | A/B fluidité, conversation de 140 messages | non vérifié sur appareil, reporté | Aucune mesure `gfxinfo` n'a pu être lancée après la panne du système invité. Aucun chiffre n'est inventé ; les deux passes restent à refaire après redémarrage de Waydroid. |
 | État final du drapeau sur l'appareil | non vérifié sur appareil, reporté | Le code est désormais activé par défaut et `/dev-flags` permet le retour. L'état persisté dans Waydroid n'a pas pu être relu après la panne. |
+
+## E2EE Lot 1 — parité 1 à 1 (2026-11-14)
+
+Toutes les lignes de cette section sont **non vérifiées sur appareil, reportées** : aucune session Waydroid n'a été ouverte pour ce lot. Seuls les tests automatiques font foi pour l'instant.
+
+| Fonctionnalité | Statut appareil | Couverture automatique |
+|---|---|---|
+| Réactions chiffrées `v:4` | non vérifié sur appareil, reporté | `payload.test.ts` (round-trip, champs exacts, valeurs fermées) ; `inbound.test.ts` (agrégation, doublons, cible inconnue, ordre d'arrivée) |
+| Indicateur de frappe chiffré | non vérifié sur appareil, reporté | `e2ee-transport.test.ts` (aucun texte émis, fréquence, rafraîchissement, expiration) |
+| Stickers de catalogue `v:3` | non vérifié sur appareil, reporté | `payload.test.ts` et `e2ee-transport.test.ts` (émission inchangée, capability active) |
+| Suppression pour tous `v:5` | non vérifié sur appareil, reporté | `inbound.test.ts` (auteur, cible inconnue, tombstone, autre conversation, malformé) ; `e2ee-transport.test.ts` (envoi et vidage local) |
+| Types inconnus et contenus malformés | non vérifié sur appareil, reporté | `payload.test.ts` et `inbound.test.ts` (rejet silencieux, session Olm avancée, ligne masquée) |
+| Stickers personnels en chiffré | non pris en charge dans ce lot | Non applicable : le format `v:3` ne transporte que des références de catalogue. |
