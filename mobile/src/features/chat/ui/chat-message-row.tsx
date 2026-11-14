@@ -464,6 +464,11 @@ function MessageBody({
         ) : (
           <MessageText text={trimmed} style={[styles.emojiText, { color: chat.primaryText }]} />
         )}
+        {message.edited ? (
+          <ThemedText type="micro" themeColor="textSecondary">
+            {fr.chat.unified.edited}
+          </ThemedText>
+        ) : null}
         {failed ? (
           <RetryActions message={message} chat={chat} onRetry={onRetry} onDiscard={onDiscard} />
         ) : null}
@@ -493,6 +498,11 @@ function MessageBody({
           ]}
         />
       )}
+      {message.edited ? (
+        <ThemedText type="micro" themeColor="textSecondary">
+          {fr.chat.unified.edited}
+        </ThemedText>
+      ) : null}
       {failed ? (
         <RetryActions message={message} chat={chat} onRetry={onRetry} onDiscard={onDiscard} />
       ) : null}

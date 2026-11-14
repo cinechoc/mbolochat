@@ -89,6 +89,7 @@ const EMPTY_CAPABILITIES: ChatCapabilities = {
   forwarded: false,
   voice: false,
   typing: false,
+  edit: false,
   ephemeral: false,
   calls: false,
   albums: false,
@@ -131,6 +132,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   const [online, setOnline] = useState(true);
   const [focused, setFocused] = useState(false);
   const [replyTo, setReplyTo] = useState<MessageQuote | null>(null);
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const replyToId = replyTo?.id ?? null;
   const [menuFor, setMenuFor] = useState<ChatMessageView | null>(null);
   const [seenFor, setSeenFor] = useState<ChatMessageView | null>(null);
@@ -566,6 +568,11 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
       setMenuFor(null);
       void copyMessage(message);
     },
+    onEdit: (message) => {
+      setMenuFor(null);
+      setReplyTo(null);
+      setEditing({ id: message.id, text: message.body });
+    },
     onDeleteForMe: (message) => {
       setMenuFor(null);
       void transport?.deleteMessage(message.id, false);
@@ -627,14 +634,22 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     async (text: string) => {
       if (!transport) return;
       try {
-        await transport.sendText(text, replyToId);
+        if (editing) {
+          await transport.editMessage(editing.id, text);
+          setEditing(null);
+        } else {
+          await transport.sendText(text, replyToId);
+        }
         setReplyTo(null);
       } catch (error) {
-        Alert.alert(fr.e2eeChat.error, fr.chat.unified.failedToSend);
+        Alert.alert(
+          fr.e2eeChat.error,
+          editing ? fr.chat.unified.editFailed : fr.chat.unified.failedToSend,
+        );
         throw error;
       }
     },
-    [transport, replyToId],
+    [transport, replyToId, editing],
   );
 
   const sendAttachments = useCallback(
@@ -1003,6 +1018,8 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
             blurTarget={blurTargetRef}
             replyTo={replyTo}
             onCancelReply={() => setReplyTo(null)}
+            editingText={editing?.text ?? null}
+            onCancelEdit={() => setEditing(null)}
             blockedText={blockedText}
             bottomInset={insets.bottom}
             availableHeight={chatAreaHeight > 0 ? chatAreaHeight : undefined}

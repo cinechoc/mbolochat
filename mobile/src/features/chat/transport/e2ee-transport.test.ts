@@ -180,6 +180,22 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
         sticker_ref: stickerRef,
       }),
     })),
+    sendEncryptedEdit: vi.fn(async ({ targetId, text }: { targetId: string; text: string }) => ({
+      clientId: 'edit-1',
+      revision: 1,
+      serverMessage: serverMessage('edit-1', '2026-01-01T00:00:15.000Z', {
+        sender: identity('me'),
+      }),
+      stored: stored('edit-1', '2026-01-01T00:00:15.000Z', {
+        sender_id: 'me',
+        sender_name: 'me',
+        body: '',
+        hidden: 1,
+        content_kind: 'edit',
+        control_target: targetId,
+        edit_revision: 1,
+      }),
+    })),
     sendEncryptedEphemeral: vi.fn(async () => ({
       clientId: 'ephemeral-1',
       ttlSeconds: 86_400,
@@ -336,6 +352,32 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
       expect.objectContaining({ text: 'secret', currentUserId: 'me' }),
     );
     expect(clearUpload).not.toHaveBeenCalled();
+    await transport.dispose();
+  });
+
+  it('modifie un texte par le chiffrement et met à jour la bulle locale', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new E2eeTransport(fakes.deps, options);
+    const received: ChatMessageView[] = [];
+    const off = transport.subscribe({
+      onMessage: (message) => received.push(message),
+      onMessageRemoved: () => undefined,
+      onReceipts: () => undefined,
+      onReaction: () => undefined,
+      onTyping: () => undefined,
+      onConnection: () => undefined,
+      onConversationUpdated: () => undefined,
+      onConversationRemoved: () => undefined,
+      onError: () => undefined,
+      onFatal: () => undefined,
+    });
+    await transport.loadInitial();
+    await transport.editMessage('a', 'texte corrigé');
+    expect(fakes.crypto.sendEncryptedEdit).toHaveBeenCalledWith(
+      expect.objectContaining({ targetId: 'a', text: 'texte corrigé' }),
+    );
+    expect(received.at(-1)).toMatchObject({ id: 'a', body: 'texte corrigé', edited: true });
+    off();
     await transport.dispose();
   });
 

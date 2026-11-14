@@ -34,6 +34,7 @@ const E2EE_CAPABILITIES: ChatCapabilities = {
   forwarded: true,
   voice: true,
   typing: true,
+  edit: true,
   ephemeral: true,
   calls: false,
   albums: false,
@@ -287,6 +288,46 @@ export class E2eeTransport implements ChatTransport {
     });
     this.absorb(result.stored, true);
     void this.deps.db.saveDraft(db, this.conversationId, '').catch(() => undefined);
+  }
+
+  async editMessage(id: string, text: string): Promise<void> {
+    if (!this.capabilities.edit) {
+      throw new UnsupportedCapabilityError('edit');
+    }
+    const target = this.stored.get(id);
+    if (
+      !target ||
+      target.mine !== 1 ||
+      target.id === target.client_id ||
+      target.deleted === 1 ||
+      target.hidden === 1 ||
+      (target.content_kind ?? null) !== null ||
+      (target.media_meta ?? null) !== null ||
+      (target.sticker_ref ?? null) !== null ||
+      text.trim().length === 0
+    ) {
+      throw new Error('edit_not_allowed');
+    }
+    const { db, account } = await this.credentials();
+    const result = await this.deps.crypto.sendEncryptedEdit({
+      token: this.token,
+      db,
+      account,
+      conversation: this.summary,
+      currentUserId: this.currentUser.id,
+      currentUserName: this.currentUser.displayName,
+      targetId: id,
+      text,
+    });
+    const edited: StoredE2eeMessage = {
+      ...target,
+      body: text,
+      edited_at: result.stored.created_at,
+      edit_revision: result.revision,
+    };
+    this.stored.set(id, edited);
+    this.index.upsert(this.render(edited));
+    this.handlers?.onMessage(this.render(edited));
   }
 
   async sendMedia(
@@ -689,6 +730,13 @@ export class E2eeTransport implements ChatTransport {
         if (result.ephemeralEvent) {
           if (result.ephemeralEvent.applied) {
             this.handlers?.onEphemeral?.(result.ephemeralEvent.ttlSeconds);
+          }
+        } else if (result.editEvent) {
+          const target = result.editEvent.target ?? this.stored.get(result.editEvent.targetId);
+          if (result.editEvent.applied && target) {
+            this.stored.set(target.id, target);
+            this.index.upsert(this.render(target));
+            this.handlers?.onMessage(this.render(target));
           }
         } else if (result.reactionEvent) {
           this.reactions = await this.deps.db.loadReactionSummaries(

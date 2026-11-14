@@ -94,6 +94,7 @@ export interface E2eeTransportDeps {
     | 'sendEncryptedReaction'
     | 'sendEncryptedSticker'
     | 'sendEncryptedDelete'
+    | 'sendEncryptedEdit'
     | 'sendEncryptedEphemeral'
     | 'decryptIncoming'
   > &

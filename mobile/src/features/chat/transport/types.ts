@@ -29,6 +29,7 @@ export interface ChatCapabilities {
   forwarded: boolean;
   voice: boolean;
   typing: boolean;
+  edit: boolean;
   ephemeral: boolean;
   calls: boolean;
   albums: boolean;
@@ -48,6 +49,7 @@ export type GatedCapability =
   | 'forwarded'
   | 'voice'
   | 'typing'
+  | 'edit'
   | 'ephemeral'
   | 'calls';
 
@@ -141,6 +143,10 @@ export interface ChatMessageView {
   deleted: boolean;
   /** Contenu authentifié mais illisible (E2EE) : jamais de détail exposé. */
   unreadable: boolean;
+  /** Texte modifié au moins une fois (mode chiffré). */
+  edited: boolean;
+  /** Dernière révision de modification, 0 si aucune. */
+  editRevision: number;
   quoteId: string | null;
   quote: MessageQuote | null;
   reactions: ReactionSummary[];
@@ -219,6 +225,7 @@ export interface ChatTransport {
   forwardText(target: ConversationSummary, text: string): Promise<void>;
 
   deleteMessage(id: string, forEveryone: boolean): Promise<void>;
+  editMessage(id: string, text: string): Promise<void>;
   toggleReaction(id: string, reaction: string): Promise<void>;
   markRead(ids?: string[]): Promise<void>;
   reportDelivered(ids: string[]): void;

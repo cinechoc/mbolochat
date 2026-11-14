@@ -18,6 +18,7 @@ import {
   hasDeletionTombstone,
   type DeleteForAllResult,
 } from './deletion';
+import { applyEditWith } from './edits';
 
 /**
  * Écriture atomique de l'état de session S1 et de l'enveloppe E.
@@ -299,6 +300,13 @@ export interface PersistIncomingInput {
   identityChanged?: boolean;
   /** Réglage éphémère reçu : appliqué seulement si sa version est plus récente. */
   ephemeral?: { ttlSeconds: number; version: number };
+  /** Modification de texte reçue, appliquée dans la même transaction. */
+  edit?: {
+    targetId: string;
+    revision: number;
+    text: string;
+    eventCreatedAt: string;
+  };
   /**
    * Événement de suppression pour tous : la tombstone, l'application à la
    * cible et l'avancement Olm sont écrits ensemble.
@@ -314,6 +322,7 @@ export interface PersistIncomingInput {
 export interface PersistIncomingResult {
   deletion?: DeleteForAllResult;
   ephemeralApplied?: boolean;
+  editApplied?: boolean;
 }
 
 export async function persistIncoming(
@@ -340,6 +349,18 @@ export async function persistIncoming(
         input.ephemeral.ttlSeconds,
         input.ephemeral.version,
       );
+    }
+    if (input.edit) {
+      result.editApplied = (
+        await applyEditWith(tx, {
+          targetId: input.edit.targetId,
+          authorId: input.message.sender_id,
+          conversationId: input.message.conversation_id,
+          revision: input.edit.revision,
+          text: input.edit.text,
+          eventCreatedAt: input.edit.eventCreatedAt,
+        })
+      ).applied;
     }
     if (input.message.content_kind === 'unknown') {
       await pruneUnknownPayloadsWith(tx, input.message.conversation_id);

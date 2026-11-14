@@ -23,6 +23,7 @@ import {
 } from './db';
 import {
   buildDeleteV5,
+  buildEditV7,
   buildEphemeralV6,
   buildReactionV4,
   buildStickerV3,
@@ -38,6 +39,10 @@ import {
   type ReactionAction,
 } from './payload';
 import type { ReactionRef } from '../stickers/reactionRules';
+import {
+  applyEditWith,
+  nextEditRevision,
+} from './edits';
 import {
   loadPersistedEnvelope,
   markEnvelopeSent,
@@ -358,6 +363,7 @@ interface OutgoingContent {
   controlTarget?: string | null;
   reaction?: string | null;
   reactionAction?: string | null;
+  editRevision?: number | null;
   /** Les messages visibles reçoivent l'échéance éphémère courante. */
   applyEphemeral?: boolean;
 }
@@ -410,6 +416,7 @@ async function sendEncryptedContent(
     control_target: content.controlTarget ?? null,
     reaction: content.reaction ?? null,
     reaction_action: content.reactionAction ?? null,
+    edit_revision: content.editRevision ?? 0,
     expires_at: expiresAt,
   };
   // La ligne provisoire est écrite avant l'envoi : un plantage entre les deux
@@ -495,6 +502,46 @@ export async function sendEncryptedDelete(
     contentKind: 'delete',
     controlTarget: input.targetId,
   });
+}
+
+/**
+ * Modifie un texte déjà envoyé. Les règles (auteur, fenêtre, révision) sont
+ * vérifiées avant le chiffrement, puis de nouveau à l'application locale.
+ */
+export async function sendEncryptedEdit(
+  input: SendEncryptedContentInput & { targetId: string; text: string },
+): Promise<SendResult & { revision: number }> {
+  const preparedAt = new Date().toISOString();
+  const revision = await nextEditRevision(input.db, {
+    targetId: input.targetId,
+    authorId: input.currentUserId,
+    conversationId: input.conversation.id,
+    text: input.text,
+    eventCreatedAt: preparedAt,
+  });
+  if (revision === null) {
+    throw new Error('edit_not_allowed');
+  }
+  const result = await sendEncryptedContent(
+    input,
+    buildEditV7(input.targetId, revision, input.text),
+    {
+      body: '',
+      hidden: true,
+      contentKind: 'edit',
+      controlTarget: input.targetId,
+      editRevision: revision,
+    },
+  );
+  await applyEditWith(input.db, {
+    targetId: input.targetId,
+    authorId: input.currentUserId,
+    conversationId: input.conversation.id,
+    revision,
+    text: input.text,
+    eventCreatedAt: result.stored.created_at,
+  });
+  return { ...result, revision };
 }
 
 export async function sendEncryptedEphemeral(
@@ -822,6 +869,15 @@ export interface IncomingEphemeralEvent {
   authorId: string;
 }
 
+export interface IncomingEditEvent {
+  targetId: string;
+  revision: number;
+  authorId: string;
+  /** Faux si la cible est inconnue, supprimée ou déjà plus récente. */
+  applied: boolean;
+  target?: StoredE2eeMessage;
+}
+
 export interface DecryptIncomingResult {
   text: string;
   media?: EncryptedMedia;
@@ -838,6 +894,7 @@ export interface DecryptIncomingResult {
   reactionEvent?: IncomingReactionEvent;
   deletionEvent?: IncomingDeletionEvent;
   ephemeralEvent?: IncomingEphemeralEvent;
+  editEvent?: IncomingEditEvent;
   /** Médias locaux à nettoyer après une suppression appliquée hors événement v5. */
   deletedMediaRefs?: LocalMediaRefs | null;
   account: E2eeAccountRow;
@@ -934,9 +991,14 @@ export async function decryptIncoming(input: {
       const isReaction = parsed.kind === 'reaction';
       const isDelete = parsed.kind === 'delete';
       const isEphemeral = parsed.kind === 'ephemeral';
+      const isEdit = parsed.kind === 'edit';
       const deleteTarget = parsed.kind === 'delete' ? parsed.targetId : null;
+      const editTarget = parsed.kind === 'edit' ? parsed.targetId : null;
+      const editRevision = parsed.kind === 'edit' ? parsed.revision : 0;
       const controlTarget =
-        parsed.kind === 'reaction' || parsed.kind === 'delete' ? parsed.targetId : null;
+        parsed.kind === 'reaction' || parsed.kind === 'delete' || parsed.kind === 'edit'
+          ? parsed.targetId
+          : null;
       const reaction = parsed.kind === 'reaction' ? parsed.reaction : null;
       const reactionAction = parsed.kind === 'reaction' ? parsed.action : null;
       const ephemeralState =
@@ -968,17 +1030,20 @@ export async function decryptIncoming(input: {
         // Référence validée par `parsePayload` : forme `pack/id` uniquement.
         // Rien d'autre n'en est tiré — ni URL, ni chemin, ni binaire.
         sticker_ref: parsed.kind === 'sticker' ? parsed.stickerRef : null,
-        hidden: isReaction || isDelete || isEphemeral ? 1 : 0,
+        hidden: isReaction || isDelete || isEphemeral || isEdit ? 1 : 0,
         content_kind: isReaction
           ? 'reaction'
           : isDelete
             ? 'delete'
             : isEphemeral
               ? 'ephemeral'
-              : null,
+              : isEdit
+                ? 'edit'
+                : null,
         control_target: controlTarget,
         reaction,
         reaction_action: reactionAction,
+        edit_revision: editRevision,
         expires_at: expiresAt,
       };
       const persisted = await persistIncoming({
@@ -992,6 +1057,15 @@ export async function decryptIncoming(input: {
         pinPeerKey: opened.keyChanged || !opened.knownKey,
         identityChanged: opened.identityChanged,
         ephemeral: ephemeralState,
+        edit:
+          parsed.kind === 'edit'
+            ? {
+                targetId: parsed.targetId,
+                revision: parsed.revision,
+                text: parsed.text,
+                eventCreatedAt: message.createdAt,
+              }
+            : undefined,
         deletion: deleteTarget
           ? {
               targetId: deleteTarget,
@@ -1036,6 +1110,26 @@ export async function decryptIncoming(input: {
           keyChanged: opened.keyChanged,
         };
       }
+      if (isEdit) {
+        const targetId = editTarget ?? '';
+        const target = persisted.editApplied
+          ? await loadLocalMessage(input.db, targetId)
+          : null;
+        return {
+          text: '',
+          hidden: true,
+          editEvent: {
+            targetId,
+            revision: editRevision,
+            authorId: message.sender.id,
+            applied: Boolean(persisted.editApplied),
+            target: target ?? undefined,
+          },
+          account: opened.account,
+          stored,
+          keyChanged: opened.keyChanged,
+        };
+      }
       const finalStored = persisted.deletion?.applied
         ? {
             ...stored,
@@ -1052,7 +1146,7 @@ export async function decryptIncoming(input: {
         media:
           parsed.kind === 'media' && !persisted.deletion?.applied ? parsed.media : undefined,
         stickerRef: parsed.kind === 'sticker' ? parsed.stickerRef : undefined,
-        hidden: isReaction,
+        hidden: isReaction || isEdit,
         reactionEvent,
         account: opened.account,
         stored: finalStored,

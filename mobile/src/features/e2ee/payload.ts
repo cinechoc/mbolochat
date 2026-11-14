@@ -64,7 +64,8 @@ export type ParsedPayload =
       action: 'add' | 'remove';
     }
   | { kind: 'delete'; targetId: string }
-  | { kind: 'ephemeral'; ttlSeconds: EphemeralTtl; version: number };
+  | { kind: 'ephemeral'; ttlSeconds: EphemeralTtl; version: number }
+  | { kind: 'edit'; targetId: string; revision: number; text: string };
 
 /**
  * Motifs d'un contenu **authentifié mais illisible**. Liste fermée : elle sert
@@ -139,11 +140,26 @@ export function buildStickerV3(stickerRef: string, replyTo?: string): string {
 }
 
 export type ReactionAction = 'add' | 'remove';
+export const MAX_EDIT_REVISION = 5;
+export const MAX_EDIT_TEXT_LENGTH = 4_000;
+export const EDIT_WINDOW_MS = 15 * 60 * 1_000;
 export const EPHEMERAL_TTLS = [0, 86_400, 604_800] as const;
 export type EphemeralTtl = (typeof EPHEMERAL_TTLS)[number];
 
 export function isEphemeralTtl(value: unknown): value is EphemeralTtl {
   return typeof value === 'number' && (EPHEMERAL_TTLS as readonly number[]).includes(value);
+}
+
+function isValidEditText(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length >= 1 &&
+    value.length <= MAX_EDIT_TEXT_LENGTH
+  );
+}
+
+function isValidEditRevision(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= MAX_EDIT_REVISION;
 }
 
 /** Identifiant serveur/local admissible dans une référence de contenu. */
@@ -171,6 +187,18 @@ export function buildEphemeralV6(ttlSeconds: EphemeralTtl, version: number): str
     throw new InvalidPayloadError('invalid_payload');
   }
   return encodeText(JSON.stringify({ v: 6, kind: 'ephemeral', ttlSeconds, version }));
+}
+
+/** Sérialise une modification de texte `v:7`, réservée à l'auteur de la cible. */
+export function buildEditV7(targetId: string, revision: number, text: string): string {
+  if (
+    !isValidControlTarget(targetId) ||
+    !isValidEditRevision(revision) ||
+    !isValidEditText(text)
+  ) {
+    throw new InvalidPayloadError('invalid_payload');
+  }
+  return encodeText(JSON.stringify({ v: 7, kind: 'edit', targetId, revision, text }));
 }
 
 /** Sérialise le contenu `v:5` d'une suppression pour tous. */
@@ -332,6 +360,23 @@ export function parsePayload(plaintextB64: string): ParsedPayload {
       kind: 'ephemeral',
       ttlSeconds: envelope.ttlSeconds,
       version: envelope.version as number,
+    };
+  }
+  if (envelope.v === 7) {
+    if (
+      !hasExactKeys(envelope, ['v', 'kind', 'targetId', 'revision', 'text']) ||
+      envelope.kind !== 'edit' ||
+      !isValidControlTarget(envelope.targetId) ||
+      !isValidEditRevision(envelope.revision) ||
+      !isValidEditText(envelope.text)
+    ) {
+      throw new InvalidPayloadError('invalid_payload');
+    }
+    return {
+      kind: 'edit',
+      targetId: envelope.targetId,
+      revision: envelope.revision,
+      text: envelope.text,
     };
   }
   throw new InvalidPayloadError('unsupported_version');

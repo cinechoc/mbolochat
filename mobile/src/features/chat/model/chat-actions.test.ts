@@ -12,6 +12,7 @@ const CLASSIC: ChatCapabilities = {
   forwarded: false,
   voice: true,
   typing: true,
+  edit: false,
   ephemeral: false,
   calls: true,
   albums: true,
@@ -29,6 +30,7 @@ const E2EE: ChatCapabilities = {
   gifs: false,
   forwarded: true,
   typing: false,
+  edit: true,
   ephemeral: false,
   calls: false,
   albums: false,
@@ -56,6 +58,8 @@ const view = (input: Partial<ChatMessageView> = {}): ChatMessageView => ({
   type: 'text',
   deleted: false,
   unreadable: false,
+  edited: false,
+  editRevision: 0,
   quoteId: null,
   quote: null,
   reactions: [],
@@ -70,6 +74,7 @@ const view = (input: Partial<ChatMessageView> = {}): ChatMessageView => ({
 const callbacks = () => ({
   onReply: vi.fn(),
   onCopy: vi.fn(),
+  onEdit: vi.fn(),
   onDeleteForMe: vi.fn(),
   onDeleteForAll: vi.fn(),
 });
@@ -118,6 +123,33 @@ describe('buildChatActions', () => {
       ...callbacks(),
     });
     expect(actions.map((action) => action.key)).toEqual(['delete-me']);
+  });
+
+  it('propose la modification chiffrée seulement dans la fenêtre et sous 5 révisions', () => {
+    const now = Date.parse('2026-01-01T00:10:00.000Z');
+    const editable = buildChatActions({
+      message: view({ mine: true, createdAt: '2026-01-01T00:00:00.000Z' }),
+      capabilities: E2EE,
+      now,
+      ...callbacks(),
+    });
+    expect(editable.map((action) => action.key)).toContain('edit');
+
+    const late = buildChatActions({
+      message: view({ mine: true, createdAt: '2026-01-01T00:00:00.000Z' }),
+      capabilities: E2EE,
+      now: Date.parse('2026-01-01T00:16:00.000Z'),
+      ...callbacks(),
+    });
+    expect(late.map((action) => action.key)).not.toContain('edit');
+
+    const exhausted = buildChatActions({
+      message: view({ mine: true, createdAt: '2026-01-01T00:00:00.000Z', editRevision: 5 }),
+      capabilities: E2EE,
+      now,
+      ...callbacks(),
+    });
+    expect(exhausted.map((action) => action.key)).not.toContain('edit');
   });
 
   it('ajoute les actions spécifiques fournies par l’écran', () => {

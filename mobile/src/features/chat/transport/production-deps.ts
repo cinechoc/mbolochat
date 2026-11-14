@@ -32,6 +32,7 @@ export const E2EE_DEPS: E2eeTransportDeps = {
     sendEncryptedReaction: e2eeText.sendEncryptedReaction,
     sendEncryptedSticker: e2eeText.sendEncryptedSticker,
     sendEncryptedDelete: e2eeText.sendEncryptedDelete,
+    sendEncryptedEdit: e2eeText.sendEncryptedEdit,
     sendEncryptedEphemeral: e2eeText.sendEncryptedEphemeral,
     sendEncryptedMedia: e2eeMedia.sendEncryptedMedia,
     decryptIncoming: e2eeText.decryptIncoming,

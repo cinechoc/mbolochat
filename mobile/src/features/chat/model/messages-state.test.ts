@@ -25,6 +25,8 @@ const view = (id: string, createdAt: string, input: Partial<ChatMessageView> = {
   type: 'text',
   deleted: false,
   unreadable: false,
+  edited: false,
+  editRevision: 0,
   quoteId: null,
   quote: null,
   reactions: [],

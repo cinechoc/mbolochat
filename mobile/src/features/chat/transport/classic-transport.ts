@@ -39,6 +39,7 @@ const CLASSIC_CAPABILITIES: ChatCapabilities = {
   forwarded: false,
   voice: true,
   typing: true,
+  edit: false,
   ephemeral: false,
   calls: true,
   albums: true,
@@ -400,6 +401,10 @@ export class ClassicTransport implements ChatTransport {
 
   async forwardText(): Promise<void> {
     throw new UnsupportedCapabilityError('forwarded');
+  }
+
+  async editMessage(): Promise<void> {
+    throw new UnsupportedCapabilityError('edit');
   }
 
   async deleteMessage(id: string, forEveryone: boolean): Promise<void> {

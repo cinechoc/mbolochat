@@ -78,6 +78,7 @@ export const fr = {
       messageOptions: 'Options du message',
       deletedMessage: 'Message supprimé',
       edited: 'modifié',
+      editingMessage: 'Modifier le message',
       editUnavailable: 'Ce message ne peut plus être modifié.',
       editFailed: 'La modification n’a pas pu être envoyée.',
       ephemeralHeader: (label: string) => `Éphémère ${label}`,

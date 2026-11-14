@@ -1,5 +1,6 @@
+import { X } from 'lucide-react-native';
 import { useCallback, useRef, useState, type ComponentRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AttachPanel } from '@/components/attach-panel';
 import { ThemedText } from '@/components/themed-text';
@@ -9,6 +10,8 @@ import type { RecentGif } from '@/features/media/GifPanel';
 import type { PersonalSticker } from '@/features/stickers/stickerLibrary';
 import type { VoiceNote } from '@/features/voice-notes/useVoiceRecorder';
 import { Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
+import { fr } from '@/i18n/fr';
 import type { MessageQuote } from '@/lib/types';
 import { useChatDraft } from '../hooks/use-chat-draft';
 import type { ChatCapabilities, ChatTransport } from '../transport/types';
@@ -20,6 +23,9 @@ export interface ChatInputBarProps {
   blurTarget?: React.RefObject<ComponentRef<typeof View> | null>;
   replyTo: MessageQuote | null;
   onCancelReply: () => void;
+  editingId?: string | null;
+  editingText?: string | null;
+  onCancelEdit?: () => void;
   blockedText: string | null;
   bottomInset: number;
   availableHeight?: number;
@@ -49,6 +55,9 @@ export function ChatInputBar({
   blurTarget,
   replyTo,
   onCancelReply,
+  editingId = null,
+  editingText = null,
+  onCancelEdit,
   blockedText,
   bottomInset,
   availableHeight,
@@ -65,8 +74,10 @@ export function ChatInputBar({
   onVoicePermissionDenied,
   onVoiceError,
 }: ChatInputBarProps) {
+  const theme = useTheme();
   const { text: draft, setText, reset } = useChatDraft({ transport });
   const [composerKey, setComposerKey] = useState(0);
+  const editing = editingText !== null;
   const textRef = useRef(draft);
   const lastTypingRef = useRef(0);
 
@@ -79,7 +90,7 @@ export function ChatInputBar({
   const onChangeText = useCallback(
     (value: string) => {
       textRef.current = value;
-      setText(value);
+      if (!editing) setText(value);
       if (!capabilities.typing) return;
       const now = Date.now();
       if (now - lastTypingRef.current > 180) {
@@ -87,7 +98,7 @@ export function ChatInputBar({
         transport.setTyping(value.length > 0, value);
       }
     },
-    [capabilities.typing, setText, transport],
+    [capabilities.typing, editing, setText, transport],
   );
 
   if (blockedText) {
@@ -102,12 +113,27 @@ export function ChatInputBar({
 
   return (
     <>
-      {replyTo ? <ChatReplyBar quote={replyTo} onCancel={onCancelReply} /> : null}
+      {editing ? (
+        <View style={[styles.editBar, { backgroundColor: composerTheme.panelBg ?? theme.backgroundElement }]}> 
+          <ThemedText type="small" numberOfLines={1} style={styles.editLabel}>
+            {fr.chat.unified.editingMessage}
+          </ThemedText>
+          <Pressable
+            onPress={onCancelEdit}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={fr.common.cancel}>
+            <X size={20} color={theme.accent} />
+          </Pressable>
+        </View>
+      ) : replyTo ? (
+        <ChatReplyBar quote={replyTo} onCancel={onCancelReply} />
+      ) : null}
       <ChatComposer
-        key={composerKey}
+        key={`${composerKey}:${editingId ?? 'draft'}`}
         blurTarget={blurTarget}
         theme={composerTheme}
-        initialText={draft}
+        initialText={editing ? editingText : draft}
         mentionCandidates={mentionCandidates}
         bottomInset={bottomInset}
         availableHeight={availableHeight}
@@ -146,6 +172,14 @@ export function ChatInputBar({
 }
 
 const styles = StyleSheet.create({
+  editBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  editLabel: { flex: 1 },
   blocked: {
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.four,

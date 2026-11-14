@@ -81,6 +81,8 @@ export function classicMessageToView(
     type: message.type ?? 'text',
     deleted: message.deleted,
     unreadable: false,
+    edited: false,
+    editRevision: 0,
     quoteId: message.replyTo?.id ?? null,
     quote: message.replyTo,
     reactions: message.reactions ?? [],
@@ -140,6 +142,8 @@ export function storedMessageToView(
     type: 'text',
     deleted,
     unreadable: !deleted && Boolean(stored.unreadable_reason),
+    edited: !deleted && (stored.edit_revision ?? 0) > 0,
+    editRevision: deleted ? 0 : (stored.edit_revision ?? 0),
     quoteId: deleted ? null : stored.quote_id,
     // La citation chiffrée est reconstruite depuis l'index local par l'écran :
     // seule la référence traverse la couche de données.

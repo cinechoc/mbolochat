@@ -52,6 +52,8 @@ export function contractMessage(
     type: 'text',
     deleted: false,
     unreadable: false,
+    edited: false,
+    editRevision: 0,
     quoteId: null,
     quote: null,
     reactions: [],
@@ -88,6 +90,7 @@ const GATED_METHODS: {
 }[] = [
   { capability: 'reactions', invoke: (transport) => transport.toggleReaction('message-1', 'mbolo/coeur') },
   { capability: 'deleteForEveryone', invoke: (transport) => transport.deleteMessage('message-1', true) },
+  { capability: 'edit', invoke: (transport) => transport.editMessage('message-1', 'modifié') },
   { capability: 'stickers', invoke: (transport) => transport.sendSticker('mbolo/merci') },
   {
     capability: 'gifs',

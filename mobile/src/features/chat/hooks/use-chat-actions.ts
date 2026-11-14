@@ -1,4 +1,4 @@
-import { Copy, Reply, Trash, Trash2 } from 'lucide-react-native';
+import { Copy, Pencil, Reply, Trash, Trash2 } from 'lucide-react-native';
 import { useMemo } from 'react';
 
 import type { SheetAction } from '@/components/action-sheet';
@@ -7,6 +7,7 @@ import { buildChatActions, type ChatActionIcons, type ChatActionsInput } from '.
 const ACTION_ICONS: ChatActionIcons = {
   reply: Reply,
   copy: Copy,
+  edit: Pencil,
   trash: Trash,
   trash2: Trash2,
 };
@@ -21,6 +22,7 @@ export function useChatActions(input: ChatActionsInput): SheetAction[] {
     capabilities,
     onReply,
     onCopy,
+    onEdit,
     onDeleteForMe,
     onDeleteForAll,
     extra,
@@ -33,10 +35,11 @@ export function useChatActions(input: ChatActionsInput): SheetAction[] {
         icons: ACTION_ICONS,
         onReply,
         onCopy,
+        onEdit,
         onDeleteForMe,
         onDeleteForAll,
         extra,
       }),
-    [message, capabilities, onReply, onCopy, onDeleteForMe, onDeleteForAll, extra],
+    [message, capabilities, onReply, onCopy, onEdit, onDeleteForMe, onDeleteForAll, extra],
   );
 }

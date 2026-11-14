@@ -472,6 +472,10 @@ export interface StoredE2eeMessage {
   deleted?: number | null;
   /** Auteur vérifié de la suppression, pour audit local uniquement. */
   deleted_by?: string | null;
+  /** Dernière modification texte appliquée, ou null. */
+  edited_at?: string | null;
+  /** Numéro de la dernière modification appliquée (0 = jamais modifiée). */
+  edit_revision?: number | null;
   /** Ordre d'insertion SQLite, utilisé uniquement comme départage de pagination. */
   rowid?: number;
 }
@@ -495,10 +499,14 @@ export async function saveLocalMessageWith(
     `INSERT INTO e2ee_messages
        (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
         media_meta, quote_id, sticker_ref, unreadable_reason, hidden, content_kind,
-        control_target, reaction, reaction_action, raw_payload, expires_at, deleted, deleted_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        control_target, reaction, reaction_action, raw_payload, expires_at, deleted, deleted_by,
+        edited_at, edit_revision)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
-       body = excluded.body,
+       body = CASE
+         WHEN e2ee_messages.content_kind IS NULL
+              AND e2ee_messages.edit_revision > 0
+         THEN e2ee_messages.body ELSE excluded.body END,
        sticker_ref = COALESCE(excluded.sticker_ref, e2ee_messages.sticker_ref),
        unreadable_reason = COALESCE(excluded.unreadable_reason, e2ee_messages.unreadable_reason),
        hidden = excluded.hidden,
@@ -509,7 +517,9 @@ export async function saveLocalMessageWith(
        raw_payload = COALESCE(excluded.raw_payload, e2ee_messages.raw_payload),
        expires_at = COALESCE(excluded.expires_at, e2ee_messages.expires_at),
        deleted = CASE WHEN e2ee_messages.deleted = 1 THEN 1 ELSE excluded.deleted END,
-       deleted_by = COALESCE(e2ee_messages.deleted_by, excluded.deleted_by)`,
+       deleted_by = COALESCE(e2ee_messages.deleted_by, excluded.deleted_by),
+       edited_at = COALESCE(excluded.edited_at, e2ee_messages.edited_at),
+       edit_revision = MAX(e2ee_messages.edit_revision, excluded.edit_revision)`,
     message.id,
     message.conversation_id,
     message.sender_id,
@@ -531,6 +541,8 @@ export async function saveLocalMessageWith(
     message.expires_at ?? null,
     message.deleted ?? 0,
     message.deleted_by ?? null,
+    message.edited_at ?? null,
+    message.edit_revision ?? 0,
   );
 }
 
