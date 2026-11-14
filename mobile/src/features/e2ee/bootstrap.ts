@@ -2,6 +2,7 @@ import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
 import { api } from '@/lib/api';
 import { isE2eeEnabled } from './policy';
 import { loadE2eeAccount, openE2eeDatabase, saveE2eeAccount, type E2eeAccountRow } from './db';
+import { purgeExpiredMessages } from './ephemeral';
 import { withAccountLock } from './locks';
 import { sweepDurablePartials, sweepSecureMedia } from './mediaStore';
 
@@ -30,6 +31,8 @@ export async function bootstrapE2ee(token: string): Promise<BootstrapResult> {
   sweepDurablePartials();
   const { db, recovered } = await openE2eeDatabase();
   try {
+    // L'échéance peut avoir expiré pendant que l'application était fermée.
+    await purgeExpiredMessages(db).catch(() => undefined);
     let account = await loadE2eeAccount(db);
     let createdNow = false;
     if (!account) {

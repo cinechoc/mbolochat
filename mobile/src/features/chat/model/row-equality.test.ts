@@ -21,6 +21,7 @@ const capabilities: ChatCapabilities = {
   gifs: true,
   voice: true,
   typing: true,
+  ephemeral: false,
   calls: true,
   albums: true,
   groups: true,

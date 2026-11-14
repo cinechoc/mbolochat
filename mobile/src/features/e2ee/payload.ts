@@ -63,7 +63,8 @@ export type ParsedPayload =
       reaction: ReactionRef;
       action: 'add' | 'remove';
     }
-  | { kind: 'delete'; targetId: string };
+  | { kind: 'delete'; targetId: string }
+  | { kind: 'ephemeral'; ttlSeconds: EphemeralTtl; version: number };
 
 /**
  * Motifs d'un contenu **authentifié mais illisible**. Liste fermée : elle sert
@@ -138,6 +139,12 @@ export function buildStickerV3(stickerRef: string, replyTo?: string): string {
 }
 
 export type ReactionAction = 'add' | 'remove';
+export const EPHEMERAL_TTLS = [0, 86_400, 604_800] as const;
+export type EphemeralTtl = (typeof EPHEMERAL_TTLS)[number];
+
+export function isEphemeralTtl(value: unknown): value is EphemeralTtl {
+  return typeof value === 'number' && (EPHEMERAL_TTLS as readonly number[]).includes(value);
+}
 
 /** Identifiant serveur/local admissible dans une référence de contenu. */
 export function isValidControlTarget(value: unknown): value is string {
@@ -156,6 +163,14 @@ export function buildReactionV4(
   return encodeText(
     JSON.stringify({ v: 4, kind: 'reaction', targetId, reaction, action }),
   );
+}
+
+/** Sérialise le contenu `v:6` du réglage éphémère de conversation. */
+export function buildEphemeralV6(ttlSeconds: EphemeralTtl, version: number): string {
+  if (!isEphemeralTtl(ttlSeconds) || !Number.isSafeInteger(version) || version <= 0) {
+    throw new InvalidPayloadError('invalid_payload');
+  }
+  return encodeText(JSON.stringify({ v: 6, kind: 'ephemeral', ttlSeconds, version }));
 }
 
 /** Sérialise le contenu `v:5` d'une suppression pour tous. */
@@ -302,6 +317,22 @@ export function parsePayload(plaintextB64: string): ParsedPayload {
       throw new InvalidPayloadError('invalid_payload');
     }
     return { kind: 'delete', targetId: envelope.targetId };
+  }
+  if (envelope.v === 6) {
+    if (
+      !hasExactKeys(envelope, ['v', 'kind', 'ttlSeconds', 'version']) ||
+      envelope.kind !== 'ephemeral' ||
+      !isEphemeralTtl(envelope.ttlSeconds) ||
+      !Number.isSafeInteger(envelope.version) ||
+      (envelope.version as number) <= 0
+    ) {
+      throw new InvalidPayloadError('invalid_payload');
+    }
+    return {
+      kind: 'ephemeral',
+      ttlSeconds: envelope.ttlSeconds,
+      version: envelope.version as number,
+    };
   }
   throw new InvalidPayloadError('unsupported_version');
 }

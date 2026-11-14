@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
-import { ChevronDown, Phone, ShieldCheck, Star, StarOff, Video } from 'lucide-react-native';
+import { ChevronDown, Phone, ShieldCheck, Star, StarOff, Timer, Video } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
   Alert,
@@ -89,6 +89,7 @@ const EMPTY_CAPABILITIES: ChatCapabilities = {
   forwarded: false,
   voice: false,
   typing: false,
+  ephemeral: false,
   calls: false,
   albums: false,
   groups: false,
@@ -134,6 +135,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   const [menuFor, setMenuFor] = useState<ChatMessageView | null>(null);
   const [seenFor, setSeenFor] = useState<ChatMessageView | null>(null);
   const [infoFor, setInfoFor] = useState<ChatMessageView | null>(null);
+  const [ephemeralOpen, setEphemeralOpen] = useState(false);
   const [forwardFor, setForwardFor] = useState<ChatMessageView | null>(null);
   const [forwardTargets, setForwardTargets] = useState<ConversationSummary[]>([]);
   const [forwardLoading, setForwardLoading] = useState(false);
@@ -211,6 +213,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     ready,
     error,
     typing,
+    ephemeralSeconds,
     loadOlder,
   } = useChatMessages({
     transport,
@@ -316,10 +319,24 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
           <ShieldCheck size={24} color={chat.headerText} />
         </Pressable>
       ) : null;
+    const ephemeralButton =
+      transport.mode === 'e2ee' && summary?.type === 'DIRECT' ? (
+        <Pressable
+          onPress={() => setEphemeralOpen(true)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={fr.chat.unified.ephemeralLabel}>
+          <Timer
+            size={23}
+            color={ephemeralSeconds > 0 ? chat.headerText : chat.secondaryText}
+          />
+        </Pressable>
+      ) : null;
     if (!transport.capabilities.calls) {
       return (
         <View style={styles.headerActions}>
           {securityButton}
+          {ephemeralButton}
           <Pressable
             onPress={showCallsUnavailable}
             hitSlop={8}
@@ -347,6 +364,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     return (
       <View style={styles.headerActions}>
         {securityButton}
+        {ephemeralButton}
         <Pressable
           onPress={() =>
             group
@@ -377,7 +395,17 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
         </Pressable>
       </View>
     );
-  }, [transport, summary?.type, directPeer, calls, conversationId, router, chat.headerText, showCallsUnavailable]);
+  }, [transport, summary?.type, directPeer, calls, conversationId, router, chat.headerText, chat.secondaryText, ephemeralSeconds, showCallsUnavailable]);
+
+  const applyEphemeral = useCallback(
+    (ttlSeconds: number) => {
+      setEphemeralOpen(false);
+      void transport
+        ?.setEphemeral(ttlSeconds)
+        .catch(() => Alert.alert(fr.e2eeChat.error, fr.chat.unified.failedToSend));
+    },
+    [transport],
+  );
 
   const copyMessage = useCallback(async (message: ChatMessageView) => {
     if (!(await copyToClipboard(message.body))) {
@@ -804,13 +832,22 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
       ? (summary.members.find((member) => member.id === typing.userId)?.displayName ??
         fr.e2eeChat.me)
       : null;
-  const subtitle = isGroup
+  const baseSubtitle = isGroup
     ? typingName
       ? fr.chat.unified.typing(typingName)
       : fr.chat.unified.members(summary?.members.length ?? 0)
     : typingName
       ? fr.chat.unified.typing(typingName)
       : '';
+  const ephemeralLabel =
+    ephemeralSeconds === 86_400
+      ? fr.chat.unified.ephemeral24h
+      : ephemeralSeconds === 604_800
+        ? fr.chat.unified.ephemeral7d
+        : null;
+  const subtitle = [baseSubtitle, ephemeralLabel ? fr.chat.unified.ephemeralHeader(ephemeralLabel) : null]
+    .filter(Boolean)
+    .join(' · ');
   const blockedText = summary?.blockedByThem
     ? fr.chat.unified.blockedPeer
     : isGroup && summary?.whoCanSend === 'admins' && summary.myRole !== 'admin'
@@ -1112,6 +1149,34 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
               <ThemedText type="small">{`${fr.e2eeChat.infoState} : ${infoFor.state}`}</ThemedText>
             </View>
           ) : null
+        }
+      />
+
+      <ActionSheet
+        visible={ephemeralOpen}
+        title={fr.chat.unified.ephemeralTitle}
+        actions={[
+          {
+            key: 'off',
+            label: fr.chat.unified.ephemeralOff,
+            onPress: () => applyEphemeral(0),
+          },
+          {
+            key: '24h',
+            label: fr.chat.unified.ephemeral24h,
+            onPress: () => applyEphemeral(86_400),
+          },
+          {
+            key: '7d',
+            label: fr.chat.unified.ephemeral7d,
+            onPress: () => applyEphemeral(604_800),
+          },
+        ]}
+        onClose={() => setEphemeralOpen(false)}
+        header={
+          <ThemedText type="small" themeColor="textSecondary">
+            {fr.chat.unified.ephemeralBody}
+          </ThemedText>
         }
       />
 

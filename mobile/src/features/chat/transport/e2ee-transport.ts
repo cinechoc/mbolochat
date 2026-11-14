@@ -3,6 +3,7 @@ import type { RecentGif } from '@/features/media/GifPanel';
 import type { PersonalSticker } from '@/features/stickers/stickerLibrary';
 import type { VoiceNote } from '@/features/voice-notes/useVoiceRecorder';
 import { isReactionRef } from '@/features/stickers/reactionRules';
+import { isEphemeralTtl } from '@/features/e2ee/payload';
 import type { Message, MessageReceipt, ReactionSummary } from '@/lib/types';
 import { MessageIndex } from '../model/message-index';
 import { storedMessageToView } from '../model/message-view';
@@ -22,6 +23,7 @@ import {
 const LOCAL_PAGE_SIZE = 50;
 const TYPING_REFRESH_MS = 2_500;
 const TYPING_EXPIRY_MS = 4_000;
+const EXPIRY_SWEEP_MS = 30_000;
 
 const E2EE_CAPABILITIES: ChatCapabilities = {
   replies: true,
@@ -32,6 +34,7 @@ const E2EE_CAPABILITIES: ChatCapabilities = {
   forwarded: true,
   voice: true,
   typing: true,
+  ephemeral: true,
   calls: false,
   albums: false,
   groups: false,
@@ -99,6 +102,7 @@ export class E2eeTransport implements ChatTransport {
 
   async loadInitial(): Promise<ChatSnapshot> {
     const { db } = await this.credentials();
+    await this.sweepExpired();
     const local = await this.deps.db.listLocalMessages(db, this.conversationId);
     this.reactions = await this.deps.db.loadReactionSummaries(
       db,
@@ -149,11 +153,13 @@ export class E2eeTransport implements ChatTransport {
           1,
         )
       : [];
+    const ephemeral = await this.deps.db.loadConversationEphemeral(db, this.conversationId);
     return {
       messages: [...this.index.values()],
       receipts: this.receipts,
       hasMore: probe.length > 0,
       unreadCount: 0,
+      ephemeralSeconds: ephemeral?.ephemeral_ttl_seconds ?? 0,
     };
   }
 
@@ -241,12 +247,17 @@ export class E2eeTransport implements ChatTransport {
     const offConnection = this.deps.socket.onConnection((online) =>
       this.handlers?.onConnection(online),
     );
+    void this.sweepExpired();
+    const expiryTimer = setInterval(() => {
+      void this.sweepExpired();
+    }, EXPIRY_SWEEP_MS);
     void this.deps.socket.ensureSocket(this.token).catch(() => undefined);
     this.cleanups.push(() => {
       socket.off('message:new', onMessage);
       socket.off('receipt', onReceipt);
       socket.off('typing', onTyping);
       offConnection();
+      clearInterval(expiryTimer);
     });
     return () => this.unsubscribe();
   }
@@ -519,6 +530,62 @@ export class E2eeTransport implements ChatTransport {
     }).catch(() => undefined);
   }
 
+  async setEphemeral(ttlSeconds: number): Promise<void> {
+    if (!this.capabilities.ephemeral) {
+      throw new UnsupportedCapabilityError('ephemeral');
+    }
+    if (!isEphemeralTtl(ttlSeconds)) {
+      throw new Error('Durée éphémère invalide');
+    }
+    const { db, account } = await this.credentials();
+    await this.deps.crypto.sendEncryptedEphemeral({
+      token: this.token,
+      db,
+      account,
+      conversation: this.summary,
+      currentUserId: this.currentUser.id,
+      currentUserName: this.currentUser.displayName,
+      ttlSeconds,
+    });
+    const state = await this.deps.db.loadConversationEphemeral(db, this.conversationId);
+    this.handlers?.onEphemeral?.(state?.ephemeral_ttl_seconds ?? 0);
+  }
+
+  async getEphemeralSeconds(): Promise<number> {
+    const { db } = await this.credentials();
+    const state = await this.deps.db.loadConversationEphemeral(db, this.conversationId);
+    return state?.ephemeral_ttl_seconds ?? 0;
+  }
+
+  private async sweepExpired(): Promise<void> {
+    const { db } = await this.credentials();
+    const purged = await this.deps.ephemeral.purgeExpiredMessages(db).catch(() => []);
+    for (const item of purged) {
+      const target = this.stored.get(item.id);
+      if (target) {
+        const expired: StoredE2eeMessage = {
+          ...target,
+          body: '',
+          media_meta: null,
+          local_cipher_uri: null,
+          upload_id: null,
+          local_thumb_cipher_uri: null,
+          thumb_upload_id: null,
+          sticker_ref: null,
+          quote_id: null,
+          unreadable_reason: null,
+          raw_payload: null,
+          deleted: 1,
+          deleted_by: null,
+        };
+        this.stored.set(item.id, expired);
+        this.reactions.delete(item.id);
+        this.index.upsert(this.render(expired));
+      }
+      this.handlers?.onMessageRemoved(item.id, true);
+    }
+  }
+
   saveDraft(text: string): void {
     void this.credentials()
       .then(({ db }) => this.deps.db.saveDraft(db, this.conversationId, text))
@@ -619,7 +686,11 @@ export class E2eeTransport implements ChatTransport {
           message,
           currentUserId: this.currentUser.id,
         });
-        if (result.reactionEvent) {
+        if (result.ephemeralEvent) {
+          if (result.ephemeralEvent.applied) {
+            this.handlers?.onEphemeral?.(result.ephemeralEvent.ttlSeconds);
+          }
+        } else if (result.reactionEvent) {
           this.reactions = await this.deps.db.loadReactionSummaries(
             db,
             this.conversationId,

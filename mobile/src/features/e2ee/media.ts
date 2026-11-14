@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { ensureSocket } from '@/lib/socket';
 import type { ConversationSummary, Message } from '@/lib/types';
 import {
+  loadConversationEphemeral,
   loadLocalMessage,
   renameLocalMessage,
   saveLocalMessage,
@@ -247,6 +248,13 @@ async function releaseDurableAfterSend(
  * durable et le journal de préparation, eux, sont conservés — ils permettent
  * une reprise, ils ne se recréent pas.
  */
+function expiryFromTtl(createdAt: string, ttlSeconds: number): string | null {
+  const start = Date.parse(createdAt);
+  return ttlSeconds > 0 && Number.isFinite(start)
+    ? new Date(start + ttlSeconds * 1000).toISOString()
+    : null;
+}
+
 export async function sendEncryptedMedia(
   input: SendEncryptedMediaInput,
 ): Promise<SendEncryptedMediaResult> {
@@ -376,6 +384,10 @@ export async function sendEncryptedMedia(
     const mediaMeta = encodeMediaMeta(media);
     await advanceMediaPreparation(input.db, clientId, { state: 'uploaded', mediaMeta });
     const caption = input.caption?.trim() ?? '';
+    const createdAt = new Date().toISOString();
+    const ttl =
+      (await loadConversationEphemeral(input.db, input.conversation.id))
+        ?.ephemeral_ttl_seconds ?? 0;
 
     // 8. SQLCipher : la ligne du message porte les références durables.
     const provisional: StoredE2eeMessage = {
@@ -384,11 +396,12 @@ export async function sendEncryptedMedia(
       sender_id: input.currentUserId,
       sender_name: input.currentUserName,
       body: caption,
-      created_at: new Date().toISOString(),
+      created_at: createdAt,
       client_id: clientId,
       mine: 1,
       media_meta: mediaMeta,
       quote_id: null,
+      expires_at: expiryFromTtl(createdAt, ttl),
     };
     await saveLocalMessage(input.db, provisional);
     await updateLocalMessageMedia(input.db, clientId, {
@@ -574,6 +587,10 @@ export async function resumeEncryptedMedia(
     clientId: input.clientId,
   });
 
+  const resumedAt = new Date().toISOString();
+  const resumedTtl =
+    (await loadConversationEphemeral(input.db, input.conversation.id))
+      ?.ephemeral_ttl_seconds ?? 0;
   const provisional: StoredE2eeMessage =
     previous ?? {
       id: input.clientId,
@@ -581,11 +598,12 @@ export async function resumeEncryptedMedia(
       sender_id: input.currentUserId,
       sender_name: input.currentUserName,
       body: '',
-      created_at: new Date().toISOString(),
+      created_at: resumedAt,
       client_id: input.clientId,
       mine: 1,
       media_meta: refs.mediaMeta,
       quote_id: null,
+      expires_at: expiryFromTtl(resumedAt, resumedTtl),
     };
   await saveLocalMessage(input.db, provisional);
   await renameLocalMessage(input.db, input.clientId, serverMessage.id);

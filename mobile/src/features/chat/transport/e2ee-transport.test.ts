@@ -129,6 +129,7 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
     loadDraft: vi.fn(async () => 'brouillon chiffré'),
     deleteLocalMessage: vi.fn(async () => undefined),
     loadReactionSummaries: vi.fn(async () => new Map()),
+    loadConversationEphemeral: vi.fn(async () => null),
   };
   const crypto = {
     sendEncryptedText: vi.fn(async () => ({
@@ -177,6 +178,19 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
         sender_name: 'me',
         body: '',
         sticker_ref: stickerRef,
+      }),
+    })),
+    sendEncryptedEphemeral: vi.fn(async () => ({
+      clientId: 'ephemeral-1',
+      ttlSeconds: 86_400,
+      version: 1,
+      serverMessage: serverMessage('ephemeral-1', '2026-01-01T00:00:14.000Z', { sender: identity('me') }),
+      stored: stored('ephemeral-1', '2026-01-01T00:00:14.000Z', {
+        sender_id: 'me',
+        sender_name: 'me',
+        body: '',
+        hidden: 1,
+        content_kind: 'ephemeral',
       }),
     })),
     sendEncryptedDelete: vi.fn(async () => ({
@@ -251,6 +265,7 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
     crypto: crypto as unknown as E2eeTransportDeps['crypto'],
     receipts: receipts as unknown as E2eeTransportDeps['receipts'],
     deletion: deletion as unknown as E2eeTransportDeps['deletion'],
+    ephemeral: { purgeExpiredMessages: vi.fn(async () => []) },
     cache: cache as unknown as E2eeTransportDeps['cache'],
     clock: () => 0,
   };

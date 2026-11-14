@@ -255,6 +255,61 @@ export async function savePeerSigningKeyWith(
   );
 }
 
+export interface ConversationEphemeralState {
+  conversation_id: string;
+  ephemeral_ttl_seconds: number;
+  ephemeral_version: number;
+  updated_at: string;
+}
+
+export async function loadConversationEphemeral(
+  db: SQLiteDatabase,
+  conversationId: string,
+): Promise<ConversationEphemeralState | null> {
+  return db.getFirstAsync<ConversationEphemeralState>(
+    `SELECT conversation_id, ephemeral_ttl_seconds, ephemeral_version, updated_at
+       FROM e2ee_conversation_state WHERE conversation_id = ?`,
+    conversationId,
+  );
+}
+
+/**
+ * Applique un réglage seulement si sa version est strictement plus récente.
+ * `changes > 0` indique que l'état local a réellement changé.
+ */
+export async function applyConversationEphemeralWith(
+  writer: SqlWriter,
+  conversationId: string,
+  ttlSeconds: number,
+  version: number,
+  updatedAt = new Date().toISOString(),
+): Promise<boolean> {
+  const result = await writer.runAsync(
+    `INSERT INTO e2ee_conversation_state
+       (conversation_id, ephemeral_ttl_seconds, ephemeral_version, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(conversation_id) DO UPDATE SET
+       ephemeral_ttl_seconds = excluded.ephemeral_ttl_seconds,
+       ephemeral_version = excluded.ephemeral_version,
+       updated_at = excluded.updated_at
+     WHERE excluded.ephemeral_version > e2ee_conversation_state.ephemeral_version`,
+    conversationId,
+    ttlSeconds,
+    version,
+    updatedAt,
+  );
+  return result.changes > 0;
+}
+
+export async function saveConversationEphemeral(
+  db: SQLiteDatabase,
+  conversationId: string,
+  ttlSeconds: number,
+  version: number,
+): Promise<boolean> {
+  return applyConversationEphemeralWith(db, conversationId, ttlSeconds, version);
+}
+
 export interface IdentityVerificationRow {
   peer_user_id: string;
   peer_identity_key: string;
@@ -411,6 +466,8 @@ export interface StoredE2eeMessage {
   reaction_action?: string | null;
   /** Contenu authentifié d'une version future, conservé en SQLCipher seulement. */
   raw_payload?: string | null;
+  /** Échéance d'un message éphémère, au format ISO ; null pour un message normal. */
+  expires_at?: string | null;
   /** Message supprimé pour tous : rangée conservée, contenu vidé. */
   deleted?: number | null;
   /** Auteur vérifié de la suppression, pour audit local uniquement. */
@@ -438,8 +495,8 @@ export async function saveLocalMessageWith(
     `INSERT INTO e2ee_messages
        (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
         media_meta, quote_id, sticker_ref, unreadable_reason, hidden, content_kind,
-        control_target, reaction, reaction_action, raw_payload, deleted, deleted_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        control_target, reaction, reaction_action, raw_payload, expires_at, deleted, deleted_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        body = excluded.body,
        sticker_ref = COALESCE(excluded.sticker_ref, e2ee_messages.sticker_ref),
@@ -450,6 +507,7 @@ export async function saveLocalMessageWith(
        reaction = excluded.reaction,
        reaction_action = excluded.reaction_action,
        raw_payload = COALESCE(excluded.raw_payload, e2ee_messages.raw_payload),
+       expires_at = COALESCE(excluded.expires_at, e2ee_messages.expires_at),
        deleted = CASE WHEN e2ee_messages.deleted = 1 THEN 1 ELSE excluded.deleted END,
        deleted_by = COALESCE(e2ee_messages.deleted_by, excluded.deleted_by)`,
     message.id,
@@ -470,6 +528,7 @@ export async function saveLocalMessageWith(
     message.reaction ?? null,
     message.reaction_action ?? null,
     message.raw_payload ?? null,
+    message.expires_at ?? null,
     message.deleted ?? 0,
     message.deleted_by ?? null,
   );

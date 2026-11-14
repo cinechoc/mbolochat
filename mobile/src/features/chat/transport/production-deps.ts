@@ -1,6 +1,7 @@
 import * as e2eeDb from '@/features/e2ee/db';
 import * as e2eeDeletion from '@/features/e2ee/deletion';
 import * as e2eeDeletionFiles from '@/features/e2ee/deletionFiles';
+import * as e2eeEphemeral from '@/features/e2ee/ephemeral';
 import * as e2eeMedia from '@/features/e2ee/media';
 import * as e2eeReceipts from '@/features/e2ee/receipts';
 import * as e2eeText from '@/features/e2ee/text';
@@ -31,10 +32,12 @@ export const E2EE_DEPS: E2eeTransportDeps = {
     sendEncryptedReaction: e2eeText.sendEncryptedReaction,
     sendEncryptedSticker: e2eeText.sendEncryptedSticker,
     sendEncryptedDelete: e2eeText.sendEncryptedDelete,
+    sendEncryptedEphemeral: e2eeText.sendEncryptedEphemeral,
     sendEncryptedMedia: e2eeMedia.sendEncryptedMedia,
     decryptIncoming: e2eeText.decryptIncoming,
   },
   deletion: { ...e2eeDeletion, ...e2eeDeletionFiles },
+  ephemeral: e2eeEphemeral,
   receipts: e2eeReceipts,
   clock: () => Date.now(),
 };

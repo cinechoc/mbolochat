@@ -28,6 +28,7 @@ export function useChatMessages(input: {
   error: string | null;
   typing: { userId: string; text: string } | null;
   online: boolean;
+  ephemeralSeconds: number;
   loadOlder: () => Promise<void>;
 } {
   const { transport, timeGapMs, currentUserId, unreadCount = 0 } = input;
@@ -61,6 +62,7 @@ export function useChatMessages(input: {
       onReceipts: (receipts) => dispatch({ type: 'receipts', receipts }),
       onReaction: (id, reactions) => dispatch({ type: 'reaction', id, reactions }),
       onTyping: (typing) => dispatch({ type: 'typing', typing }),
+      onEphemeral: (ttlSeconds) => dispatch({ type: 'ephemeral', ttlSeconds }),
       onConnection: (online) => dispatch({ type: 'connection', online }),
       onConversationUpdated: () => undefined,
       onConversationRemoved: () => undefined,
@@ -108,6 +110,7 @@ export function useChatMessages(input: {
     error: state.error,
     typing: state.typing,
     online: state.online,
+    ephemeralSeconds: state.ephemeralSeconds,
     loadOlder,
   };
 }

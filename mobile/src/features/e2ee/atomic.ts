@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import {
+  applyConversationEphemeralWith,
   notePeerIdentityChangedWith,
   pruneUnknownPayloadsWith,
   saveE2eeAccountWith,
@@ -296,6 +297,8 @@ export interface PersistIncomingInput {
   pinPeerKey?: boolean;
   /** Le pair a changé de clé d'identité : la vérification locale retombe. */
   identityChanged?: boolean;
+  /** Réglage éphémère reçu : appliqué seulement si sa version est plus récente. */
+  ephemeral?: { ttlSeconds: number; version: number };
   /**
    * Événement de suppression pour tous : la tombstone, l'application à la
    * cible et l'avancement Olm sont écrits ensemble.
@@ -310,6 +313,7 @@ export interface PersistIncomingInput {
 
 export interface PersistIncomingResult {
   deletion?: DeleteForAllResult;
+  ephemeralApplied?: boolean;
 }
 
 export async function persistIncoming(
@@ -327,6 +331,14 @@ export async function persistIncoming(
         tx,
         input.message.sender_id,
         input.session.peer_identity_key,
+      );
+    }
+    if (input.ephemeral) {
+      result.ephemeralApplied = await applyConversationEphemeralWith(
+        tx,
+        input.message.conversation_id,
+        input.ephemeral.ttlSeconds,
+        input.ephemeral.version,
       );
     }
     if (input.message.content_kind === 'unknown') {

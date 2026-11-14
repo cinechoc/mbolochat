@@ -22,7 +22,7 @@ export type E2eeSchemaDb = Pick<
 >;
 
 /** Version de schéma attendue par ce code. */
-export const E2EE_SCHEMA_VERSION = 9;
+export const E2EE_SCHEMA_VERSION = 10;
 
 const META_TABLE = 'e2ee_schema_meta';
 
@@ -405,6 +405,7 @@ const STEPS: { version: number; run: (db: E2eeSchemaDb) => Promise<void> }[] = [
   { version: 7, run: migrateToV7 },
   { version: 8, run: migrateToV8 },
   { version: 9, run: migrateToV9 },
+  { version: 10, run: migrateToV10 },
 ];
 
 async function readVersion(db: E2eeSchemaDb): Promise<number> {
@@ -575,6 +576,31 @@ async function migrateToV9(db: E2eeSchemaDb): Promise<void> {
       );
     `);
     await stampVersion(db, 9);
+  });
+}
+
+/**
+ * Version 10 : messages éphémères.
+ *
+ * Le réglage vit par conversation ; `version` permet à la modification la plus
+ * récente de gagner même si les enveloppes arrivent dans un autre ordre.
+ * `expires_at` ne concerne que les nouveaux messages : les anciens gardent leur
+ * valeur NULL et ne sont jamais purgés rétroactivement.
+ */
+async function migrateToV10(db: E2eeSchemaDb): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await addMissingColumns(db, 'e2ee_messages', [['expires_at', 'TEXT']]);
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS e2ee_conversation_state (
+        conversation_id TEXT PRIMARY KEY,
+        ephemeral_ttl_seconds INTEGER NOT NULL DEFAULT 0,
+        ephemeral_version INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS e2ee_messages_expiry_idx
+        ON e2ee_messages (expires_at) WHERE expires_at IS NOT NULL;
+    `);
+    await stampVersion(db, 10);
   });
 }
 

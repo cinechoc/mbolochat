@@ -39,6 +39,7 @@ const CLASSIC_CAPABILITIES: ChatCapabilities = {
   forwarded: false,
   voice: true,
   typing: true,
+  ephemeral: false,
   calls: true,
   albums: true,
   groups: true,
@@ -141,6 +142,7 @@ export class ClassicTransport implements ChatTransport {
       receipts: this.receipts,
       hasMore: history.length >= PAGE_SIZE,
       unreadCount: summary.unreadCount,
+      ephemeralSeconds: 0,
     };
   }
 
@@ -452,6 +454,14 @@ export class ClassicTransport implements ChatTransport {
       typing: active,
       ...(text ? { text: text.slice(0, 300) } : {}),
     });
+  }
+
+  async setEphemeral(_ttlSeconds: number): Promise<void> {
+    throw new UnsupportedCapabilityError('ephemeral');
+  }
+
+  async getEphemeralSeconds(): Promise<number> {
+    return 0;
   }
 
   saveDraft(text: string): void {

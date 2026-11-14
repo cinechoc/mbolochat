@@ -6,12 +6,14 @@ import { ensureSocket } from '@/lib/socket';
 import type { ConversationSummary, Message } from '@/lib/types';
 import {
   deleteLocalMessage,
+  loadConversationEphemeral,
   loadE2eeAccount,
   loadLocalMessage,
   loadPeerSigningKey,
   loadSession,
   MAX_UNKNOWN_PAYLOAD_CHARS,
   renameLocalMessage,
+  saveConversationEphemeral,
   saveLocalMessage,
   savePeerSigningKey,
   type E2eeAccountRow,
@@ -21,6 +23,7 @@ import {
 } from './db';
 import {
   buildDeleteV5,
+  buildEphemeralV6,
   buildReactionV4,
   buildStickerV3,
   buildTextV1,
@@ -29,6 +32,7 @@ import {
   InvalidPayloadError,
   parsePayload,
   type EncryptedMedia,
+  type EphemeralTtl,
   type ParsedPayload,
   type PayloadError,
   type ReactionAction,
@@ -354,6 +358,8 @@ interface OutgoingContent {
   controlTarget?: string | null;
   reaction?: string | null;
   reactionAction?: string | null;
+  /** Les messages visibles reçoivent l'échéance éphémère courante. */
+  applyEphemeral?: boolean;
 }
 
 /** Envoie un contenu déjà sérialisé par l'un des builders ci-dessus. */
@@ -363,6 +369,16 @@ async function sendEncryptedContent(
   content: OutgoingContent,
 ): Promise<SendResult> {
   const clientId = input.clientId ?? newClientId();
+  const createdAt = new Date().toISOString();
+  let expiresAt: string | null = null;
+  if (content.applyEphemeral) {
+    const state = await loadConversationEphemeral(input.db, input.conversation.id);
+    const ttl = state?.ephemeral_ttl_seconds ?? 0;
+    if (ttl > 0) {
+      const start = Date.parse(createdAt);
+      if (Number.isFinite(start)) expiresAt = new Date(start + ttl * 1000).toISOString();
+    }
+  }
   const encrypted = await encryptEnvelope({
     token: input.token,
     db: input.db,
@@ -383,7 +399,7 @@ async function sendEncryptedContent(
     sender_id: input.currentUserId,
     sender_name: input.currentUserName,
     body: content.body,
-    created_at: new Date().toISOString(),
+    created_at: createdAt,
     client_id: clientId,
     mine: 1,
     media_meta: null,
@@ -394,6 +410,7 @@ async function sendEncryptedContent(
     control_target: content.controlTarget ?? null,
     reaction: content.reaction ?? null,
     reaction_action: content.reactionAction ?? null,
+    expires_at: expiresAt,
   };
   // La ligne provisoire est écrite avant l'envoi : un plantage entre les deux
   // ne doit pas rendre le message indéchiffrable et invisible.
@@ -434,7 +451,7 @@ export async function sendEncryptedText(
   return sendEncryptedContent(
     input,
     buildTextV1(input.text, input.replyToId ?? undefined),
-    { body: input.text, quoteId: input.replyToId ?? null },
+    { body: input.text, quoteId: input.replyToId ?? null, applyEphemeral: true },
   );
 }
 
@@ -444,6 +461,7 @@ export async function sendEncryptedSticker(
   return sendEncryptedContent(input, buildStickerV3(input.stickerRef), {
     body: '',
     stickerRef: input.stickerRef,
+    applyEphemeral: true,
   });
 }
 
@@ -477,6 +495,30 @@ export async function sendEncryptedDelete(
     contentKind: 'delete',
     controlTarget: input.targetId,
   });
+}
+
+export async function sendEncryptedEphemeral(
+  input: SendEncryptedContentInput & { ttlSeconds: EphemeralTtl },
+): Promise<SendResult & { ttlSeconds: EphemeralTtl; version: number }> {
+  const current = await loadConversationEphemeral(input.db, input.conversation.id);
+  const version = Math.max((current?.ephemeral_version ?? 0) + 1, Date.now());
+  const result = await sendEncryptedContent(
+    input,
+    buildEphemeralV6(input.ttlSeconds, version),
+    {
+      body: '',
+      hidden: true,
+      contentKind: 'ephemeral',
+      applyEphemeral: false,
+    },
+  );
+  await saveConversationEphemeral(
+    input.db,
+    input.conversation.id,
+    input.ttlSeconds,
+    version,
+  );
+  return { ...result, ttlSeconds: input.ttlSeconds, version };
 }
 
 /** Résultat brut d'une ouverture : rien n'est encore écrit en base. */
@@ -772,6 +814,14 @@ export interface IncomingDeletionEvent {
   mediaRefs?: LocalMediaRefs | null;
 }
 
+export interface IncomingEphemeralEvent {
+  ttlSeconds: number;
+  version: number;
+  /** Faux si une version plus récente était déjà appliquée localement. */
+  applied: boolean;
+  authorId: string;
+}
+
 export interface DecryptIncomingResult {
   text: string;
   media?: EncryptedMedia;
@@ -787,6 +837,7 @@ export interface DecryptIncomingResult {
   hidden?: boolean;
   reactionEvent?: IncomingReactionEvent;
   deletionEvent?: IncomingDeletionEvent;
+  ephemeralEvent?: IncomingEphemeralEvent;
   /** Médias locaux à nettoyer après une suppression appliquée hors événement v5. */
   deletedMediaRefs?: LocalMediaRefs | null;
   account: E2eeAccountRow;
@@ -882,11 +933,25 @@ export async function decryptIncoming(input: {
       }
       const isReaction = parsed.kind === 'reaction';
       const isDelete = parsed.kind === 'delete';
+      const isEphemeral = parsed.kind === 'ephemeral';
       const deleteTarget = parsed.kind === 'delete' ? parsed.targetId : null;
       const controlTarget =
         parsed.kind === 'reaction' || parsed.kind === 'delete' ? parsed.targetId : null;
       const reaction = parsed.kind === 'reaction' ? parsed.reaction : null;
       const reactionAction = parsed.kind === 'reaction' ? parsed.action : null;
+      const ephemeralState =
+        parsed.kind === 'ephemeral'
+          ? { ttlSeconds: parsed.ttlSeconds, version: parsed.version }
+          : undefined;
+      const currentTtl = isEphemeral
+        ? 0
+        : ((await loadConversationEphemeral(input.db, message.conversationId))
+            ?.ephemeral_ttl_seconds ?? 0);
+      const start = Date.parse(message.createdAt);
+      const expiresAt =
+        currentTtl > 0 && Number.isFinite(start)
+          ? new Date(start + currentTtl * 1000).toISOString()
+          : null;
       const stored: StoredE2eeMessage = {
         id: message.id,
         conversation_id: message.conversationId,
@@ -903,11 +968,18 @@ export async function decryptIncoming(input: {
         // Référence validée par `parsePayload` : forme `pack/id` uniquement.
         // Rien d'autre n'en est tiré — ni URL, ni chemin, ni binaire.
         sticker_ref: parsed.kind === 'sticker' ? parsed.stickerRef : null,
-        hidden: isReaction || isDelete ? 1 : 0,
-        content_kind: isReaction ? 'reaction' : isDelete ? 'delete' : null,
+        hidden: isReaction || isDelete || isEphemeral ? 1 : 0,
+        content_kind: isReaction
+          ? 'reaction'
+          : isDelete
+            ? 'delete'
+            : isEphemeral
+              ? 'ephemeral'
+              : null,
         control_target: controlTarget,
         reaction,
         reaction_action: reactionAction,
+        expires_at: expiresAt,
       };
       const persisted = await persistIncoming({
         db: input.db,
@@ -919,6 +991,7 @@ export async function decryptIncoming(input: {
         // Le pair est épinglé dès qu'il change de clé, ou à la première vue.
         pinPeerKey: opened.keyChanged || !opened.knownKey,
         identityChanged: opened.identityChanged,
+        ephemeral: ephemeralState,
         deletion: deleteTarget
           ? {
               targetId: deleteTarget,
@@ -928,6 +1001,21 @@ export async function decryptIncoming(input: {
             }
           : undefined,
       });
+      if (isEphemeral) {
+        return {
+          text: '',
+          hidden: true,
+          ephemeralEvent: {
+            ttlSeconds: ephemeralState?.ttlSeconds ?? 0,
+            version: ephemeralState?.version ?? 0,
+            applied: Boolean(persisted.ephemeralApplied),
+            authorId: message.sender.id,
+          },
+          account: opened.account,
+          stored,
+          keyChanged: opened.keyChanged,
+        };
+      }
       if (isDelete) {
         const targetId = deleteTarget ?? '';
         const target = persisted.deletion?.applied

@@ -29,6 +29,7 @@ export interface ChatCapabilities {
   forwarded: boolean;
   voice: boolean;
   typing: boolean;
+  ephemeral: boolean;
   calls: boolean;
   albums: boolean;
   groups: boolean;
@@ -47,6 +48,7 @@ export type GatedCapability =
   | 'forwarded'
   | 'voice'
   | 'typing'
+  | 'ephemeral'
   | 'calls';
 
 /** Refus typé d'une méthode non supportée par le mode courant. */
@@ -167,6 +169,7 @@ export interface ChatSnapshot {
   receipts: Record<string, MessageReceipt[]>;
   hasMore: boolean;
   unreadCount: number;
+  ephemeralSeconds: number;
 }
 
 export interface ChatPage {
@@ -180,6 +183,7 @@ export interface ChatTransportHandlers {
   onReceipts(receipts: MessageReceipt[]): void;
   onReaction(messageId: string, reactions: ReactionSummary[]): void;
   onTyping(state: { userId: string; text: string } | null): void;
+  onEphemeral?(ttlSeconds: number): void;
   onConnection(online: boolean): void;
   onConversationUpdated(summary: ConversationSummary): void;
   onConversationRemoved(): void;
@@ -219,6 +223,8 @@ export interface ChatTransport {
   markRead(ids?: string[]): Promise<void>;
   reportDelivered(ids: string[]): void;
   setTyping(active: boolean, text?: string): void;
+  setEphemeral(ttlSeconds: number): Promise<void>;
+  getEphemeralSeconds(): Promise<number>;
   saveDraft(text: string): void;
   loadDraft(): Promise<string>;
   retry(id: string): void;

@@ -11,6 +11,7 @@ export interface MessagesState {
   error: string | null;
   typing: { userId: string; text: string } | null;
   online: boolean;
+  ephemeralSeconds: number;
 }
 
 export const INITIAL_MESSAGES_STATE: MessagesState = {
@@ -21,6 +22,7 @@ export const INITIAL_MESSAGES_STATE: MessagesState = {
   error: null,
   typing: null,
   online: true,
+  ephemeralSeconds: 0,
 };
 
 /** Insertion par recherche binaire, horodatages égaux conservés dans l'ordre. */
@@ -149,6 +151,7 @@ export type MessagesAction =
   | { type: 'hasMore'; hasMore: boolean }
   | { type: 'error'; error: string | null }
   | { type: 'typing'; typing: { userId: string; text: string } | null }
+  | { type: 'ephemeral'; ttlSeconds: number }
   | { type: 'connection'; online: boolean };
 
 export function messagesReducer(state: MessagesState, action: MessagesAction): MessagesState {
@@ -162,6 +165,7 @@ export function messagesReducer(state: MessagesState, action: MessagesAction): M
         receipts: action.snapshot.receipts,
         ready: true,
         hasMore: action.snapshot.hasMore,
+        ephemeralSeconds: action.snapshot.ephemeralSeconds,
         error: null,
       };
     case 'upsert':
@@ -188,6 +192,10 @@ export function messagesReducer(state: MessagesState, action: MessagesAction): M
       return state.error === action.error ? state : { ...state, error: action.error };
     case 'typing':
       return state.typing === action.typing ? state : { ...state, typing: action.typing };
+    case 'ephemeral':
+      return state.ephemeralSeconds === action.ttlSeconds
+        ? state
+        : { ...state, ephemeralSeconds: action.ttlSeconds };
     case 'connection':
       return state.online === action.online ? state : { ...state, online: action.online };
     default:

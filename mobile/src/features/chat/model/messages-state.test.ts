@@ -47,6 +47,7 @@ describe('messagesReducer', () => {
         receipts: {},
         hasMore: true,
         unreadCount: 0,
+        ephemeralSeconds: 0,
       },
     });
     expect(state.messages.map((entry) => entry.id)).toEqual(['a', 'b']);
