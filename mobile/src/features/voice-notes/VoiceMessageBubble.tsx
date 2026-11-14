@@ -43,8 +43,13 @@ type Props = {
   foregroundColor?: string;
   barOffColor?: string;
   barOnColor?: string;
-  /** Pastille et vitesse mémorisée : réservé au chemin clair de l'écran unifié. */
+  /** Bouton de vitesse dans la bulle : 1x → 1,5x → 2x, mémorisé. */
   speedControl?: boolean;
+  /** Bouton « Aa » : la transcription n'existe que pour les notes reçues
+   *  dont le moteur local est disponible et le clair déjà déchiffré. */
+  transcribable?: boolean;
+  /** Produit le texte transcrit (cache puis moteur) ; `null` si indisponible. */
+  onTranscribe?: () => Promise<string | null>;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -88,17 +93,22 @@ function VoiceMessageBubbleBase({
   barOffColor,
   barOnColor,
   speedControl = false,
+  transcribable = false,
+  onTranscribe,
   style,
 }: Props) {
   const { width: screenW } = useWindowDimensions();
   const playback = useVoicePlayback(id);
   const [scrub, setScrub] = useState<number | null>(null);
   const track = useRef({ x: 0, width: 1 });
+  // Transcript : `null` = masqué, chaîne = affiché sous l'onde.
+  const [transcript, setTranscript] = useState<string | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
 
   // Largeur proportionnelle à la durée (comme WeChat), bornée.
   const width = voiceBubbleWidth(durationMs, screenW);
 
-  const barCount = Math.max(8, Math.floor((width - 104) / 5));
+  const barCount = Math.max(8, Math.floor((width - 140) / 5));
   const bars = useMemo(
     () =>
       toWaveform(
@@ -127,6 +137,22 @@ function VoiceMessageBubbleBase({
       console.warn('[VoiceMessageBubble] lecture impossible', e);
     }
   }, [id, uri, durationMs, unplayed, onFirstPlay, speedControl]);
+
+  const toggleTranscript = useCallback(async () => {
+    if (transcript !== null) {
+      setTranscript(null);
+      return;
+    }
+    if (!onTranscribe || transcribing) return;
+    setTranscribing(true);
+    try {
+      setTranscript((await onTranscribe()) ?? fr.chat.voiceTranscript.unavailable);
+    } catch {
+      setTranscript(fr.chat.voiceTranscript.unavailable);
+    } finally {
+      setTranscribing(false);
+    }
+  }, [transcript, onTranscribe, transcribing]);
 
   const ratioFromX = useCallback(
     (x: number) => Math.min(1, Math.max(0, (x - track.current.x) / Math.max(1, track.current.width))),
@@ -177,40 +203,61 @@ function VoiceMessageBubbleBase({
               { backgroundColor: bg },
             ]}
           />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              active && playback.playing
-                ? 'Mettre en pause le message vocal'
-                : `Lire le message vocal de ${formatTime(durationMs)}`
-            }
-            hitSlop={8}
-            onPress={() => void onPress()}
-            style={({ pressed }) => [styles.playButton, pressed && styles.pressed]}>
-            <Ionicons
-              name={active && playback.playing ? 'pause' : 'play'}
-              size={20}
-              color={foregroundColor}
-              style={styles.icon}
-            />
-          </Pressable>
-          <View
-            style={styles.waveform}
-            onLayout={(e) => {
-              track.current = { x: e.nativeEvent.layout.x, width: e.nativeEvent.layout.width };
-            }}>
-            {bars.map((v, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.bar,
-                  { height: 4 + v * 20, backgroundColor: i / bars.length < shownProgress ? barOn : barOff },
-                ]}
+          <View style={styles.contentRow}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                active && playback.playing
+                  ? 'Mettre en pause le message vocal'
+                  : `Lire le message vocal de ${formatTime(durationMs)}`
+              }
+              hitSlop={8}
+              onPress={() => void onPress()}
+              style={({ pressed }) => [styles.playButton, pressed && styles.pressed]}>
+              <Ionicons
+                name={active && playback.playing ? 'pause' : 'play'}
+                size={20}
+                color={foregroundColor}
+                style={styles.icon}
               />
-            ))}
+            </Pressable>
+            <View
+              style={styles.waveform}
+              onLayout={(e) => {
+                track.current = { x: e.nativeEvent.layout.x, width: e.nativeEvent.layout.width };
+              }}>
+              {bars.map((v, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.bar,
+                    { height: 4 + v * 20, backgroundColor: i / bars.length < shownProgress ? barOn : barOff },
+                  ]}
+                />
+              ))}
+            </View>
+            <Text style={[styles.duration, { color: foregroundColor }]}>{label}</Text>
+            {transcribable ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  transcript !== null
+                    ? fr.chat.voiceTranscript.hide
+                    : fr.chat.voiceTranscript.action
+                }
+                hitSlop={6}
+                onPress={() => void toggleTranscript()}
+                style={({ pressed }) => [styles.chip, pressed && { opacity: 0.7 }]}>
+                <Text style={[styles.chipText, { color: foregroundColor }]}>Aa</Text>
+              </Pressable>
+            ) : null}
+            {speedControl ? <VoiceSpeedChip foreground={foregroundColor} /> : null}
           </View>
-          <Text style={[styles.duration, { color: foregroundColor }]}>{label}</Text>
-          {speedControl && active && playback.playing ? <VoiceSpeedPill /> : null}
+          {transcribing || transcript !== null ? (
+            <Text style={[styles.transcript, { color: foregroundColor }]} numberOfLines={8}>
+              {transcribing ? fr.chat.voiceTranscript.running : transcript}
+            </Text>
+          ) : null}
         </View>
       </GestureDetector>
       {!isMine && unplayed && <View style={styles.unplayedDot} />}
@@ -220,7 +267,8 @@ function VoiceMessageBubbleBase({
 
 export const VoiceMessageBubble = memo(VoiceMessageBubbleBase);
 
-function VoiceSpeedPill() {
+/** Chip de vitesse dans la bulle : 1x par défaut, cycles 1x → 1,5x → 2x. */
+function VoiceSpeedChip({ foreground }: { foreground: string }) {
   const speed = useVoiceSpeed();
   const label = fr.voicePlayback.speedValue(speed);
   return (
@@ -232,10 +280,8 @@ function VoiceSpeedPill() {
         setVoicePlaybackSpeed(next);
         void setVoiceSpeed(next);
       }}
-      style={styles.speedHit}>
-      <View style={styles.speedPill}>
-        <Text style={styles.speedText}>{label}</Text>
-      </View>
+      style={({ pressed }) => [styles.chip, pressed && { opacity: 0.7 }]}>
+      <Text style={[styles.chipText, { color: foreground }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -245,12 +291,19 @@ const styles = StyleSheet.create({
   rowMine: { alignSelf: 'flex-end' },
   rowOther: { alignSelf: 'flex-start' },
   bubble: {
-    height: 44,
+    minHeight: 44,
     borderRadius: Radii.lg,
+    flexDirection: 'column',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  contentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
     gap: 8,
+    height: 32,
   },
   tail: {
     position: 'absolute',
@@ -268,24 +321,16 @@ const styles = StyleSheet.create({
   waveform: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 28 },
   bar: { width: 2.5, borderRadius: Radii.full},
   duration: { minWidth: 34, textAlign: 'right', fontSize: 13, fontVariant: ['tabular-nums'] },
-  speedHit: {
-    position: 'absolute',
-    top: -18,
-    right: 2,
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  speedPill: {
-    minWidth: 28,
-    height: 17,
+  chip: {
+    minWidth: 26,
+    height: 18,
     borderRadius: Radii.full,
     paddingHorizontal: 5,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.10)',
   },
-  speedText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  chipText: { fontSize: 11, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  transcript: { fontSize: 13, lineHeight: 17, flexShrink: 1 },
   unplayedDot: { width: 8, height: 8, borderRadius: Radii.full, backgroundColor: '#FA5151', marginLeft: 6 },
 });

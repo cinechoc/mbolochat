@@ -22,7 +22,7 @@ export type E2eeSchemaDb = Pick<
 >;
 
 /** Version de schéma attendue par ce code. */
-export const E2EE_SCHEMA_VERSION = 12;
+export const E2EE_SCHEMA_VERSION = 13;
 
 const META_TABLE = 'e2ee_schema_meta';
 
@@ -408,6 +408,7 @@ const STEPS: { version: number; run: (db: E2eeSchemaDb) => Promise<void> }[] = [
   { version: 10, run: migrateToV10 },
   { version: 11, run: migrateToV11 },
   { version: 12, run: migrateToV12 },
+  { version: 13, run: migrateToV13 },
 ];
 
 async function readVersion(db: E2eeSchemaDb): Promise<number> {
@@ -645,6 +646,26 @@ async function migrateToV12(db: E2eeSchemaDb): Promise<void> {
         WHERE scheduled_at IS NOT NULL;
     `);
     await stampVersion(db, 12);
+  });
+}
+
+/**
+ * Version 13 : transcription locale des notes vocales.
+ *
+ * Le texte dérivé d'un média chiffré ne vit que dans SQLCipher : il n'est ni
+ * envoyé au serveur ni stocké en clair. La table est un cache par message ; la
+ * supprimer ne détruit que le confort de lecture, jamais le média.
+ */
+async function migrateToV13(db: E2eeSchemaDb): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS e2ee_voice_transcriptions (
+        message_id TEXT PRIMARY KEY,
+        text TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `);
+    await stampVersion(db, 13);
   });
 }
 

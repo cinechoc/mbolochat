@@ -207,6 +207,12 @@ export const fr = {
       previewA11y: (duration: string) => `Aperçu du message vocal, ${duration}`,
       tooShort: 'Message trop court',
     },
+    voiceTranscript: {
+      action: 'Transcrire le message vocal',
+      hide: 'Masquer la transcription',
+      running: 'Transcription…',
+      unavailable: 'Transcription indisponible',
+    },
   },
   media: {
     uploadProgress: 'Progression de l’envoi',

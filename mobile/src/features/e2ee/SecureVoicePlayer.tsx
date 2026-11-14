@@ -6,8 +6,11 @@ import { useChatColors } from '@/constants/chat-theme';
 import { Radii } from '@/constants/theme';
 import { VoiceMessageBubble, voiceBubbleWidth } from '@/features/voice-notes/VoiceMessageBubble';
 import { toWaveform } from '@/features/voice-notes/useVoiceRecorder';
+import { transcribeVoiceMessage } from '@/features/voice-notes/transcription';
 import { fr } from '@/i18n/fr';
+import { openE2eeDatabase } from './db';
 import { openForView } from './mediaStore';
+import { voiceTranscriptionAvailable } from '@/features/voice-notes/transcription';
 import type { EncryptedMedia } from './payload';
 
 /**
@@ -67,6 +70,17 @@ export function SecureVoicePlayer({
         foregroundColor={chat.primaryText}
         barOffColor={chat.voiceBarOff}
         barOnColor={chat.voiceBarOn}
+        // Transcription locale, reçue uniquement : le clair vient d'être
+        // produit, le moteur tourne sur l'appareil, le cache vit en SQLCipher.
+        transcribable={!mine && voiceTranscriptionAvailable()}
+        onTranscribe={async () => {
+          const { db } = await openE2eeDatabase();
+          return transcribeVoiceMessage(db, id, {
+            uri,
+            mimeType: media.mime,
+            durationMs,
+          });
+        }}
       />
     );
   }
