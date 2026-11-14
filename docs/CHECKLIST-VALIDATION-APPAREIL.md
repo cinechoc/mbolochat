@@ -61,13 +61,13 @@ Consigner la date, la build/commit, l'appareil, et joindre les captures des KO. 
 | 11 | Brouillon | `use-chat-draft.ts` + `model/draft-buffer.ts` ; transport `saveDraft/loadDraft` | Complet |
 | 12 | Défilement | `use-chat-scroll.ts` + `model/scroll-state.ts` ; liste inversée les deux modes | Complet, **à vérifier appareil** |
 | 13 | Connexion | `use-chat-messages.ts` `online` + bandeau `chat-screen.tsx` | Complet |
-| 14 | Menus | `model/chat-actions.ts` ; transfert `e2ee-transport.ts` `forwardText` | Transfert texte chiffré porté ; **favori sticker classique non porté** |
+| 14 | Menus | `model/chat-actions.ts` ; transfert `e2ee-transport.ts` `forwardText` ; favori `chat-screen.tsx` | Complet, y compris favori sticker classique |
 | 15 | Accessibilité | `docs/ACCESSIBILITE-FUSION-CHAT.md` | Complet, pertes listées |
 | 16 | Groupes | `chat-screen.tsx` (permissions, mentions) | Complet |
 | 17 | Appels | `chat-screen.tsx` `headerRight` ; refus chiffré | Complet |
 | 18 | Sécurité d'écran | `hooks/use-chat-security.ts` + `model/media-leases.ts` | Complet |
 
-Scénarios marqués manquants : pagination chiffrée (#3), indicateur de frappe chiffré (#10, volontairement absent), favori sticker classique (#14).
+Scénarios marqués manquants : pagination chiffrée (#3), indicateur de frappe chiffré (#10, volontairement absent).
 
 ## Résultats Waydroid — 2026-11-14
 
@@ -109,10 +109,30 @@ Statuts utilisés : **OK**, **KO corrigé**, **KO ouvert**, **non vérifié**.
 | Document chiffré | OK | Envoyé, rouvert après rechargement, PDF affiché page 1/1. |
 | Repli sur le cache SQLCipher et bandeau hors ligne | OK | Le mode reste `e2ee` avec le cache ; un résumé inconnu met l'écran en attente. Aucun basculement en clair. |
 | Fermeture du clair après lecture | OK dans le code et les tests / non vérifié sur disque | `openedDocumentRef` + `useFocusEffect` appellent `closeMedia` ; `mediaStore.test.ts` couvre le nettoyage. L'inspection directe du dossier privé est impossible sur Waydroid (`run-as` refusé). |
-| Envoi hors ligne chiffré | Erreur explicite, pas de file | `E2eeTransport.sendText` appelle uniquement `crypto.sendEncryptedText` et remonte l'échec ; aucun envoi clair, aucune outbox E2EE. Le compositeur se vide visuellement et le brouillon SQLCipher n'est pas restauré à l'écran : manque consigné dans `docs/BACKLOG-CHAT.md`. |
+| Envoi hors ligne chiffré | Erreur explicite, pas de file | `E2eeTransport.sendText` appelle uniquement `crypto.sendEncryptedText` et remonte l'échec ; aucun envoi clair, aucune outbox E2EE. Depuis B.3.5c, le compositeur restaure le texte échoué, ou l'ajoute à la saisie reprise entre-temps. `failed-text.test.ts` couvre la logique ; validation visuelle sur appareil restant à refaire. |
 
 ### Non vérifié sur appareil
 
 - **« Reçu » / « Ouvert »** : non vérifié faute de deuxième client réel sur un téléphone. Couverture unitaire : `mobile/src/features/e2ee/receipts.test.ts` (états et fusion des accusés) et `mobile/src/features/chat/transport/e2ee-transport.test.ts` (mise à jour d'une bulle à l'arrivée de « Reçu » puis « Ouvert »). À refaire sur téléphone réel.
 - **TalkBack** : non vérifié sur appareil. Inventaire et renvois : `docs/ACCESSIBILITE-FUSION-CHAT.md` ; les libellés de coches sont portés par `mobile/src/features/chat/ui/message-receipt.tsx`. À faire sur téléphone réel.
 - **Appel clair de bout en bout** : non vérifié, Waydroid ne fournit pas de caméra fonctionnelle ; seul le câblage bouton → écran d'appel est validé.
+
+## B.3.5c — correctifs avant mise en service (2026-11-14)
+
+### Correctifs couverts localement
+
+| Point | Statut | Preuve / limite |
+|---|---|---|
+| Texte restauré après échec E2EE | OK tests / non vérifié appareil | `ChatComposer` vide après acceptation et restaure sur rejet (`failed-text.test.ts`). L'ancien écran chiffré propage aussi l'échec. En classique, une panne réseau reste dans l'outbox avec bulle en échec et « Réessayer » ; seule une erreur d'enqueue restaure la saisie. |
+| Garde centrale des appels clairs | OK tests / non vérifié appareil | `guardDirectCall` refuse `DIRECT + e2eeSince` avant `getMedia()` et le micro ; le mode inconnu échoue fermé. Les appels de groupe ne passent pas par cette garde. |
+| Détection 401 des téléchargements | OK tests | `expo-file-system@58.0.13` émet `status: 401` sur Android, `status 401` sur iOS et `HTTP 401` dans la tâche iOS. `downloadError.ts` privilégie `status`/`statusCode`, vérifie `ERR_UNABLE_TO_DOWNLOAD`, puis parse les trois messages. `mediaStore.ts` ne change que l'appel de cette détection. |
+| `api.request` après refactor | OK tests | `api.request.test.ts` couvre un refresh puis un seul rejeu, deux 401 sans boucle, et un refresh partagé entre deux requêtes concurrentes. |
+| Favori sticker classique / cache après transfert | OK tests | Action de menu portée sur l'écran unifié ; `e2ee-transport.test.ts` vérifie la mise à jour de `patchConversation` pour la cible. |
+
+### Vérifications Waydroid B.3.5c
+
+| Scénario | Statut | Résultat |
+|---|---|---|
+| « Supprimer pour tous » sur l'écran unifié | non vérifié | Le drapeau a été ouvert, puis Waydroid a déclenché un ANR au rechargement. Le service Android `activity` a ensuite disparu ; `am start` répond `Can't find service: activity` et `force-stop` renvoie `Surface DEAD_OBJECT`. Aucun message de test n'a été supprimé. Redémarrage du conteneur impossible sans accès root. |
+| A/B fluidité, conversation de 140 messages | non vérifié | Aucune mesure `gfxinfo` n'a pu être lancée après la panne du système invité. Aucun chiffre n'est inventé ; les deux passes restent à refaire après redémarrage de Waydroid. |
+| État final du drapeau sur l'appareil | non vérifié | La valeur par défaut du code reste désactivée et aucun réglage par défaut n'a été changé. L'état persisté dans Waydroid n'a pas pu être relu après la panne. |
