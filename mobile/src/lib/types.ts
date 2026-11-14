@@ -125,6 +125,8 @@ export interface MessageAttachment {
   height?: number;
   /** Durée d'un message vocal, en millisecondes. */
   duration?: number;
+  /** Forme d'onde d'un message vocal (valeurs 0..1), pour la bulle. */
+  waveform?: number[];
   name?: string;
   /** GIF GIPHY : sticker animé transparent (sinon GIF plein cadre). */
   sticker?: boolean;

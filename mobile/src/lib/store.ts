@@ -33,6 +33,8 @@ export interface OutboxItem {
   kind: 'image' | 'video' | 'file' | 'audio' | 'gif' | 'sticker';
   /** Durée d'un vocal ou d'une vidéo, en millisecondes. */
   durationMs: number | null;
+  /** Forme d'onde d'un vocal (valeurs 0..1), affichée dans la bulle. */
+  waveform: number[] | null;
   mime: string | null;
   width: number | null;
   height: number | null;
@@ -114,6 +116,7 @@ type Row = {
   local_uri: string | null;
   kind: string;
   duration_ms: number | null;
+  waveform: string | null;
   mime: string | null;
   width: number | null;
   height: number | null;
@@ -141,6 +144,7 @@ create table if not exists outbox (
   local_uri text,
   kind text not null default 'image',
   duration_ms integer,
+  waveform text,
   mime text,
   width integer,
   height integer,
@@ -174,6 +178,7 @@ const toParams = (item: OutboxItem): Record<string, string | number | null> => (
   $local_uri: item.localUri,
   $kind: item.kind,
   $duration_ms: item.durationMs,
+  $waveform: item.waveform ? JSON.stringify(item.waveform) : null,
   $mime: item.mime,
   $width: item.width,
   $height: item.height,
@@ -187,7 +192,17 @@ const toParams = (item: OutboxItem): Record<string, string | number | null> => (
   $created_at: item.createdAt,
 });
 
-const fromRow = (row: Row): OutboxItem => ({
+const fromRow = (row: Row): OutboxItem => {
+  let waveform: number[] | null = null;
+  if (row.waveform) {
+    try {
+      const parsed: unknown = JSON.parse(row.waveform);
+      if (Array.isArray(parsed)) waveform = parsed.filter((v) => typeof v === 'number');
+    } catch {
+      waveform = null; // ligne corrompue : la bulle retombera sur sa forme générique
+    }
+  }
+  return {
   clientId: row.client_id,
   conversationId: row.conversation_id,
   messageType: row.message_type === 'sticker' ? 'sticker' : 'text',
@@ -207,6 +222,7 @@ const fromRow = (row: Row): OutboxItem => ({
       ? row.kind
       : 'image',
   durationMs: row.duration_ms,
+  waveform,
   mime: row.mime,
   width: row.width,
   height: row.height,
@@ -221,7 +237,8 @@ const fromRow = (row: Row): OutboxItem => ({
   progress: null,
   uploadedBytes: null,
   totalBytes: null,
-});
+  };
+};
 
 interface Database {
   execAsync(sql: string): Promise<void>;
@@ -261,6 +278,8 @@ async function openSqlite(): Promise<Database> {
     await instance.execAsync('alter table outbox add column view_once integer not null default 0;');
   if (!names.has('scheduled_at'))
     await instance.execAsync('alter table outbox add column scheduled_at integer;');
+  if (!names.has('waveform'))
+    await instance.execAsync('alter table outbox add column waveform text;');
   return instance;
 }
 
@@ -268,8 +287,8 @@ function sqliteStore(db: Database): LocalStore {
   return {
     async save(item) {
       await db.runAsync(
-        `insert into outbox (client_id, conversation_id, message_type, sticker_ref, content, reply_to, silent, view_once, scheduled_at, local_uri, kind, duration_ms, mime, width, height, name, size, upload_id, external, status, attempts, error, created_at)
-         values ($client_id, $conversation_id, $message_type, $sticker_ref, $content, $reply_to, $silent, $view_once, $scheduled_at, $local_uri, $kind, $duration_ms, $mime, $width, $height, $name, $size, $upload_id, $external, $status, $attempts, $error, $created_at)
+        `insert into outbox (client_id, conversation_id, message_type, sticker_ref, content, reply_to, silent, view_once, scheduled_at, local_uri, kind, duration_ms, waveform, mime, width, height, name, size, upload_id, external, status, attempts, error, created_at)
+         values ($client_id, $conversation_id, $message_type, $sticker_ref, $content, $reply_to, $silent, $view_once, $scheduled_at, $local_uri, $kind, $duration_ms, $waveform, $mime, $width, $height, $name, $size, $upload_id, $external, $status, $attempts, $error, $created_at)
          on conflict (client_id) do update set
            message_type = excluded.message_type,
            sticker_ref = excluded.sticker_ref,
@@ -281,6 +300,7 @@ function sqliteStore(db: Database): LocalStore {
            local_uri = excluded.local_uri,
            kind = excluded.kind,
            duration_ms = excluded.duration_ms,
+           waveform = excluded.waveform,
            mime = excluded.mime,
            width = excluded.width,
            height = excluded.height,

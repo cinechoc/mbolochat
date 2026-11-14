@@ -26,12 +26,18 @@ export type VoiceNote = {
   /** WAVEFORM_BARS valeurs normalisées entre 0 et 1. */
   waveform: number[];
   mimeType: 'audio/mp4';
+  /** Lecture unique : la note disparaît chez le destinataire après écoute. */
+  viewOnce?: boolean;
 };
 
 export type RecorderStatus = 'idle' | 'starting' | 'recording' | 'stopping';
 
 type Options = {
+  /** Relâchement du doigt hors zone : envoi immédiat. */
   onSend: (note: VoiceNote) => void;
+  /** Limite de 60 s atteinte : la note est capturée mais rien n'est envoyé ;
+   *  le composant décide (envoi direct, ou aperçu si verrouillé). */
+  onMaxDuration?: (note: VoiceNote) => void;
   onTooShort?: () => void;
   onPermissionDenied?: () => void;
   onError?: (error: unknown) => void;
@@ -71,7 +77,8 @@ export function toWaveform(samples: number[], bars: number = WAVEFORM_BARS): num
   return out.map((v) => Math.round(Math.min(1, Math.max(0.08, v / peak)) * 100) / 100);
 }
 
-async function tryDeleteFile(uri: string | null | undefined) {
+/** Supprime le fichier local d'une note jetée (annulation, aperçu refusé). */
+export function discardVoiceNote(uri: string | null | undefined) {
   if (!uri) return;
   try {
     // API "nouvelle génération" d'expo-file-system (SDK 54+). Silencieux si absente.
@@ -112,8 +119,12 @@ export function useVoiceRecorder(options: Options) {
     tickRef.current = null;
   };
 
-  const finish = useCallback(async (cancel: boolean) => {
-    if (statusRef.current !== 'recording') return;
+  /**
+   * Arrête la capture et renvoie la note, sans décider de son sort. `null` si
+   * rien n'était en cours ou si le fichier est introuvable.
+   */
+  const capture = useCallback(async (): Promise<VoiceNote | null> => {
+    if (statusRef.current !== 'recording') return null;
     stopTick();
     setStatus('stopping');
 
@@ -139,22 +150,35 @@ export function useVoiceRecorder(options: Options) {
     setElapsedMs(0);
     setLevels(new Array(LIVE_BARS).fill(0));
 
-    if (cancel || !uri) {
-      void tryDeleteFile(uri);
-      return;
-    }
-    if (durationMs < MIN_DURATION_MS) {
-      void tryDeleteFile(uri);
-      optionsRef.current.onTooShort?.();
-      return;
-    }
-    optionsRef.current.onSend({
+    if (!uri) return null;
+    return {
       uri,
       durationMs: Math.min(durationMs, MAX_DURATION_MS),
       waveform,
       mimeType: 'audio/mp4',
-    });
+    };
   }, []);
+
+  /**
+   * Relâchement du doigt : `cancel` jette la note, sinon elle part immédiatement.
+   * C'est le chemin « rapide » ; le mode verrouillé passe par `stop()`.
+   */
+  const finish = useCallback(
+    async (cancel: boolean) => {
+      const note = await capture();
+      if (cancel || !note) {
+        discardVoiceNote(note?.uri);
+        return;
+      }
+      if (note.durationMs < MIN_DURATION_MS) {
+        discardVoiceNote(note.uri);
+        optionsRef.current.onTooShort?.();
+        return;
+      }
+      optionsRef.current.onSend(note);
+    },
+    [capture],
+  );
 
   const start = useCallback(async () => {
     if (statusRef.current !== 'idle') return;
@@ -186,7 +210,13 @@ export function useVoiceRecorder(options: Options) {
         samplesRef.current.push(level);
         setElapsedMs(elapsed);
         setLevels((prev) => pushLiveLevel(prev, level, LIVE_BARS));
-        if (elapsed >= MAX_DURATION_MS) void finish(false); // envoi auto à 60 s
+        if (elapsed >= MAX_DURATION_MS) {
+          // Limite atteinte : la note est rendue à l'appelant, jamais envoyée
+          // en douce (le mode verrouillé veut l'aperçu avant envoi).
+          void capture().then((note) => {
+            if (note) optionsRef.current.onMaxDuration?.(note);
+          });
+        }
       }, 80);
 
       // Doigt relâché pendant la préparation : on termine tout de suite.
@@ -198,7 +228,7 @@ export function useVoiceRecorder(options: Options) {
       setStatus('idle');
       optionsRef.current.onError?.(e);
     }
-  }, [finish]);
+  }, [capture, finish]);
 
   /** À appeler quand le doigt est relevé. `cancel` = true pour jeter la note. */
   const release = useCallback(
@@ -211,6 +241,21 @@ export function useVoiceRecorder(options: Options) {
     },
     [finish],
   );
+
+  /**
+   * Arrête l'enregistrement sans rien envoyer (bouton stop du mode verrouillé).
+   * Renvoie la note prête pour l'aperçu, ou `null` si elle est trop courte.
+   */
+  const stop = useCallback(async (): Promise<VoiceNote | null> => {
+    const note = await capture();
+    if (!note) return null;
+    if (note.durationMs < MIN_DURATION_MS) {
+      discardVoiceNote(note.uri);
+      optionsRef.current.onTooShort?.();
+      return null;
+    }
+    return note;
+  }, [capture]);
 
   // App mise en arrière-plan pendant l'enregistrement : on annule proprement.
   // Un passage très bref en fond (activité de permission système) ne doit pas
@@ -248,5 +293,5 @@ export function useVoiceRecorder(options: Options) {
     };
   }, []);
 
-  return { status, elapsedMs, levels, start, release };
+  return { status, elapsedMs, levels, start, release, stop };
 }

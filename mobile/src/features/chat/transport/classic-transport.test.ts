@@ -210,6 +210,31 @@ describe('ClassicTransport — anti-downgrade et outbox', () => {
     expect(fakes.outbox.drain).toHaveBeenCalledWith('token');
   });
 
+  it('envoie un vocal par l’outbox avec sa forme d’onde et sa lecture unique', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new ClassicTransport(fakes.deps, options);
+    await transport.sendVoice({
+      uri: 'file:///notes/a.m4a',
+      durationMs: 3200,
+      waveform: [0.2, 0.9, 0.4],
+      mimeType: 'audio/mp4',
+      viewOnce: true,
+    });
+    expect(fakes.outbox.enqueue).toHaveBeenCalledWith({
+      conversationId: 'conversation-1',
+      content: '',
+      viewOnce: true,
+      attachment: {
+        localUri: 'file:///notes/a.m4a',
+        mime: 'audio/mp4',
+        durationMs: 3200,
+        waveform: [0.2, 0.9, 0.4],
+        kind: 'audio',
+      },
+    });
+    expect(fakes.outbox.drain).toHaveBeenCalledWith('token');
+  });
+
   it('signale la lecture une fois l’historique chargé, comme l’ancien écran', async () => {
     const fakes = createFakes(SEED);
     const transport = new ClassicTransport(fakes.deps, options);

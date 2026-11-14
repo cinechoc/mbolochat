@@ -39,6 +39,16 @@ import { isMessageType, isValidStickerRef, type MessageType } from './sticker-re
 
 const roomOf = (conversationId: string) => `conv:${conversationId}`;
 
+/** Forme d'onde d'un vocal : au plus 40 barres, valeurs finies dans [0,1]. */
+function isWaveform(value: unknown): value is number[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= 40 &&
+    value.every((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1)
+  );
+}
+
 @WebSocketGateway({ cors: { origin: corsOrigin, credentials: true }, allowRequest: socketAllowRequest })
 export class ChatGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
@@ -154,6 +164,8 @@ export class ChatGateway
       silent?: boolean;
       /** Lecture unique : contenu masqué jusqu’à ouverture. */
       viewOnce?: boolean;
+      /** Forme d'onde d'un vocal (chemin clair) : au plus 40 valeurs 0..1. */
+      waveform?: unknown;
       /** `v1` : enveloppe chiffrée opaque (conversation E2EE). */
       encryption?: 'none' | 'v1';
       /** Enveloppe chiffrée base64. */
@@ -199,6 +211,12 @@ export class ChatGateway
     }
     const silent = body?.silent === true;
     const viewOnce = body?.viewOnce === true;
+    // Forme d'onde du vocal : simple métadonnée d'affichage, mais bornée ici —
+    // jamais plus de 40 barres, jamais hors de [0,1].
+    if (body?.waveform !== undefined && !isWaveform(body.waveform)) {
+      throw new WsException('Forme d’onde invalide');
+    }
+    const waveform = body?.waveform === undefined ? undefined : (body.waveform as number[]);
     // Pièce jointe GIF externe (GIPHY) : le client a choisi l'URL dans l'API
     // GIPHY ; le serveur se contente de vérifier l'allowlist des CDN.
     let gifAttachment: ReturnType<typeof normalizeGifAttachment> | null = null;
@@ -278,6 +296,7 @@ export class ChatGateway
         payloadType,
         silent,
         viewOnce,
+        waveform,
       )
       .catch((error: unknown) => {
         // L'acquittement porte l'erreur : le client peut l'afficher

@@ -36,7 +36,13 @@ import type { PersonalSticker } from '../stickers/stickerLibrary';
 import { useEmojiFavorites } from '../emoji/useEmojiFavorites';
 import { useRecentEmoji } from '../emoji/useRecentEmoji';
 import { deleteBackward, insertAt } from '../emoji/emojiUtils';
-import { useVoiceRecorder, type VoiceNote } from '../voice-notes/useVoiceRecorder';
+import {
+  discardVoiceNote,
+  useVoiceRecorder,
+  type VoiceNote,
+} from '../voice-notes/useVoiceRecorder';
+import { VoicePreviewPlayer } from '../voice-notes/VoicePreviewPlayer';
+import { stopVoicePlayback } from '../voice-notes/voicePlayback';
 import {
   initialVoiceGesture,
   LONG_PRESS_MS,
@@ -178,6 +184,9 @@ export function ChatComposer({
   /** Zone de glissement active pendant l'enregistrement (annuler/verrouiller). */
   const [zone, setZone] = useState<VoiceGestureZone>('none');
   const [locked, setLocked] = useState(false);
+  /** Note capturée en mode verrouillé, en attente d'aperçu avant envoi. */
+  const [previewNote, setPreviewNote] = useState<VoiceNote | null>(null);
+  const [viewOnceVoice, setViewOnceVoice] = useState(false);
   const [sendOptionsOpen, setSendOptionsOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const gestureRef = useRef(initialVoiceGesture());
@@ -374,11 +383,21 @@ export function ChatComposer({
     [],
   );
 
-  const { status, elapsedMs, levels, start, release } = useVoiceRecorder({
+  const { status, elapsedMs, levels, start, release, stop } = useVoiceRecorder({
     onSend: onSendVoice,
     onPermissionDenied: onVoicePermissionDenied,
     onError: onVoiceError,
     onTooShort: () => showNotice(fr.chat.voiceRecord.tooShort),
+    // Limite de 60 s : verrouillé, la note rejoint l'aperçu ; doigt encore
+    // posé, elle part comme un relâchement normal.
+    onMaxDuration: (note) => {
+      if (locked) {
+        setPreviewNote(note);
+        setViewOnceVoice(false);
+      } else {
+        onSendVoice(note);
+      }
+    },
   });
   const recording = status === 'recording' || status === 'starting';
 
@@ -390,6 +409,8 @@ export function ChatComposer({
     if (recording && lockRequestedRef.current) {
       lockRequestedRef.current = false;
       setLocked(true);
+      // Mains libres : le clavier n'a plus rien à faire là.
+      Keyboard.dismiss();
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     }
     if (status === 'idle') {
@@ -484,6 +505,46 @@ export function ChatComposer({
     [disabled, dispatchGesture],
   );
 
+  /* --------------------- Mode verrouillé et aperçu --------------------- */
+
+  const previewRef = useRef<VoiceNote | null>(null);
+  useEffect(() => {
+    previewRef.current = previewNote;
+  }, [previewNote]);
+  // Écran quitté pendant l'aperçu : la lecture s'arrête avec lui.
+  useEffect(
+    () => () => {
+      if (previewRef.current) void stopVoicePlayback();
+    },
+    [],
+  );
+
+  /** Bouton 🛑 du mode verrouillé : arrête la capture et ouvre l'aperçu. */
+  const handleStopRecording = useCallback(async () => {
+    const note = await stop();
+    if (note) {
+      setPreviewNote(note);
+      setViewOnceVoice(false);
+    }
+  }, [stop]);
+
+  /** Envoi de l'aperçu (avec ou sans lecture unique). */
+  const handleSendPreview = useCallback(() => {
+    const note = previewNote;
+    if (!note) return;
+    setPreviewNote(null);
+    onSendVoice(viewOnceVoice ? { ...note, viewOnce: true } : note);
+  }, [previewNote, viewOnceVoice, onSendVoice]);
+
+  /** Poubelle de l'aperçu : la note est jetée, retour au champ de saisie. */
+  const handleDeletePreview = useCallback(() => {
+    const note = previewNote;
+    if (!note) return;
+    setPreviewNote(null);
+    void stopVoicePlayback();
+    discardVoiceNote(note.uri);
+  }, [previewNote]);
+
   const togglePanel = (target: 'emoji' | 'plus') => {
     if (panel === target) {
       // Rendre le clavier au compositeur avant de démonter le panneau de recherche.
@@ -555,89 +616,113 @@ export function ChatComposer({
       <Glass blurTarget={blurTarget} fallbackColor={t.panelBg} style={styles.bar}>
         <View style={styles.center}>
           <Glass blurTarget={blurTarget} variant="clear" fallbackColor={t.inputBg} style={styles.field}>
-            <TextInput
-              ref={inputRef}
-              value={text}
-              editable={!disabled}
-              multiline
-              placeholder={placeholder}
-              placeholderTextColor={t.placeholder}
-              onChangeText={(value) => commit(value)}
-              selection={forcedSelection ?? undefined}
-              onSelectionChange={handleSelectionChange}
-              onFocus={() => {
-                if (panel !== 'none') {
-                  setPanel('none');
-                  setSearchActive(false);
-                  searchActiveRef.current = false;
-                }
-              }}
-              style={[styles.input, { color: t.inputText }]}
-              textAlignVertical="center"
-              blurOnSubmit={false}
-            />
-            {recording ? (
-              <View
-                pointerEvents="none"
-                style={[styles.recordingOverlay, { backgroundColor: t.inputBg }]}
-              >
-                <RecordingTimeline
-                  levels={levels}
-                  elapsedMs={elapsedMs}
-                  zone={zone}
-                  showHints={!locked}
+            {previewNote ? (
+              // Mode aperçu : la note capturée s'écoute avant de partir.
+              <View style={styles.previewRow}>
+                <FieldButton
+                  onPress={handleDeletePreview}
+                  label={fr.chat.voiceRecord.deleteRecording}
+                >
+                  <MaterialCommunityIcons
+                    name="trash-can-outline"
+                    size={22}
+                    color={theme.danger}
+                  />
+                </FieldButton>
+                <VoicePreviewPlayer
+                  note={previewNote}
                   colors={{
-                    bar: t.sendBg,
-                    cancel: theme.danger,
-                    text: t.inputText,
-                    dot: t.sendBg,
-                    hint: t.subtle,
+                    icon: t.icon,
+                    barOn: t.sendBg,
+                    barOff: theme.border,
+                    text: t.subtle,
                   }}
                 />
               </View>
-            ) : null}
-            {locked ? (
-              <FieldButton
-                onPress={() => {
-                  release(true);
-                  setLocked(false);
-                }}
-                label={fr.chat.voiceRecord.cancelRecording}
-              >
-                <MaterialCommunityIcons
-                  name="close-circle-outline"
-                  size={24}
-                  color={theme.danger}
-                />
-              </FieldButton>
-            ) : recording || text.length === 0 ? (
-              <View
-                {...voicePan.panHandlers}
-                accessible
-                accessibilityRole="button"
-                accessibilityLabel={fr.chat.voiceRecord.micHint}
-                style={styles.fieldButton}
-              >
-                <WaveformIcon color={recording ? t.sendBg : t.icon} size={22} />
-              </View>
             ) : (
-              <FieldButton onPress={() => togglePanel('plus')} label="Plus d'actions">
-                <MaterialCommunityIcons
-                  name={panel === 'plus' ? 'close-circle-outline' : 'plus-circle-outline'}
-                  size={24}
-                  color={t.icon}
+              <>
+                <TextInput
+                  ref={inputRef}
+                  value={text}
+                  editable={!disabled}
+                  multiline
+                  placeholder={placeholder}
+                  placeholderTextColor={t.placeholder}
+                  onChangeText={(value) => commit(value)}
+                  selection={forcedSelection ?? undefined}
+                  onSelectionChange={handleSelectionChange}
+                  onFocus={() => {
+                    if (panel !== 'none') {
+                      setPanel('none');
+                      setSearchActive(false);
+                      searchActiveRef.current = false;
+                    }
+                  }}
+                  style={[styles.input, { color: t.inputText }]}
+                  textAlignVertical="center"
+                  blurOnSubmit={false}
                 />
-              </FieldButton>
+                {recording ? (
+                  <View
+                    pointerEvents="none"
+                    style={[
+                      styles.recordingOverlay,
+                      { backgroundColor: t.inputBg, right: locked ? 2 : 34 },
+                    ]}
+                  >
+                    <RecordingTimeline
+                      levels={levels}
+                      elapsedMs={elapsedMs}
+                      zone={zone}
+                      showHints={!locked}
+                      colors={{
+                        bar: t.sendBg,
+                        cancel: theme.danger,
+                        text: t.inputText,
+                        dot: t.sendBg,
+                        hint: t.subtle,
+                      }}
+                    />
+                  </View>
+                ) : null}
+                {!locked && (recording || text.length === 0) ? (
+                  <View
+                    {...voicePan.panHandlers}
+                    accessible
+                    accessibilityRole="button"
+                    accessibilityLabel={fr.chat.voiceRecord.micHint}
+                    style={styles.fieldButton}
+                  >
+                    <WaveformIcon color={recording ? t.sendBg : t.icon} size={22} />
+                  </View>
+                ) : !locked ? (
+                  <FieldButton onPress={() => togglePanel('plus')} label="Plus d'actions">
+                    <MaterialCommunityIcons
+                      name={panel === 'plus' ? 'close-circle-outline' : 'plus-circle-outline'}
+                      size={24}
+                      color={t.icon}
+                    />
+                  </FieldButton>
+                ) : null}
+                {notice && !recording ? (
+                  <View style={[styles.noticeOverlay, { backgroundColor: t.inputBg }]}>
+                    <Text style={[styles.noticeText, { color: t.subtle }]}>{notice}</Text>
+                  </View>
+                ) : null}
+              </>
             )}
-            {notice && !recording ? (
-              <View style={[styles.noticeOverlay, { backgroundColor: t.inputBg }]}>
-                <Text style={[styles.noticeText, { color: t.subtle }]}>{notice}</Text>
-              </View>
-            ) : null}
           </Glass>
         </View>
 
-        {locked ? null : (
+        {previewNote ? (
+          // Lecture unique vocale : bascule « 1 » cerclé, comme pour le texte.
+          <IconButton
+            name="numeric-1-circle-outline"
+            color={viewOnceVoice ? t.sendBg : t.icon}
+            label={fr.chat.sendOptions.viewOnce}
+            onPress={() => setViewOnceVoice((value) => !value)}
+          />
+        ) : locked ? null : (
           <IconButton
             name={panel === 'emoji' ? 'keyboard-outline' : 'emoticon-happy-outline'}
             color={t.icon}
@@ -654,14 +739,18 @@ export function ChatComposer({
           />
         )}
 
-        {locked ? (
+        {previewNote ? (
           <SendButton
             background={t.sendBg}
             color={t.accentText}
-            onPress={() => {
-              release(false);
-              setLocked(false);
-            }}
+            onPress={handleSendPreview}
+          />
+        ) : locked ? (
+          <IconButton
+            name="stop-circle-outline"
+            color={t.icon}
+            label={fr.chat.voiceRecord.stopRecording}
+            onPress={() => void handleStopRecording()}
           />
         ) : hasText ? (
           <SendButton
@@ -908,6 +997,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   fieldButton: { width: 32, height: 40, alignItems: 'center', justifyContent: 'center', marginRight: 2 },
+  previewRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 2,
+    paddingRight: 4,
+  },
   recordingOverlay: {
     position: 'absolute',
     left: 0,

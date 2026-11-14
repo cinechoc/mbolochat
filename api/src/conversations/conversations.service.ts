@@ -1856,6 +1856,8 @@ export class ConversationsService {
     payloadType?: 'prekey' | 'normal',
     silent = false,
     viewOnce = false,
+    /** Forme d'onde d'un vocal (chemin clair), déjà validée par le gateway. */
+    waveform?: number[],
   ): Promise<MessageDto> {
     if (!isMessageType(messageType)) {
       throw new BadRequestException('Type de message invalide');
@@ -2004,6 +2006,9 @@ export class ConversationsService {
               ...(sticker.name !== undefined ? { stickerName: sticker.name } : {}),
             }
           : {}),
+        // Forme d'onde du vocal : métadonnée d'affichage du chemin clair, elle
+        // voyage à côté du fichier (comme les dimensions d'une image).
+        ...(waveform && upload.type === 'AUDIO' ? { waveform } : {}),
       };
     } else if (gifAttachment) {
       attachment = gifAttachment;

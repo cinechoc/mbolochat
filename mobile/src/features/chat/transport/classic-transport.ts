@@ -396,10 +396,12 @@ export class ClassicTransport implements ChatTransport {
     await this.deps.outbox.enqueue({
       conversationId: this.conversationId,
       content: '',
+      viewOnce: note.viewOnce === true,
       attachment: {
         localUri: note.uri,
         mime: note.mimeType,
         durationMs: note.durationMs,
+        waveform: note.waveform,
         kind: 'audio',
       },
     });

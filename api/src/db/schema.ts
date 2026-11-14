@@ -274,6 +274,9 @@ export interface MessageAttachment {
   height?: number;
   /** Durée d'un message vocal, en millisecondes. */
   duration?: number;
+  /** Forme d'onde d'un message vocal (au plus 40 valeurs 0..1) : métadonnée
+   *  d'affichage du chemin clair, bornée par le gateway. */
+  waveform?: number[];
   /** Nom d'origine (fichiers). */
   name?: string;
   /** GIF GIPHY : sticker animé transparent (sinon GIF plein cadre). */

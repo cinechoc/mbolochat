@@ -40,6 +40,8 @@ export interface NewOutboxItem {
     height?: number | null;
     /** Durée d'un vocal ou d'une vidéo, en millisecondes. */
     durationMs?: number | null;
+    /** Forme d'onde d'un vocal (valeurs 0..1), métadonnée d'affichage. */
+    waveform?: number[] | null;
     /** Une photo par défaut ; audio, vidéo, document, GIF ou sticker. */
     kind?: 'image' | 'video' | 'file' | 'audio' | 'gif' | 'sticker';
     name?: string | null;
@@ -94,6 +96,7 @@ export async function enqueue(input: NewOutboxItem): Promise<OutboxItem> {
     localUri: input.attachment?.localUri ?? null,
     kind: input.attachment?.kind ?? 'image',
     durationMs: input.attachment?.durationMs ?? null,
+    waveform: input.attachment?.waveform ?? null,
     mime: input.attachment?.mime ?? null,
     width: input.attachment?.width ?? null,
     height: input.attachment?.height ?? null,
@@ -395,6 +398,9 @@ async function deliver(token: string, item: OutboxItem): Promise<boolean> {
         replyToId: item.replyTo ?? undefined,
         silent: item.silent || undefined,
         viewOnce: item.viewOnce || undefined,
+        // Forme d'onde du vocal : métadonnée d'affichage du chemin clair,
+        // validée et bornée côté serveur.
+        waveform: item.kind === 'audio' ? (item.waveform ?? undefined) : undefined,
       })) as Message | { error?: string };
 
     if ('error' in result && result.error) {
@@ -485,6 +491,7 @@ export function pendingMessage(
             height: item.height ?? undefined,
             duration: item.durationMs ?? undefined,
             name: item.name ?? undefined,
+            ...(type === 'AUDIO' && item.waveform ? { waveform: item.waveform } : {}),
             ...(stickerMeta
               ? {
                   stickerId: stickerMeta.id,
