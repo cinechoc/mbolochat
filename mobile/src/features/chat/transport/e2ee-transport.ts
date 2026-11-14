@@ -25,7 +25,7 @@ const TYPING_EXPIRY_MS = 4_000;
 const E2EE_CAPABILITIES: ChatCapabilities = {
   replies: true,
   reactions: true,
-  deleteForEveryone: false,
+  deleteForEveryone: true,
   stickers: true,
   gifs: false,
   forwarded: true,
@@ -360,7 +360,54 @@ export class E2eeTransport implements ChatTransport {
 
   async deleteMessage(id: string, forEveryone: boolean): Promise<void> {
     if (forEveryone) {
-      throw new UnsupportedCapabilityError('deleteForEveryone');
+      const target = this.stored.get(id);
+      if (
+        !target ||
+        target.mine !== 1 ||
+        target.id === target.client_id ||
+        target.deleted === 1 ||
+        target.hidden === 1
+      ) {
+        return;
+      }
+      const { db, account } = await this.credentials();
+      await this.deps.crypto.sendEncryptedDelete({
+        token: this.token,
+        db,
+        account,
+        conversation: this.summary,
+        currentUserId: this.currentUser.id,
+        currentUserName: this.currentUser.displayName,
+        targetId: id,
+      });
+      const result = await this.deps.deletion.applyDeleteForAll(
+        this.db ?? db,
+        id,
+        this.currentUser.id,
+      );
+      await this.deps.deletion.cleanupDeletedMedia(this.db ?? db, result.refs);
+      if (result.applied) {
+        const deleted: StoredE2eeMessage = {
+          ...target,
+          body: '',
+          media_meta: null,
+          local_cipher_uri: null,
+          upload_id: null,
+          local_thumb_cipher_uri: null,
+          thumb_upload_id: null,
+          sticker_ref: null,
+          quote_id: null,
+          unreadable_reason: null,
+          raw_payload: null,
+          deleted: 1,
+          deleted_by: this.currentUser.id,
+        };
+        this.stored.set(id, deleted);
+        this.reactions.delete(id);
+        this.index.upsert(this.render(deleted));
+      }
+      this.handlers?.onMessageRemoved(id, true);
+      return;
     }
     const { db } = await this.credentials();
     this.stored.delete(id);
@@ -378,6 +425,7 @@ export class E2eeTransport implements ChatTransport {
     if (
       !target ||
       target.id === target.client_id ||
+      target.deleted === 1 ||
       target.hidden === 1
     ) {
       return;
@@ -543,8 +591,23 @@ export class E2eeTransport implements ChatTransport {
               this.reactions.get(target.id) ?? [],
             );
           }
+        } else if (result.deletionEvent) {
+          const targetId = result.deletionEvent.targetId;
+          const target = result.deletionEvent.target ?? this.stored.get(targetId);
+          if (target) {
+            this.stored.set(targetId, target);
+            this.reactions.delete(targetId);
+            this.index.upsert(this.render(target));
+          }
+          if (result.deletionEvent.applied) {
+            this.handlers?.onMessageRemoved(targetId, true);
+          }
         } else {
           this.absorb(result.stored, true);
+        }
+        const deletedRefs = result.deletionEvent?.mediaRefs ?? result.deletedMediaRefs;
+        if (deletedRefs) {
+          await this.deps.deletion.cleanupDeletedMedia(db, deletedRefs);
         }
         const acked = this.deps.receipts.deliveredIds([result.stored]);
         if (acked.length > 0) this.reportDelivered(acked);

@@ -166,6 +166,14 @@ const decryptedReaction = (
   action: 'add' | 'remove' = 'add',
 ) => ({ ...decrypted(pickle), plaintext_b64: reactionPlain(targetId, reaction, action) });
 
+const deletePlain = (targetId: string) =>
+  Buffer.from(JSON.stringify({ v: 5, kind: 'delete', targetId }), 'utf8').toString('base64');
+
+const decryptedDelete = (pickle: string, targetId: string) => ({
+  ...decrypted(pickle),
+  plaintext_b64: deletePlain(targetId),
+});
+
 function read(fixture: Fixture, sql: string, ...params: unknown[]) {
   return fixture.raw
     .prepare(sql)
@@ -467,7 +475,7 @@ describe('déchiffrement entrant — persistance atomique', () => {
         },
         pinPeerKey: true,
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({});
     expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([
       { session_pickle: 'S9' },
     ]);
@@ -989,6 +997,115 @@ describe('déchiffrement entrant — réactions v4', () => {
   });
 });
 
+describe('déchiffrement entrant — suppression pour tous v5', () => {
+  const seedTarget = async (fixture: Fixture) => {
+    await fixture.handle.runAsync(
+      `INSERT INTO e2ee_messages
+         (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
+          media_meta, quote_id, sticker_ref)
+       VALUES ('m1', 'conv-1', 'peer-1', 'Pair', 'secret', '2026-01-01T00:00:00Z', NULL, 0,
+               '{"type":"IMAGE"}', 'cited-1', 'mbolo-panther-2d/amour')`,
+    );
+  };
+
+  it('vide la cible uniquement quand l’auteur du message la supprime', async () => {
+    const fixture = await seeded();
+    await seedTarget(fixture);
+    cryptoMock.secureDecrypt.mockResolvedValueOnce(decryptedDelete('S1', 'm1') as never);
+
+    const result = await decrypt(fixture, incoming({ id: 'd1' }));
+
+    expect(result.deletionEvent).toMatchObject({
+      targetId: 'm1',
+      authorId: 'peer-1',
+      applied: true,
+    });
+    expect(
+      read(
+        fixture,
+        `SELECT body, media_meta, quote_id, sticker_ref, deleted, deleted_by
+           FROM e2ee_messages WHERE id = 'm1'`,
+      ),
+    ).toEqual([
+      {
+        body: '',
+        media_meta: null,
+        quote_id: null,
+        sticker_ref: null,
+        deleted: 1,
+        deleted_by: 'peer-1',
+      },
+    ]);
+  });
+
+  it('ignore une suppression demandée par un autre auteur', async () => {
+    const fixture = await seeded([
+      { peer: 'peer-1', device: 'dev-1', pickle: 'S0' },
+      { peer: 'peer-2', device: 'dev-2', pickle: 'T0' },
+    ]);
+    await seedTarget(fixture);
+    cryptoMock.secureDecrypt.mockResolvedValueOnce(decryptedDelete('T1', 'm1') as never);
+
+    const result = await decrypt(
+      fixture,
+      incoming({
+        id: 'd1',
+        senderDeviceId: 'dev-2',
+        sender: { id: 'peer-2', displayName: 'Autre' } as unknown as Message['sender'],
+      }),
+    );
+
+    expect(result.deletionEvent).toMatchObject({ applied: false, authorId: 'peer-2' });
+    expect(
+      read(fixture, `SELECT body, deleted FROM e2ee_messages WHERE id = 'm1'`),
+    ).toEqual([{ body: 'secret', deleted: 0 }]);
+  });
+
+  it('applique une tombstone reçue avant sa cible, dans la transaction d’arrivée', async () => {
+    const fixture = await seeded();
+    cryptoMock.secureDecrypt
+      .mockResolvedValueOnce(decryptedDelete('S1', 'future-message') as never)
+      .mockResolvedValueOnce(decrypted('S2', 'arrive après') as never);
+
+    const deletion = await decrypt(fixture, incoming({ id: 'd1' }));
+    expect(deletion.deletionEvent).toMatchObject({ applied: false, targetId: 'future-message' });
+    expect(read(fixture, 'SELECT target_id, author_id FROM e2ee_deletions')).toEqual([
+      { target_id: 'future-message', author_id: 'peer-1' },
+    ]);
+
+    const target = await decrypt(fixture, incoming({ id: 'future-message' }));
+    expect(target.stored).toMatchObject({ deleted: 1, body: '', deleted_by: 'peer-1' });
+    expect(
+      read(fixture, `SELECT body, deleted FROM e2ee_messages WHERE id = 'future-message'`),
+    ).toEqual([{ body: '', deleted: 1 }]);
+    expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([
+      { session_pickle: 'S2' },
+    ]);
+  });
+
+  it('rend un doublon inoffensif et masque une suppression mal formée', async () => {
+    const fixture = await seeded();
+    await seedTarget(fixture);
+    cryptoMock.secureDecrypt.mockResolvedValueOnce(decryptedDelete('S1', 'm1') as never);
+    await decrypt(fixture, incoming({ id: 'd1' }));
+    const duplicate = await decrypt(fixture, incoming({ id: 'd1' }));
+    expect(duplicate.deletionEvent).toMatchObject({ targetId: 'm1', applied: false });
+    expect(cryptoMock.secureDecrypt).toHaveBeenCalledTimes(1);
+
+    cryptoMock.secureDecrypt.mockResolvedValueOnce({
+      ...decrypted('S2'),
+      plaintext_b64: Buffer.from(
+        JSON.stringify({ v: 5, kind: 'delete', targetId: '../m1', authorId: 'peer-1' }),
+        'utf8',
+      ).toString('base64'),
+    } as never);
+    const malformed = await decrypt(fixture, incoming({ id: 'd2' }));
+    expect(malformed.hidden).toBe(true);
+    expect(malformed.unreadableReason).toBe('invalid_payload');
+    expect(malformed.deletionEvent).toBeUndefined();
+  });
+});
+
 /**
  * Lot A — protection P0 : un contenu **authentifié mais illisible** (le
  * déchiffrement Olm a réussi, le parsing échoue) doit être persisté comme
@@ -1044,7 +1161,7 @@ describe('message authentifié mais illisible — le ratchet avance quand même'
   it('persiste un placeholder pour une version future et avance la session', async () => {
     const fixture = await seeded();
     cryptoMock.secureDecrypt.mockResolvedValue(
-      unreadableOf('S1', plainOf({ v: 5, kind: 'sticker', stickerRef: 'pack/id' })) as never,
+      unreadableOf('S1', plainOf({ v: 6, kind: 'sticker', stickerRef: 'pack/id' })) as never,
     );
 
     const result = await decrypt(fixture, incoming({ id: 'm1' }));

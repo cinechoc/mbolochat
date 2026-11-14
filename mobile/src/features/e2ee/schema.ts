@@ -22,7 +22,7 @@ export type E2eeSchemaDb = Pick<
 >;
 
 /** Version de schéma attendue par ce code. */
-export const E2EE_SCHEMA_VERSION = 7;
+export const E2EE_SCHEMA_VERSION = 8;
 
 const META_TABLE = 'e2ee_schema_meta';
 
@@ -403,6 +403,7 @@ const STEPS: { version: number; run: (db: E2eeSchemaDb) => Promise<void> }[] = [
   { version: 5, run: migrateToV5 },
   { version: 6, run: migrateToV6 },
   { version: 7, run: migrateToV7 },
+  { version: 8, run: migrateToV8 },
 ];
 
 async function readVersion(db: E2eeSchemaDb): Promise<number> {
@@ -517,6 +518,38 @@ async function migrateToV7(db: E2eeSchemaDb): Promise<void> {
         ON e2ee_messages (conversation_id, content_kind, control_target, created_at);
     `);
     await stampVersion(db, 7);
+  });
+}
+
+/**
+ * Version 8 : suppression pour tous.
+ *
+ * Le message cible reste présent comme ligne vide (`deleted = 1`) pour que
+ * l'ordre des bulles et les accusés ne changent pas. `deleted_by` permet de
+ * constater l'auteur autorisé sans exposer le contenu supprimé.
+ *
+ * `e2ee_deletions` est une tombstone locale, chiffrée par SQLCipher. Elle est
+ * écrite quand l'événement arrive avant le message ; la cible, en arrivant,
+ * applique la tombstone dans la même transaction que l'avancement Olm.
+ */
+async function migrateToV8(db: E2eeSchemaDb): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await addMissingColumns(db, 'e2ee_messages', [
+      ['deleted', 'INTEGER NOT NULL DEFAULT 0'],
+      ['deleted_by', 'TEXT'],
+    ]);
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS e2ee_deletions (
+        target_id TEXT NOT NULL,
+        author_id TEXT NOT NULL,
+        event_message_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (target_id, author_id)
+      );
+      CREATE INDEX IF NOT EXISTS e2ee_deletions_event_idx
+        ON e2ee_deletions (event_message_id);
+    `);
+    await stampVersion(db, 8);
   });
 }
 

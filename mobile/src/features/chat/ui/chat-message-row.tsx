@@ -584,7 +584,9 @@ function ChatMessageRowComponent(props: ChatMessageRowProps) {
     return (
       <View style={styles.systemRow}>
         <ThemedText style={{ color: chat.systemText }}>
-          {fr.chat.unified.deletedMessage}
+          {capabilities.encrypted
+            ? fr.chat.unified.deletedForEveryoneEncrypted
+            : fr.chat.unified.deletedMessage}
         </ThemedText>
       </View>
     );

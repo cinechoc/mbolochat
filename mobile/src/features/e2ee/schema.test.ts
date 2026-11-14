@@ -804,7 +804,7 @@ describe('migrateE2eeSchema — v7 : lignes de contrôle masquées', () => {
     const db = adapter(legacyDatabase());
     expect(await migrateE2eeSchema(db, 6)).toBe(6);
 
-    expect(await migrateE2eeSchema(db)).toBe(7);
+    expect(await migrateE2eeSchema(db)).toBe(8);
 
     const columns = await db.getAllAsync<{ name: string; notnull: number; dflt_value: unknown }>(
       'PRAGMA table_info(e2ee_messages)',
@@ -843,5 +843,48 @@ describe('migrateE2eeSchema — v7 : lignes de contrôle masquées', () => {
       control_target: 'msg-1',
       reaction_action: 'add',
     });
+  });
+});
+
+describe('migrateE2eeSchema — v8 : suppression pour tous', () => {
+  it('ajoute deleted et la tombstone sans modifier le contenu existant', async () => {
+    const db = adapter(legacyDatabase());
+    expect(await migrateE2eeSchema(db, 7)).toBe(7);
+
+    expect(await migrateE2eeSchema(db)).toBe(E2EE_SCHEMA_VERSION);
+
+    const columns = await db.getAllAsync<{ name: string; notnull: number; dflt_value: unknown }>(
+      'PRAGMA table_info(e2ee_messages)',
+    );
+    const deleted = columns.find((column) => column.name === 'deleted');
+    expect(deleted).toBeDefined();
+    expect(deleted?.notnull).toBe(1);
+    expect(deleted?.dflt_value).toBe('0');
+    expect(
+      await db.getAllAsync<Record<string, unknown>>(
+        'SELECT id, deleted, deleted_by FROM e2ee_messages ORDER BY id',
+      ),
+    ).toEqual([{ id: 'msg-1', deleted: 0, deleted_by: null }]);
+    expect(await tableNames(db)).toContain('e2ee_deletions');
+  });
+
+  it('accepte une tombstone avant la cible et une suppression idempotente', async () => {
+    const db = adapter(legacyDatabase());
+    await migrateE2eeSchema(db);
+    await db.runAsync(
+      `INSERT INTO e2ee_deletions (target_id, author_id, event_message_id, created_at)
+       VALUES ('future', 'peer-1', 'event-1', '2026-01-02T00:00:00Z')
+       ON CONFLICT(target_id, author_id) DO NOTHING`,
+    );
+    await db.runAsync(
+      `INSERT INTO e2ee_deletions (target_id, author_id, event_message_id, created_at)
+       VALUES ('future', 'peer-1', 'event-2', '2026-01-03T00:00:00Z')
+       ON CONFLICT(target_id, author_id) DO NOTHING`,
+    );
+    expect(await db.getAllAsync<Record<string, unknown>>(
+      'SELECT target_id, author_id, event_message_id FROM e2ee_deletions',
+    )).toEqual([
+      { target_id: 'future', author_id: 'peer-1', event_message_id: 'event-1' },
+    ]);
   });
 });

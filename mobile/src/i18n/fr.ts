@@ -76,6 +76,8 @@ export const fr = {
         'Impossible de vérifier le chiffrement de cette conversation. Aucun appel ne sera lancé.',
       messageOptions: 'Options du message',
       deletedMessage: 'Message supprimé',
+      deletedForEveryoneEncrypted:
+        'Supprimé pour tous si le correspondant est à jour',
       unreadableMessage: 'Message non pris en charge. Mets ton application à jour.',
       failedToSend: 'Le message n’est pas parti.',
       reactionFallback: 'Réaction',

@@ -9,6 +9,12 @@ import {
   type E2eeSessionRow,
   type StoredE2eeMessage,
 } from './db';
+import {
+  addDeletionTombstone,
+  applyDeleteForAll,
+  hasDeletionTombstone,
+  type DeleteForAllResult,
+} from './deletion';
 
 /**
  * Écriture atomique de l'état de session S1 et de l'enveloppe E.
@@ -286,14 +292,49 @@ export interface PersistIncomingInput {
   message: StoredE2eeMessage;
   /** Épingler la clé de signature du pair (première vue ou changement). */
   pinPeerKey?: boolean;
+  /**
+   * Événement de suppression pour tous : la tombstone, l'application à la
+   * cible et l'avancement Olm sont écrits ensemble.
+   */
+  deletion?: {
+    targetId: string;
+    authorId: string;
+    eventMessageId: string;
+    createdAt: string;
+  };
+}
+
+export interface PersistIncomingResult {
+  deletion?: DeleteForAllResult;
 }
 
 export async function persistIncoming(
   input: PersistIncomingInput,
-): Promise<void> {
+): Promise<PersistIncomingResult> {
+  const result: PersistIncomingResult = {};
   await inWriteTransaction(input.db, async () => {
     const tx = input.db;
+    if (input.deletion) {
+      await addDeletionTombstone(tx, input.deletion);
+    }
     await saveLocalMessageWith(tx, input.message);
+    if (input.message.hidden !== 1) {
+      const tombstoned = await hasDeletionTombstone(
+        tx,
+        input.message.id,
+        input.message.sender_id,
+      );
+      if (tombstoned) {
+        result.deletion = await applyDeleteForAll(tx, input.message.id, input.message.sender_id);
+      }
+    }
+    if (input.deletion) {
+      result.deletion = await applyDeleteForAll(
+        tx,
+        input.deletion.targetId,
+        input.deletion.authorId,
+      );
+    }
     await saveSessionWith(tx, input.session);
     if (input.account) await saveE2eeAccountWith(tx, input.account);
     if (input.pinPeerKey) {
@@ -306,6 +347,7 @@ export async function persistIncoming(
       );
     }
   });
+  return result;
 }
 
 /** Références média d'une entrée d'outbox : de quoi reprendre sans rien recalculer. */

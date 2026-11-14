@@ -15,9 +15,11 @@ import {
   savePeerSigningKey,
   type E2eeAccountRow,
   type E2eeSessionRow,
+  type LocalMediaRefs,
   type StoredE2eeMessage,
 } from './db';
 import {
+  buildDeleteV5,
   buildReactionV4,
   buildStickerV3,
   buildTextV1,
@@ -461,6 +463,17 @@ export async function sendEncryptedReaction(
   );
 }
 
+export async function sendEncryptedDelete(
+  input: SendEncryptedContentInput & { targetId: string },
+): Promise<SendResult> {
+  return sendEncryptedContent(input, buildDeleteV5(input.targetId), {
+    body: '',
+    hidden: true,
+    contentKind: 'delete',
+    controlTarget: input.targetId,
+  });
+}
+
 /** Résultat brut d'une ouverture : rien n'est encore écrit en base. */
 interface OpenedInbound {
   plaintextB64: string;
@@ -673,16 +686,7 @@ async function finalizeUnreadable(
   message: Message,
   opened: OpenedInbound,
   reason: PayloadError,
-): Promise<{
-  text: string;
-  media?: EncryptedMedia;
-  stickerRef?: string;
-  unreadableReason: PayloadError;
-  hidden: boolean;
-  account: E2eeAccountRow;
-  stored: StoredE2eeMessage;
-  keyChanged: boolean;
-}> {
+): Promise<DecryptIncomingResult> {
   const stored: StoredE2eeMessage = {
     id: message.id,
     conversation_id: message.conversationId,
@@ -715,6 +719,8 @@ async function finalizeUnreadable(
     stickerRef: undefined,
     unreadableReason: reason,
     hidden: true,
+    reactionEvent: undefined,
+    deletionEvent: undefined,
     account: opened.account,
     stored,
     keyChanged: opened.keyChanged,
@@ -736,6 +742,15 @@ export interface IncomingReactionEvent {
   authorId: string;
 }
 
+export interface IncomingDeletionEvent {
+  targetId: string;
+  authorId: string;
+  /** La cible était déjà locale et a été vidée pendant cette transaction. */
+  applied: boolean;
+  target?: StoredE2eeMessage;
+  mediaRefs?: LocalMediaRefs | null;
+}
+
 export interface DecryptIncomingResult {
   text: string;
   media?: EncryptedMedia;
@@ -750,6 +765,9 @@ export interface DecryptIncomingResult {
   /** Ligne de contrôle masquée : aucune bulle ne doit être émise. */
   hidden?: boolean;
   reactionEvent?: IncomingReactionEvent;
+  deletionEvent?: IncomingDeletionEvent;
+  /** Médias locaux à nettoyer après une suppression appliquée hors événement v5. */
+  deletedMediaRefs?: LocalMediaRefs | null;
   account: E2eeAccountRow;
   stored: StoredE2eeMessage;
   keyChanged: boolean;
@@ -781,6 +799,13 @@ export async function decryptIncoming(input: {
     };
   };
 
+  const deletionEventOf = (stored: StoredE2eeMessage): IncomingDeletionEvent | undefined => {
+    if (stored.content_kind !== 'delete' || typeof stored.control_target !== 'string') {
+      return undefined;
+    }
+    return { targetId: stored.control_target, authorId: stored.sender_id, applied: false };
+  };
+
   const replay = async () => {
     const existing = await loadLocalMessage(input.db, message.id);
     if (!existing) return null;
@@ -792,20 +817,21 @@ export async function decryptIncoming(input: {
       unreadableReason: (existing.unreadable_reason as PayloadError | null) ?? undefined,
       hidden: Boolean(existing.hidden),
       reactionEvent: reactionEventOf(existing),
+      deletionEvent: deletionEventOf(existing),
       account: input.account,
       stored: existing,
       keyChanged: false,
     };
   };
 
-  return runInbound(
+  return runInbound<DecryptIncomingResult>(
     {
       token: input.token,
       db: input.db,
       account: input.account,
       message,
     },
-    async (opened) => {
+    async (opened): Promise<DecryptIncomingResult> => {
       let parsed: ParsedPayload;
       try {
         parsed = parsePayload(opened.plaintextB64);
@@ -823,15 +849,23 @@ export async function decryptIncoming(input: {
       // stocker à part évite une bulle de texte vide.
       const body =
         parsed.kind === 'text' ? parsed.text : parsed.kind === 'media' ? parsed.caption : '';
-      const reactionEvent =
-        parsed.kind === 'reaction'
-          ? {
-              targetId: parsed.targetId,
-              reaction: parsed.reaction,
-              action: parsed.action,
-              authorId: message.sender.id,
-            }
-          : undefined;
+      let reactionEvent: IncomingReactionEvent | undefined;
+      if (parsed.kind === 'reaction') {
+        const event: IncomingReactionEvent = {
+          targetId: parsed.targetId,
+          reaction: parsed.reaction,
+          action: parsed.action,
+          authorId: message.sender.id,
+        };
+        reactionEvent = event;
+      }
+      const isReaction = parsed.kind === 'reaction';
+      const isDelete = parsed.kind === 'delete';
+      const deleteTarget = parsed.kind === 'delete' ? parsed.targetId : null;
+      const controlTarget =
+        parsed.kind === 'reaction' || parsed.kind === 'delete' ? parsed.targetId : null;
+      const reaction = parsed.kind === 'reaction' ? parsed.reaction : null;
+      const reactionAction = parsed.kind === 'reaction' ? parsed.action : null;
       const stored: StoredE2eeMessage = {
         id: message.id,
         conversation_id: message.conversationId,
@@ -848,13 +882,13 @@ export async function decryptIncoming(input: {
         // Référence validée par `parsePayload` : forme `pack/id` uniquement.
         // Rien d'autre n'en est tiré — ni URL, ni chemin, ni binaire.
         sticker_ref: parsed.kind === 'sticker' ? parsed.stickerRef : null,
-        hidden: parsed.kind === 'reaction' ? 1 : 0,
-        content_kind: parsed.kind === 'reaction' ? 'reaction' : null,
-        control_target: parsed.kind === 'reaction' ? parsed.targetId : null,
-        reaction: parsed.kind === 'reaction' ? parsed.reaction : null,
-        reaction_action: parsed.kind === 'reaction' ? parsed.action : null,
+        hidden: isReaction || isDelete ? 1 : 0,
+        content_kind: isReaction ? 'reaction' : isDelete ? 'delete' : null,
+        control_target: controlTarget,
+        reaction,
+        reaction_action: reactionAction,
       };
-      await persistIncoming({
+      const persisted = await persistIncoming({
         db: input.db,
         session: opened.session,
         // `null` sur une session existante : le compte n'a pas bougé et une
@@ -863,15 +897,56 @@ export async function decryptIncoming(input: {
         message: stored,
         // Le pair est épinglé dès qu'il change de clé, ou à la première vue.
         pinPeerKey: opened.keyChanged || !opened.knownKey,
+        deletion: deleteTarget
+          ? {
+              targetId: deleteTarget,
+              authorId: message.sender.id,
+              eventMessageId: message.id,
+              createdAt: message.createdAt,
+            }
+          : undefined,
       });
+      if (isDelete) {
+        const targetId = deleteTarget ?? '';
+        const target = persisted.deletion?.applied
+          ? await loadLocalMessage(input.db, targetId)
+          : null;
+        return {
+          text: '',
+          hidden: true,
+          deletionEvent: {
+            targetId,
+            authorId: message.sender.id,
+            applied: Boolean(persisted.deletion?.applied),
+            target: target ?? undefined,
+            mediaRefs: persisted.deletion?.refs ?? null,
+          },
+          account: opened.account,
+          stored,
+          keyChanged: opened.keyChanged,
+        };
+      }
+      const finalStored = persisted.deletion?.applied
+        ? {
+            ...stored,
+            body: '',
+            media_meta: null,
+            quote_id: null,
+            sticker_ref: null,
+            deleted: 1,
+            deleted_by: message.sender.id,
+          }
+        : stored;
       return {
-        text: body,
-        media: parsed.kind === 'media' ? parsed.media : undefined,
+        text: finalStored.body,
+        media:
+          parsed.kind === 'media' && !persisted.deletion?.applied ? parsed.media : undefined,
         stickerRef: parsed.kind === 'sticker' ? parsed.stickerRef : undefined,
-        hidden: parsed.kind === 'reaction',
+        hidden: isReaction,
         reactionEvent,
         account: opened.account,
-        stored,
+        stored: finalStored,
+        deletedMediaRefs: persisted.deletion?.refs ?? null,
         keyChanged: opened.keyChanged,
       };
     },

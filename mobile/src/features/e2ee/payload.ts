@@ -62,7 +62,8 @@ export type ParsedPayload =
       targetId: string;
       reaction: ReactionRef;
       action: 'add' | 'remove';
-    };
+    }
+  | { kind: 'delete'; targetId: string };
 
 /**
  * Motifs d'un contenu **authentifié mais illisible**. Liste fermée : elle sert
@@ -155,6 +156,14 @@ export function buildReactionV4(
   return encodeText(
     JSON.stringify({ v: 4, kind: 'reaction', targetId, reaction, action }),
   );
+}
+
+/** Sérialise le contenu `v:5` d'une suppression pour tous. */
+export function buildDeleteV5(targetId: string): string {
+  if (!isValidControlTarget(targetId)) {
+    throw new InvalidPayloadError('invalid_payload');
+  }
+  return encodeText(JSON.stringify({ v: 5, kind: 'delete', targetId }));
 }
 
 function isBlob(value: unknown): value is EncryptedBlob {
@@ -283,6 +292,16 @@ export function parsePayload(plaintextB64: string): ParsedPayload {
       reaction: envelope.reaction,
       action: envelope.action,
     };
+  }
+  if (envelope.v === 5) {
+    if (
+      !hasExactKeys(envelope, ['v', 'kind', 'targetId']) ||
+      envelope.kind !== 'delete' ||
+      !isValidControlTarget(envelope.targetId)
+    ) {
+      throw new InvalidPayloadError('invalid_payload');
+    }
+    return { kind: 'delete', targetId: envelope.targetId };
   }
   throw new InvalidPayloadError('unsupported_version');
 }

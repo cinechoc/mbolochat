@@ -104,13 +104,14 @@ export function storedMessageToView(
 ): ChatMessageView {
   const mine = stored.mine === 1;
   const media = stored.media_meta ? decodeMediaMeta(stored.media_meta) : null;
+  const deleted = stored.deleted === 1;
   const sender = mine
     ? options.currentUser
     : {
         ...options.peer,
         displayName: stored.sender_name || options.peer.displayName,
       };
-  const attachment: ChatAttachmentView | null = media
+  const attachment: ChatAttachmentView | null = media && !deleted
     ? {
         type: media.type,
         url: null,
@@ -135,16 +136,16 @@ export function storedMessageToView(
     mine,
     sender,
     createdAt: stored.created_at,
-    body: stored.body,
+    body: deleted ? '' : stored.body,
     type: 'text',
-    deleted: false,
-    unreadable: Boolean(stored.unreadable_reason),
-    quoteId: stored.quote_id,
+    deleted,
+    unreadable: !deleted && Boolean(stored.unreadable_reason),
+    quoteId: deleted ? null : stored.quote_id,
     // La citation chiffrée est reconstruite depuis l'index local par l'écran :
     // seule la référence traverse la couche de données.
     quote: null,
-    reactions: options.reactions ?? [],
-    stickerRef: stored.sticker_ref ?? null,
+    reactions: deleted ? [] : options.reactions ?? [],
+    stickerRef: deleted ? null : stored.sticker_ref ?? null,
     attachment,
     state: options.state ?? 'none',
     error: null,

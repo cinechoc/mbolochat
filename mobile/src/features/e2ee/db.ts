@@ -303,6 +303,10 @@ export interface StoredE2eeMessage {
   reaction_action?: string | null;
   /** Contenu authentifié d'une version future, conservé en SQLCipher seulement. */
   raw_payload?: string | null;
+  /** Message supprimé pour tous : rangée conservée, contenu vidé. */
+  deleted?: number | null;
+  /** Auteur vérifié de la suppression, pour audit local uniquement. */
+  deleted_by?: string | null;
 }
 
 export async function saveLocalMessage(
@@ -324,8 +328,8 @@ export async function saveLocalMessageWith(
     `INSERT INTO e2ee_messages
        (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine,
         media_meta, quote_id, sticker_ref, unreadable_reason, hidden, content_kind,
-        control_target, reaction, reaction_action, raw_payload)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        control_target, reaction, reaction_action, raw_payload, deleted, deleted_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        body = excluded.body,
        sticker_ref = COALESCE(excluded.sticker_ref, e2ee_messages.sticker_ref),
@@ -335,7 +339,9 @@ export async function saveLocalMessageWith(
        control_target = excluded.control_target,
        reaction = excluded.reaction,
        reaction_action = excluded.reaction_action,
-       raw_payload = COALESCE(excluded.raw_payload, e2ee_messages.raw_payload)`,
+       raw_payload = COALESCE(excluded.raw_payload, e2ee_messages.raw_payload),
+       deleted = CASE WHEN e2ee_messages.deleted = 1 THEN 1 ELSE excluded.deleted END,
+       deleted_by = COALESCE(e2ee_messages.deleted_by, excluded.deleted_by)`,
     message.id,
     message.conversation_id,
     message.sender_id,
@@ -354,6 +360,8 @@ export async function saveLocalMessageWith(
     message.reaction ?? null,
     message.reaction_action ?? null,
     message.raw_payload ?? null,
+    message.deleted ?? 0,
+    message.deleted_by ?? null,
   );
 }
 

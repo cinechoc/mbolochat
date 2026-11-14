@@ -178,6 +178,20 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
         sticker_ref: stickerRef,
       }),
     })),
+    sendEncryptedDelete: vi.fn(async () => ({
+      clientId: 'delete-1',
+      serverMessage: serverMessage('delete-1', '2026-01-01T00:00:13.000Z', {
+        sender: identity('me'),
+      }),
+      stored: stored('delete-1', '2026-01-01T00:00:13.000Z', {
+        sender_id: 'me',
+        sender_name: 'me',
+        body: '',
+        hidden: 1,
+        content_kind: 'delete',
+        control_target: 'a',
+      }),
+    })),
     decryptIncoming: vi.fn(async ({ message }: { message: Message }) => ({
       text: '',
       account: ACCOUNT,
@@ -220,6 +234,14 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
     deliveredIds,
     canReportDelivered,
   };
+  const deletion = {
+    applyDeleteForAll: vi.fn(async () => ({
+      exists: true,
+      applied: true,
+      refs: null,
+    })),
+    cleanupDeletedMedia: vi.fn(async () => undefined),
+  };
   const cache = { patchConversation: vi.fn() };
   const deps: E2eeTransportDeps = {
     api: api as unknown as E2eeTransportDeps['api'],
@@ -227,6 +249,7 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
     db: db as unknown as E2eeTransportDeps['db'],
     crypto: crypto as unknown as E2eeTransportDeps['crypto'],
     receipts: receipts as unknown as E2eeTransportDeps['receipts'],
+    deletion: deletion as unknown as E2eeTransportDeps['deletion'],
     cache: cache as unknown as E2eeTransportDeps['cache'],
     clock: () => 0,
   };
@@ -235,7 +258,7 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
       handler(...args);
     }
   };
-  return { deps, db, crypto, api, socket, socketDeps, cache, emitEvent, fakeDb };
+  return { deps, db, crypto, api, socket, socketDeps, deletion, cache, emitEvent, fakeDb };
 }
 
 runTransportContract({
@@ -375,6 +398,34 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
       'message:send',
       expect.objectContaining({ content: expect.stringContaining('mbolo-panther') }),
     );
+    await transport.dispose();
+  });
+
+  it('supprime pour tous via l’enveloppe, puis vide le contenu local', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new E2eeTransport(fakes.deps, options);
+    await transport.loadInitial();
+    const removed: { id: string; forEveryone: boolean }[] = [];
+    const off = transport.subscribe({
+      onMessage: () => undefined,
+      onMessageRemoved: (id, forEveryone) => removed.push({ id, forEveryone }),
+      onReceipts: () => undefined,
+      onReaction: () => undefined,
+      onTyping: () => undefined,
+      onConnection: () => undefined,
+      onConversationUpdated: () => undefined,
+      onConversationRemoved: () => undefined,
+      onError: () => undefined,
+      onFatal: () => undefined,
+    });
+    await transport.deleteMessage('a', true);
+    expect(fakes.crypto.sendEncryptedDelete).toHaveBeenCalledWith(
+      expect.objectContaining({ targetId: 'a' }),
+    );
+    expect(fakes.deletion.applyDeleteForAll).toHaveBeenCalledWith(expect.anything(), 'a', 'me');
+    expect(removed).toContainEqual({ id: 'a', forEveryone: true });
+    expect(fakes.socketDeps.deleteMessage).not.toHaveBeenCalled();
+    off();
     await transport.dispose();
   });
 

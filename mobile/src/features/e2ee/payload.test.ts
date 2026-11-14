@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildDeleteV5,
   buildMediaV2,
   buildReactionV4,
   buildStickerV3,
@@ -138,10 +139,23 @@ describe('parsePayload — réaction v4', () => {
   });
 });
 
+describe('parsePayload — suppression v5', () => {
+  it('fait l aller-retour et rejette tout champ supplémentaire', () => {
+    expect(parsePayload(buildDeleteV5('msg-42'))).toEqual({ kind: 'delete', targetId: 'msg-42' });
+    for (const payload of [
+      { v: 5, kind: 'delete', targetId: '../secret' },
+      { v: 5, kind: 'reaction', targetId: 'msg-42' },
+      { v: 5, kind: 'delete', targetId: 'msg-42', authorId: 'faux' },
+    ]) {
+      expect(() => parsePayload(encodeText(JSON.stringify(payload)))).toThrow(InvalidPayloadError);
+    }
+  });
+});
+
 describe('parsePayload — refus', () => {
   it('rejette une version inconnue au lieu de la deviner', () => {
-    // v3 est reconnu depuis 1.3b : la version « du futur » est désormais v5.
-    const future = encodeText(JSON.stringify({ v: 5, kind: 'media' }));
+    // Toutes les versions publiées sont reconnues : la prochaine est v6.
+    const future = encodeText(JSON.stringify({ v: 6, kind: 'media' }));
     expect(() => parsePayload(future)).toThrow(InvalidPayloadError);
     try {
       parsePayload(future);
@@ -295,8 +309,7 @@ describe('parsePayload — sticker v3', () => {
     } catch (error) {
       expect((error as InvalidPayloadError).reason).toBe('unsupported_version');
     }
-    // v5 sera ajouté plus tard : aucune version non implémentée n'est interprétée.
-    expect(() => parsePayload(encodeText(JSON.stringify({ v: 5, stickerRef: REF })))).toThrow(
+    expect(() => parsePayload(encodeText(JSON.stringify({ v: 6, stickerRef: REF })))).toThrow(
       InvalidPayloadError,
     );
   });
@@ -385,7 +398,7 @@ describe('motifs d’un contenu illisible', () => {
   };
 
   it('classe une version future en unsupported_version', () => {
-    for (const version of [5, 6, 99]) {
+    for (const version of [6, 99]) {
       expect(reasonOf(encodeText(JSON.stringify({ v: version, text: 'futur' })))).toBe(
         'unsupported_version',
       );
