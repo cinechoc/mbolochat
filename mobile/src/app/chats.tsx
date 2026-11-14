@@ -138,11 +138,13 @@ export default function ChatsScreen() {
     }
   }, [token]);
 
-  useEffect(() => {
-    if (filter === 'hidden') {
-      void loadHidden();
-    }
-  }, [filter, loadHidden]);
+  const handleFilterChange = useCallback(
+    (next: ConversationFilter) => {
+      setFilter(next);
+      if (next === 'hidden') void loadHidden();
+    },
+    [loadHidden],
+  );
 
   const loadBlocked = useCallback(async () => {
     if (!token) {
@@ -879,7 +881,7 @@ export default function ChatsScreen() {
           />
         </ThemedView>
 
-        <FilterTabs options={filterOptions} value={filter} onChange={setFilter} />
+        <FilterTabs options={filterOptions} value={filter} onChange={handleFilterChange} />
 
         {error ? (
           <ThemedText type="small" style={styles.error}>

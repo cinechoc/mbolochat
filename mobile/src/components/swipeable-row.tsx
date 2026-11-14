@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react-native';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -44,31 +44,27 @@ export function SwipeableRow({ open, onOpenChange, left, right, children }: Swip
   const theme = useTheme();
   const tx = useSharedValue(0);
   const startX = useSharedValue(0);
-  const [side, setSide] = useState<'left' | 'right' | null>(null);
+  const wasOpenRef = useRef(open);
   const leftWidth = left.length * ACTION_WIDTH;
   const rightWidth = right.length * ACTION_WIDTH;
 
   const close = useCallback(() => {
-    tx.value = withSpring(0, SPRING);
-    setSide(null);
+    tx.set(withSpring(0, SPRING));
     onOpenChange(false);
   }, [onOpenChange, tx]);
 
   // Fermeture demandée par l'écran (autre ligne ouverte, défilement, navigation).
   useEffect(() => {
-    if (!open && side !== null) close();
-  }, [open, side, close]);
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (!open && wasOpen) tx.set(withSpring(0, SPRING));
+  }, [open, tx]);
 
-  const opened = useCallback(
-    (next: 'left' | 'right') => {
-      setSide(next);
-      onOpenChange(true);
-    },
-    [onOpenChange],
-  );
+  const opened = useCallback(() => {
+    onOpenChange(true);
+  }, [onOpenChange]);
 
   const closed = useCallback(() => {
-    setSide(null);
     onOpenChange(false);
   }, [onOpenChange]);
 
@@ -76,22 +72,22 @@ export function SwipeableRow({ open, onOpenChange, left, right, children }: Swip
     .activeOffsetX([-12, 12])
     .failOffsetY([-14, 14])
     .onBegin(() => {
-      startX.value = tx.value;
+      startX.set(tx.get());
     })
     .onUpdate((event) => {
-      const next = startX.value + event.translationX;
-      tx.value = Math.min(leftWidth, Math.max(-rightWidth, next));
+      const next = startX.get() + event.translationX;
+      tx.set(Math.min(leftWidth, Math.max(-rightWidth, next)));
     })
     .onEnd((event) => {
-      const next = startX.value + event.translationX;
+      const next = startX.get() + event.translationX;
       if (next > OPEN_THRESHOLD && leftWidth > 0) {
-        tx.value = withSpring(leftWidth, SPRING);
-        runOnJS(opened)('left');
+        tx.set(withSpring(leftWidth, SPRING));
+        runOnJS(opened)();
       } else if (next < -OPEN_THRESHOLD && rightWidth > 0) {
-        tx.value = withSpring(-rightWidth, SPRING);
-        runOnJS(opened)('right');
+        tx.set(withSpring(-rightWidth, SPRING));
+        runOnJS(opened)();
       } else {
-        tx.value = withSpring(0, SPRING);
+        tx.set(withSpring(0, SPRING));
         runOnJS(closed)();
       }
     });
