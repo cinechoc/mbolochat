@@ -71,7 +71,7 @@ export type ParsedPayload =
       viewOnce?: true;
       preview?: EncryptedLinkPreview;
     }
-  | { kind: 'media'; media: EncryptedMedia; caption: string; replyTo?: string }
+  | { kind: 'media'; media: EncryptedMedia; caption: string; replyTo?: string; viewOnce?: true }
   | { kind: 'sticker'; stickerRef: string; replyTo?: string }
   | {
       kind: 'reaction';
@@ -217,6 +217,38 @@ export function buildMediaV2(media: EncryptedMedia, caption = '', replyTo?: stri
   return encodeText(
     JSON.stringify(replyTo ? { v: 2, kind: 'media', media, caption, replyTo } : { v: 2, kind: 'media', media, caption }),
   );
+}
+
+export interface MediaV9Options {
+  caption?: string;
+  replyTo?: string;
+  /** Lecture unique : le média disparaît chez le destinataire après ouverture. */
+  viewOnce?: boolean;
+}
+
+/**
+ * Sérialise le contenu `v:9` d'un média chiffré à lecture unique.
+ *
+ * Identique à `v:2` avec un champ `viewOnce` facultatif (sa seule valeur
+ * admise est `true`) : le serveur ne voit toujours que l'identifiant d'upload,
+ * et les enveloppes v:1 à v:8 restent inchangées.
+ */
+export function buildMediaV9(media: EncryptedMedia, options: MediaV9Options = {}): string {
+  if (
+    (options.replyTo !== undefined && !isValidControlTarget(options.replyTo)) ||
+    (options.viewOnce !== undefined && options.viewOnce !== true)
+  ) {
+    throw new InvalidPayloadError('invalid_payload');
+  }
+  const payload: Record<string, unknown> = {
+    v: 9,
+    kind: 'media',
+    media,
+    caption: options.caption ?? '',
+  };
+  if (options.replyTo) payload.replyTo = options.replyTo;
+  if (options.viewOnce === true) payload.viewOnce = true;
+  return encodeText(JSON.stringify(payload));
 }
 
 /**
@@ -508,6 +540,35 @@ export function parsePayload(plaintextB64: string): ParsedPayload {
       ...(envelope.silent === true ? { silent: true as const } : {}),
       ...(envelope.viewOnce === true ? { viewOnce: true as const } : {}),
       ...(isEncryptedLinkPreview(envelope.preview) ? { preview: envelope.preview } : {}),
+    };
+  }
+  if (envelope.v === 9) {
+    // Lecture unique média : clés exactes comme v:8 — un champ inattendu rend
+    // le contenu illisible plutôt qu'interprété à moitié.
+    const allowed = [
+      'v',
+      'kind',
+      'media',
+      'caption',
+      ...(Object.hasOwn(envelope, 'replyTo') ? ['replyTo'] : []),
+      ...(Object.hasOwn(envelope, 'viewOnce') ? ['viewOnce'] : []),
+    ];
+    if (
+      !hasExactKeys(envelope, allowed) ||
+      envelope.kind !== 'media' ||
+      !isMedia(envelope.media) ||
+      typeof envelope.caption !== 'string' ||
+      (envelope.replyTo !== undefined && !isValidControlTarget(envelope.replyTo)) ||
+      (envelope.viewOnce !== undefined && envelope.viewOnce !== true)
+    ) {
+      throw new InvalidPayloadError('invalid_payload');
+    }
+    return {
+      kind: 'media',
+      media: envelope.media,
+      caption: envelope.caption,
+      ...(typeof envelope.replyTo === 'string' ? { replyTo: envelope.replyTo } : {}),
+      ...(envelope.viewOnce === true ? { viewOnce: true as const } : {}),
     };
   }
   throw new InvalidPayloadError('unsupported_version');

@@ -1093,7 +1093,10 @@ export async function decryptIncoming(input: {
         reaction_action: reactionAction,
         edit_revision: editRevision,
         silent: parsed.kind === 'text' && parsed.silent === true ? 1 : 0,
-        view_once: parsed.kind === 'text' && parsed.viewOnce === true ? 1 : 0,
+        // Lecture unique : texte v:8 comme média v:9 — la copie locale est
+        // marquée pour que l'interface la masque derrière son voile.
+        view_once:
+          (parsed.kind === 'text' || parsed.kind === 'media') && parsed.viewOnce === true ? 1 : 0,
         preview_json:
           parsed.kind === 'text' && parsed.preview ? JSON.stringify(parsed.preview) : null,
         // Les événements de contrôle ne portent jamais d'échéance : seuls les

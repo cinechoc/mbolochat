@@ -181,6 +181,8 @@ export interface OutgoingAsset {
   height: number | null;
   durationMs: number | null;
   waveform?: number[];
+  /** Lecture unique (vocal chiffré : enveloppe v:9 ; clair : drapeau serveur). */
+  viewOnce?: boolean;
 }
 
 export interface ChatSnapshot {

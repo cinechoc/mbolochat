@@ -24,7 +24,7 @@ import {
   mediaUploadKey,
   noteMediaPreparationError,
 } from './mediaPrep';
-import { buildMediaV2, decodeMediaMeta, encodeMediaMeta } from './payload';
+import { buildMediaV2, buildMediaV9, decodeMediaMeta, encodeMediaMeta } from './payload';
 import { E2eeAlreadySentError, encryptEnvelope } from './text';
 import {
   loadOutboxMediaRefs,
@@ -76,6 +76,8 @@ export interface E2eeMediaAsset {
   durationMs?: number;
   /** Note vocale : forme d'onde, hors chiffrement, comme en clair. */
   waveform?: number[];
+  /** Lecture unique : l'enveloppe part en v:9 et la copie locale est marquée. */
+  viewOnce?: boolean;
 }
 
 const BLOB_KIND: Record<E2eeMediaKind, EncryptedMedia['type']> = {
@@ -402,6 +404,7 @@ export async function sendEncryptedMedia(
       media_meta: mediaMeta,
       quote_id: null,
       expires_at: expiryFromTtl(createdAt, ttl),
+      view_once: input.asset.viewOnce ? 1 : 0,
     };
     await saveLocalMessage(input.db, provisional);
     await updateLocalMessageMedia(input.db, clientId, {
@@ -419,7 +422,9 @@ export async function sendEncryptedMedia(
       account: input.account,
       conversation: input.conversation,
       currentUserId: input.currentUserId,
-      plaintext: buildMediaV2(media, caption),
+      plaintext: input.asset.viewOnce
+        ? buildMediaV9(media, { caption, viewOnce: true })
+        : buildMediaV2(media, caption),
       allowKeyChange: input.allowKeyChange ?? false,
       clientId,
       attachmentId: mediaUpload.id,
@@ -563,13 +568,18 @@ export async function resumeEncryptedMedia(
   const envelope =
     stored.status === 'none'
       ? // Interruption entre SQLCipher et journal : même média, mêmes clés.
+        // Le drapeau lecture unique vit sur la ligne provisoire (étape 8) :
+        // elle précède toujours le journal d'enveloppe (étape 9).
         await encryptEnvelope({
           token: input.token,
           db: input.db,
           account: input.account,
           conversation: input.conversation,
           currentUserId: input.currentUserId,
-          plaintext: buildMediaV2(media, previous?.body ?? ''),
+          plaintext:
+            previous?.view_once === 1
+              ? buildMediaV9(media, { caption: previous?.body ?? '', viewOnce: true })
+              : buildMediaV2(media, previous?.body ?? ''),
           allowKeyChange: false,
           clientId: input.clientId,
           attachmentId: refs.attachmentId,

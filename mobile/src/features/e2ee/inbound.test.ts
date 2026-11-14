@@ -1304,7 +1304,7 @@ describe('message authentifié mais illisible — le ratchet avance quand même'
   it('persiste un placeholder pour une version future et avance la session', async () => {
     const fixture = await seeded();
     cryptoMock.secureDecrypt.mockResolvedValue(
-      unreadableOf('S1', plainOf({ v: 9, kind: 'sticker', stickerRef: 'pack/id' })) as never,
+      unreadableOf('S1', plainOf({ v: 10, kind: 'sticker', stickerRef: 'pack/id' })) as never,
     );
 
     const result = await decrypt(fixture, incoming({ id: 'm1' }));
@@ -1377,7 +1377,7 @@ describe('message authentifié mais illisible — le ratchet avance quand même'
   it('test décisif : le message suivant reste déchiffrable après un contenu illisible', async () => {
     const fixture = await seeded();
     const state = ratchetMock((payload) =>
-      payload === 'ILLISIBLE' ? plainOf({ v: 9, kind: 'sticker' }) : plainOf({ v: 1, text: 'bonjour' }),
+      payload === 'ILLISIBLE' ? plainOf({ v: 10, kind: 'sticker' }) : plainOf({ v: 1, text: 'bonjour' }),
     );
 
     const first = await decrypt(fixture, incoming({ id: 'm1', payload: 'ILLISIBLE' }));
@@ -1490,7 +1490,7 @@ describe('message authentifié mais illisible — le ratchet avance quand même'
 
   it('reconnaît le doublon d’un message illisible sans rejouer le ratchet', async () => {
     const fixture = await seeded();
-    cryptoMock.secureDecrypt.mockResolvedValue(unreadableOf('S1', plainOf({ v: 9 })) as never);
+    cryptoMock.secureDecrypt.mockResolvedValue(unreadableOf('S1', plainOf({ v: 10 })) as never);
 
     await decrypt(fixture, incoming({ id: 'm1' }));
     const again = await decrypt(fixture, incoming({ id: 'm1' }));

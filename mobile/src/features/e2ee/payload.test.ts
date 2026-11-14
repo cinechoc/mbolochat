@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildDeleteV5,
   buildMediaV2,
+  buildMediaV9,
   buildReactionV4,
   buildStickerV3,
   buildTextV1,
@@ -165,6 +166,55 @@ describe('parsePayload — média v2', () => {
   });
 });
 
+describe('parsePayload — média v9 (lecture unique)', () => {
+  it('construit et relit un média v9 à lecture unique', () => {
+    const parsed = parsePayload(buildMediaV9(media, { caption: 'vocal', viewOnce: true }));
+    expect(parsed.kind).toBe('media');
+    if (parsed.kind !== 'media') return;
+    expect(parsed.caption).toBe('vocal');
+    expect(parsed.media).toEqual(media);
+    expect(parsed.viewOnce).toBe(true);
+  });
+
+  it('sans lecture unique, v9 décrit un média ordinaire', () => {
+    const parsed = parsePayload(buildMediaV9(media));
+    expect(parsed).toEqual({ kind: 'media', media, caption: '' });
+  });
+
+  it('transporte une citation à côté de la lecture unique', () => {
+    const parsed = parsePayload(buildMediaV9(media, { viewOnce: true, replyTo: 'msg-7' }));
+    expect(parsed.kind).toBe('media');
+    if (parsed.kind !== 'media') return;
+    expect(parsed.replyTo).toBe('msg-7');
+    expect(parsed.viewOnce).toBe(true);
+  });
+
+  it('refuse à la construction un viewOnce différent de true', () => {
+    expect(() => buildMediaV9(media, { viewOnce: false })).toThrow(InvalidPayloadError);
+  });
+
+  it('refuse à la lecture un viewOnce mal typé ou un champ supplémentaire', () => {
+    const base = JSON.parse(decodeText(buildMediaV9(media, { viewOnce: true }))) as Record<
+      string,
+      unknown
+    >;
+    expect(() =>
+      parsePayload(encodeText(JSON.stringify({ ...base, viewOnce: 'oui' }))),
+    ).toThrow(InvalidPayloadError);
+    expect(() =>
+      parsePayload(encodeText(JSON.stringify({ ...base, extra: 1 }))),
+    ).toThrow(InvalidPayloadError);
+  });
+
+  it('v2 sans viewOnce reste acceptée (non-régression)', () => {
+    expect(parsePayload(buildMediaV2(media, 'ma photo'))).toEqual({
+      kind: 'media',
+      media,
+      caption: 'ma photo',
+    });
+  });
+});
+
 describe('media_meta — référence stockée dans la base chiffrée', () => {
   it('fait l aller-retour complet, clés du fichier comprises', () => {
     expect(decodeMediaMeta(encodeMediaMeta(media))).toEqual(media);
@@ -220,7 +270,7 @@ describe('parsePayload — suppression v5', () => {
 describe('parsePayload — refus', () => {
   it('rejette une version inconnue au lieu de la deviner', () => {
     // Toutes les versions publiées sont reconnues : la prochaine est v9.
-    const future = encodeText(JSON.stringify({ v: 9, kind: 'media' }));
+    const future = encodeText(JSON.stringify({ v: 10, kind: 'media' }));
     expect(() => parsePayload(future)).toThrow(InvalidPayloadError);
     try {
       parsePayload(future);
@@ -367,14 +417,14 @@ describe('parsePayload — sticker v3', () => {
   });
 
   it('rejette toujours une version inconnue', () => {
-    const future = encodeText(JSON.stringify({ v: 9, kind: 'sticker', stickerRef: REF }));
+    const future = encodeText(JSON.stringify({ v: 10, kind: 'sticker', stickerRef: REF }));
     expect(() => parsePayload(future)).toThrow(InvalidPayloadError);
     try {
       parsePayload(future);
     } catch (error) {
       expect((error as InvalidPayloadError).reason).toBe('unsupported_version');
     }
-    expect(() => parsePayload(encodeText(JSON.stringify({ v: 9, stickerRef: REF })))).toThrow(
+    expect(() => parsePayload(encodeText(JSON.stringify({ v: 10, stickerRef: REF })))).toThrow(
       InvalidPayloadError,
     );
   });
@@ -463,13 +513,13 @@ describe('motifs d’un contenu illisible', () => {
   };
 
   it('classe une version future en unsupported_version', () => {
-    for (const version of [9, 99]) {
+    for (const version of [10, 99]) {
       expect(reasonOf(encodeText(JSON.stringify({ v: version, text: 'futur' })))).toBe(
         'unsupported_version',
       );
     }
     // Une version sans contenu exploitable reste « non prise en charge ».
-    expect(reasonOf(encodeText(JSON.stringify({ v: 9 })))).toBe('unsupported_version');
+    expect(reasonOf(encodeText(JSON.stringify({ v: 10 })))).toBe('unsupported_version');
   });
 
   it('classe un JSON invalide en invalid_payload', () => {
@@ -497,7 +547,7 @@ describe('motifs d’un contenu illisible', () => {
   it('n’expose dans le motif aucune donnée du payload', () => {
     const marqueur = 'SECRET-DU-PAYLOAD-7';
     // Le message d'exception est le motif normalisé, rien d'autre.
-    const reason = reasonOf(encodeText(JSON.stringify({ v: 9, text: marqueur })));
+    const reason = reasonOf(encodeText(JSON.stringify({ v: 10, text: marqueur })));
     expect(reason).toBe('unsupported_version');
     expect(String(reason)).not.toContain(marqueur);
   });

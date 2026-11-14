@@ -469,6 +469,24 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     await transport.dispose();
   });
 
+  it('propage la lecture unique d’un vocal vers l’enveloppe v9', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new E2eeTransport(fakes.deps, options);
+    await transport.sendVoice({
+      uri: 'file:///note.m4a',
+      durationMs: 1500,
+      waveform: [0.3, 0.8],
+      mimeType: 'audio/mp4',
+      viewOnce: true,
+    });
+    expect(fakes.crypto.sendEncryptedMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        asset: expect.objectContaining({ kind: 'audio', viewOnce: true }),
+      }),
+    );
+    await transport.dispose();
+  });
+
   it('agrège les réactions et les envoie dans l’enveloppe Olm', async () => {
     const fakes = createFakes(SEED);
     fakes.db.loadReactionSummaries.mockResolvedValueOnce(

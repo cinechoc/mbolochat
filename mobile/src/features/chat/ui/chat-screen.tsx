@@ -1223,7 +1223,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
         onClose={closeMessageMenu}
       />
 
-      <ViewOnceModal message={viewOnceFor} onClose={closeViewOnce} />
+      <ViewOnceModal message={viewOnceFor} token={token} onClose={closeViewOnce} />
 
       <ActionSheet
         visible={seenFor !== null}

@@ -306,6 +306,7 @@ export const fr = {
     close: 'Fermer le média',
     errorTitle: 'Lecture impossible',
     errorBody: 'Le média n’a pas pu être ouvert. Réessaie dans un instant.',
+    unavailable: 'Média indisponible',
     voiceName: 'Note vocale',
     micTitle: 'Micro non autorisé',
     micBody: 'Autorise le micro dans les réglages pour envoyer une note vocale.',
