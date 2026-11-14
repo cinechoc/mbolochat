@@ -6,8 +6,9 @@ import {
   RecordingPresets,
   setAudioModeAsync,
   useAudioRecorder,
-  useAudioRecorderState,
 } from 'expo-audio';
+
+import { pushLiveLevel } from './voiceRecordingLevels';
 
 /** Durée max d'une note vocale (comme WeChat : 60 s). */
 export const MAX_DURATION_MS = 60_000;
@@ -83,7 +84,6 @@ async function tryDeleteFile(uri: string | null | undefined) {
 
 export function useVoiceRecorder(options: Options) {
   const recorder = useAudioRecorder(RECORDING_OPTIONS);
-  const recorderState = useAudioRecorderState(recorder, 80);
 
   const [status, setStatusState] = useState<RecorderStatus>('idle');
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -111,14 +111,6 @@ export function useVoiceRecorder(options: Options) {
     if (tickRef.current) clearInterval(tickRef.current);
     tickRef.current = null;
   };
-
-  // Alimente la forme d'onde à chaque mise à jour du metering.
-  useEffect(() => {
-    if (statusRef.current !== 'recording') return;
-    const level = dbToLevel(recorderState.metering);
-    samplesRef.current.push(level);
-    setLevels((prev) => [...prev.slice(1), level]);
-  }, [recorderState]);
 
   const finish = useCallback(async (cancel: boolean) => {
     if (statusRef.current !== 'recording') return;
@@ -190,7 +182,10 @@ export function useVoiceRecorder(options: Options) {
       stopTick();
       tickRef.current = setInterval(() => {
         const elapsed = Date.now() - startedAtRef.current;
+        const level = dbToLevel(recorderRef.current.getStatus().metering);
+        samplesRef.current.push(level);
         setElapsedMs(elapsed);
+        setLevels((prev) => pushLiveLevel(prev, level, LIVE_BARS));
         if (elapsed >= MAX_DURATION_MS) void finish(false); // envoi auto à 60 s
       }, 80);
 
