@@ -77,6 +77,21 @@ describe('messagesReducer', () => {
     expect(upsertMessage(base, a)).toBe(base);
   });
 
+  it('remplace la bulle optimiste par la version serveur du même clientId', () => {
+    const optimistic = view('local-1', at(1), { clientId: 'client-1', state: 'pending' });
+    const server = view('server-1', at(2), { clientId: 'client-1', state: 'sent' });
+    const next = upsertMessage([optimistic], server);
+    expect(next.map((entry) => entry.id)).toEqual(['server-1']);
+    expect(next[0]?.state).toBe('sent');
+  });
+
+  it('supprime un doublon résiduel quand la confirmation arrive avant le retrait optimiste', () => {
+    const optimistic = view('local-1', at(1), { clientId: 'client-1', state: 'pending' });
+    const server = view('server-1', at(2), { clientId: 'client-1', state: 'sent' });
+    const next = upsertMessage([optimistic, server], server);
+    expect(next.map((entry) => entry.id)).toEqual(['server-1']);
+  });
+
   it('retire pour moi et vide pour tous', () => {
     const base = [view('a', at(1)), view('b', at(2))];
     const removed = messagesReducer(

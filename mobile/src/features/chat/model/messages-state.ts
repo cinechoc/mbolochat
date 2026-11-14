@@ -52,8 +52,31 @@ export function upsertMessage(
 ): ChatMessageView[] {
   const index = messages.findIndex((entry) => entry.id === message.id);
   if (index === -1) {
-    return insertSorted(messages, message);
+    const optimistic = message.clientId
+      ? messages.findIndex((entry) => entry.clientId === message.clientId)
+      : -1;
+    if (optimistic === -1) {
+      return insertSorted(messages, message);
+    }
+    return replaceMessage(messages, optimistic, message);
   }
+  const duplicate = message.clientId
+    ? messages.findIndex(
+        (entry, position) => position !== index && entry.clientId === message.clientId,
+      )
+    : -1;
+  if (duplicate !== -1) {
+    const withoutDuplicate = messages.filter((_entry, position) => position !== duplicate);
+    return replaceMessage(withoutDuplicate, duplicate < index ? index - 1 : index, message);
+  }
+  return replaceMessage(messages, index, message);
+}
+
+function replaceMessage(
+  messages: readonly ChatMessageView[],
+  index: number,
+  message: ChatMessageView,
+): ChatMessageView[] {
   if (messages[index] === message) {
     return messages as ChatMessageView[];
   }
