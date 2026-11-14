@@ -1044,7 +1044,10 @@ export async function decryptIncoming(input: {
         reaction,
         reaction_action: reactionAction,
         edit_revision: editRevision,
-        expires_at: expiresAt,
+        // Les événements de contrôle ne portent jamais d'échéance : seuls les
+        // messages visibles (texte, média, sticker) expirent.
+        expires_at:
+          isReaction || isDelete || isEphemeral || isEdit ? null : expiresAt,
       };
       const persisted = await persistIncoming({
         db: input.db,

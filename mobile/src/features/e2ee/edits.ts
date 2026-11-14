@@ -100,12 +100,13 @@ export async function applyEditWith(
   const result = await db.runAsync(
     `UPDATE e2ee_messages
         SET body = ?, edited_at = ?, edit_revision = ?
-      WHERE id = ? AND conversation_id = ? AND deleted = 0`,
+      WHERE id = ? AND conversation_id = ? AND deleted = 0 AND edit_revision = ?`,
     input.text,
     input.eventCreatedAt,
     input.revision,
     input.targetId,
     input.conversationId,
+    row.edit_revision ?? 0,
   );
   return { exists: true, applied: result.changes > 0 };
 }
