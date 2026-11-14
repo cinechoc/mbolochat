@@ -31,6 +31,7 @@ vi.mock('@/lib/socket', () => ({
 
 vi.mock('./db', () => ({
   deleteLocalMessage: vi.fn(),
+  loadConversationEphemeral: vi.fn(),
   loadE2eeAccount: vi.fn(),
   loadLocalMessage: vi.fn(),
   loadSession: vi.fn(),

@@ -70,6 +70,7 @@ vi.mock('@/lib/api', () => ({ api: { uploadMedia: vi.fn() } }));
 vi.mock('@/lib/socket', () => ({ ensureSocket: vi.fn() }));
 
 vi.mock('./db', () => ({
+  loadConversationEphemeral: vi.fn(),
   saveLocalMessage: vi.fn(),
   renameLocalMessage: vi.fn(),
   updateLocalMessageMedia: vi.fn(),

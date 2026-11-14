@@ -154,8 +154,8 @@ describe('parsePayload — suppression v5', () => {
 
 describe('parsePayload — refus', () => {
   it('rejette une version inconnue au lieu de la deviner', () => {
-    // Toutes les versions publiées sont reconnues : la prochaine est v6.
-    const future = encodeText(JSON.stringify({ v: 6, kind: 'media' }));
+    // Toutes les versions publiées sont reconnues : la prochaine est v8.
+    const future = encodeText(JSON.stringify({ v: 8, kind: 'media' }));
     expect(() => parsePayload(future)).toThrow(InvalidPayloadError);
     try {
       parsePayload(future);
@@ -302,14 +302,14 @@ describe('parsePayload — sticker v3', () => {
   });
 
   it('rejette toujours une version inconnue', () => {
-    const future = encodeText(JSON.stringify({ v: 6, kind: 'sticker', stickerRef: REF }));
+    const future = encodeText(JSON.stringify({ v: 8, kind: 'sticker', stickerRef: REF }));
     expect(() => parsePayload(future)).toThrow(InvalidPayloadError);
     try {
       parsePayload(future);
     } catch (error) {
       expect((error as InvalidPayloadError).reason).toBe('unsupported_version');
     }
-    expect(() => parsePayload(encodeText(JSON.stringify({ v: 6, stickerRef: REF })))).toThrow(
+    expect(() => parsePayload(encodeText(JSON.stringify({ v: 8, stickerRef: REF })))).toThrow(
       InvalidPayloadError,
     );
   });
@@ -398,13 +398,13 @@ describe('motifs d’un contenu illisible', () => {
   };
 
   it('classe une version future en unsupported_version', () => {
-    for (const version of [6, 99]) {
+    for (const version of [8, 99]) {
       expect(reasonOf(encodeText(JSON.stringify({ v: version, text: 'futur' })))).toBe(
         'unsupported_version',
       );
     }
     // Une version sans contenu exploitable reste « non prise en charge ».
-    expect(reasonOf(encodeText(JSON.stringify({ v: 6 })))).toBe('unsupported_version');
+    expect(reasonOf(encodeText(JSON.stringify({ v: 8 })))).toBe('unsupported_version');
   });
 
   it('classe un JSON invalide en invalid_payload', () => {
@@ -432,7 +432,7 @@ describe('motifs d’un contenu illisible', () => {
   it('n’expose dans le motif aucune donnée du payload', () => {
     const marqueur = 'SECRET-DU-PAYLOAD-7';
     // Le message d'exception est le motif normalisé, rien d'autre.
-    const reason = reasonOf(encodeText(JSON.stringify({ v: 6, text: marqueur })));
+    const reason = reasonOf(encodeText(JSON.stringify({ v: 8, text: marqueur })));
     expect(reason).toBe('unsupported_version');
     expect(String(reason)).not.toContain(marqueur);
   });
