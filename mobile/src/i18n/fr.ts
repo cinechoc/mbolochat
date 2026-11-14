@@ -103,7 +103,7 @@ export const fr = {
       title: 'Drapeaux de développement',
       unifiedChat: 'Écran de conversation unifié',
       unifiedHint:
-        'Bascule entre l’ancien écran et l’écran unifié pour les tests. Désactivé par défaut.',
+        'Bascule entre l’écran unifié et l’ancien écran. Activé par défaut.',
       enabled: 'Activé',
       disabled: 'Désactivé',
     },

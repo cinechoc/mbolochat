@@ -75,7 +75,7 @@ Statuts utilisés : **OK**, **KO corrigé**, **KO ouvert**, **non vérifié**.
 
 - Branche : `refactor/phase-5-unification-chat`, code `1f67b73` sur `1987a15` et `95b597b` ; aucun push, B.3.6 non commencé.
 - Appareil : Waydroid `192.168.240.112:5555`, paquet `com.groupenzogho.mbolochat`, API `:3001` et Metro `:8081` actifs.
-- Drapeau unifié : **ON** pendant les comparaisons, puis remis à **OFF** et vérifié « Désactivé » en fin de session.
+- Drapeau unifié : **ON** pendant les comparaisons de la session B.3.5b, puis remis à **OFF**. Depuis la clôture B.3.5c, il est **activé par défaut** ; `/dev-flags` permet encore de revenir à l'ancien écran.
 - Conversations : clair direct `b91f5c98-0d7f-4b7e-8041-e9338a9596b6` (« Test Demo »), groupe `50e68ebf-967a-4ced-8e69-44525329ca04` (« On boit où? »), chiffré direct `d84d01ea-0c70-49d6-aa3f-f72777f13bfc`.
 - Second compte clair : `alice.martin` / `password123` (client socket secondaire pour les réceptions).
 
@@ -90,7 +90,7 @@ Statuts utilisés : **OK**, **KO corrigé**, **KO ouvert**, **non vérifié**.
 | Notes vocales claires | OK | Enregistrement par appui maintenu, note `0:03`, envoi puis lecture réelle par ExoPlayer. |
 | Documents clairs | OK | PDF poussé dans `/sdcard/Download`, envoyé, affiché (`PDF · 1 Ko`) et ouvert page 1/1. |
 | Pagination longue claire | OK avec réserve | Conversation de 140 messages, remontée sur plusieurs écrans jusqu'au 28 octobre et avant, aucun doublon visible. Ralentissement puis `uiautomator` bloqué sur « idle state » ; application toujours active, aucun crash. |
-| Appels clairs | OK câblage / non vérifié | Le bouton vidéo ouvre bien l'écran d'appel ; Waydroid affiche ensuite « Caméra indisponible ». L'aboutissement réel de l'appel n'est pas vérifié. |
+| Appels clairs | non vérifié sur appareil, reporté | Le câblage bouton → écran d'appel avait été observé, mais l'appel réel n'est pas validé. Waydroid ne fournit pas de caméra fonctionnelle. |
 
 ### Écran unifié — KO et parité
 
@@ -113,9 +113,9 @@ Statuts utilisés : **OK**, **KO corrigé**, **KO ouvert**, **non vérifié**.
 
 ### Non vérifié sur appareil
 
-- **« Reçu » / « Ouvert »** : non vérifié faute de deuxième client réel sur un téléphone. Couverture unitaire : `mobile/src/features/e2ee/receipts.test.ts` (états et fusion des accusés) et `mobile/src/features/chat/transport/e2ee-transport.test.ts` (mise à jour d'une bulle à l'arrivée de « Reçu » puis « Ouvert »). À refaire sur téléphone réel.
-- **TalkBack** : non vérifié sur appareil. Inventaire et renvois : `docs/ACCESSIBILITE-FUSION-CHAT.md` ; les libellés de coches sont portés par `mobile/src/features/chat/ui/message-receipt.tsx`. À faire sur téléphone réel.
-- **Appel clair de bout en bout** : non vérifié, Waydroid ne fournit pas de caméra fonctionnelle ; seul le câblage bouton → écran d'appel est validé.
+- **« Reçu » / « Ouvert »** : non vérifié sur appareil, reporté faute de deuxième client réel sur un téléphone. Couverture unitaire : `mobile/src/features/e2ee/receipts.test.ts` (états et fusion des accusés) et `mobile/src/features/chat/transport/e2ee-transport.test.ts` (mise à jour d'une bulle à l'arrivée de « Reçu » puis « Ouvert »).
+- **TalkBack** : non vérifié sur appareil, reporté. Inventaire et renvois : `docs/ACCESSIBILITE-FUSION-CHAT.md` ; les libellés de coches sont portés par `mobile/src/features/chat/ui/message-receipt.tsx`.
+- **Appel clair de bout en bout** : non vérifié sur appareil, reporté ; Waydroid ne fournit pas de caméra fonctionnelle. Seul le câblage bouton → écran d'appel avait été observé.
 
 ## B.3.5c — correctifs avant mise en service (2026-11-14)
 
@@ -133,6 +133,6 @@ Statuts utilisés : **OK**, **KO corrigé**, **KO ouvert**, **non vérifié**.
 
 | Scénario | Statut | Résultat |
 |---|---|---|
-| « Supprimer pour tous » sur l'écran unifié | non vérifié | Le drapeau a été ouvert, puis Waydroid a déclenché un ANR au rechargement. Le service Android `activity` a ensuite disparu ; `am start` répond `Can't find service: activity` et `force-stop` renvoie `Surface DEAD_OBJECT`. Aucun message de test n'a été supprimé. Redémarrage du conteneur impossible sans accès root. |
-| A/B fluidité, conversation de 140 messages | non vérifié | Aucune mesure `gfxinfo` n'a pu être lancée après la panne du système invité. Aucun chiffre n'est inventé ; les deux passes restent à refaire après redémarrage de Waydroid. |
-| État final du drapeau sur l'appareil | non vérifié | La valeur par défaut du code reste désactivée et aucun réglage par défaut n'a été changé. L'état persisté dans Waydroid n'a pas pu être relu après la panne. |
+| « Supprimer pour tous » sur l'écran unifié | non vérifié sur appareil, reporté | Le drapeau a été ouvert, puis Waydroid a déclenché un ANR au rechargement. Le service Android `activity` a ensuite disparu ; `am start` répond `Can't find service: activity` et `force-stop` renvoie `Surface DEAD_OBJECT`. Aucun message de test n'a été supprimé. |
+| A/B fluidité, conversation de 140 messages | non vérifié sur appareil, reporté | Aucune mesure `gfxinfo` n'a pu être lancée après la panne du système invité. Aucun chiffre n'est inventé ; les deux passes restent à refaire après redémarrage de Waydroid. |
+| État final du drapeau sur l'appareil | non vérifié sur appareil, reporté | Le code est désormais activé par défaut et `/dev-flags` permet le retour. L'état persisté dans Waydroid n'a pas pu être relu après la panne. |

@@ -520,7 +520,7 @@ export interface E2eeTransportDeps {
 | B.3.2 | Transport classique + hooks (fichiers neufs, **non branchés**) + début de la suite de contrat | à faire |
 | B.3.3 | Transport chiffré + suite de contrat complète + tests de sécurité | à faire, puis **arrêt et rapport** |
 | B.3.4 | Composants de présentation | après validation |
-| B.3.5 | Écran unifié + **drapeau de configuration désactivé par défaut** : la route choisit l'ancien ou le nouveau écran. Retour arrière = une ligne ; diff limité à quelques lignes dans les anciens écrans | après validation |
+| B.3.5 | Écran unifié + **drapeau de configuration activé par défaut** : la route choisit le nouveau ou l'ancien écran. Retour arrière depuis `/dev-flags` ; diff limité à quelques lignes dans les anciens écrans | après validation |
 | B.3.6 | Preuve de parité (checklist appareil) puis retrait des anciens écrans et des styles morts | après validation |
 
 Aucun ancien écran n'est supprimé avant B.3.6 et la validation utilisateur. Chaque pas est un commit vert (`tsc`, lint, tests).
@@ -528,7 +528,7 @@ Aucun ancien écran n'est supprimé avant B.3.6 et la validation utilisateur. Ch
 ### 10.7 Risques, garde-fous et backlog
 
 - **Stratégie additive** : les anciens écrans ne bougent pas avant B.3.5 ; aucun nettoyage de style mort avant la suppression des fichiers.
-- **Bascule réversible** : en B.3.5, un drapeau de configuration désactivé par défaut sélectionne l'écran unifié ; le retour à l'ancien comportement tient en une ligne.
+- **Bascule réversible** : en B.3.5, un drapeau de configuration activé par défaut sélectionne l'écran unifié ; `/dev-flags` permet encore de revenir à l'ancien comportement.
 - **Anti-downgrade et hors ligne** : résumé inconnu ou incomplet → attente sans compositeur, jamais `classic` par défaut ; le cache local fournit `e2eeSince` quand le réseau manque.
 - **Zone crypto** : `features/e2ee/` (text, media, payload, db, init, mediaStore, draftQueue, receipts, read-visibility, policy, routing) est importé, jamais modifié ni étendu d'un export. Blocage et demande si un accès manque.
 - **Sécurité d'écran** : `FLAG_SECURE`, sweep des médias, brouillons SQLCipher et sémantique `Reçu`/`Ouvert` restent propres au mode chiffré.

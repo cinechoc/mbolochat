@@ -11,8 +11,8 @@ import { E2eeTransport } from '../transport/e2ee-transport';
 import type { ChatTransport } from '../transport/types';
 
 /**
- * Instancie le transport adapté au mode résolu. Non branché sur les écrans
- * avant B.3.5 (drapeau désactivé par défaut).
+ * Instancie le transport adapté au mode résolu. L'écran unifié est le défaut ;
+ * le drapeau développeur permet encore de revenir aux anciens écrans.
  *
  * Les objets `classic`/`e2ee` (dépendances et options) doivent être stables
  * (mémoïsés par l'appelant) : un changement d'identité recrée le transport et

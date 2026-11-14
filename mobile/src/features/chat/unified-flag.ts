@@ -2,32 +2,35 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
 
 const FLAG_KEY = 'mbolo.dev.unified-chat';
+const DEFAULT_ENABLED = true;
 
-let cached: boolean | null = null;
+let cached = DEFAULT_ENABLED;
 const listeners = new Set<(enabled: boolean) => void>();
 
 function notify(): void {
   for (const listener of listeners) {
-    listener(cached === true);
+    listener(cached);
   }
 }
 
 /**
  * Drapeau de développement de l'écran unifié.
  *
- * Désactivé par défaut, stocké localement (AsyncStorage) : l'activer ne
+ * Activé par défaut, stocké localement (AsyncStorage) : le désactiver ne
  * demande aucun rebuild. Aucune interface utilisateur normale ne l'expose ;
- * la route `/dev-flags` est réservée à `__DEV__`.
+ * la route `/dev-flags` est réservée à `__DEV__` et permet le retour à
+ * l'ancien écran.
  */
 export function getUnifiedChatFlagSync(): boolean {
-  return cached === true;
+  return cached;
 }
 
 export async function loadUnifiedChatFlag(): Promise<boolean> {
   try {
-    cached = (await AsyncStorage.getItem(FLAG_KEY)) === '1';
+    const stored = await AsyncStorage.getItem(FLAG_KEY);
+    cached = stored === null ? DEFAULT_ENABLED : stored === '1';
   } catch {
-    cached = false;
+    cached = DEFAULT_ENABLED;
   }
   notify();
   return cached;

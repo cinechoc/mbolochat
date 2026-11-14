@@ -4,6 +4,7 @@ Version 1.0 — 2026-11-14. Priorités proposées : **P0** sécurité ou perte d
 
 | Priorité | Élément | Manque constaté |
 |---|---|---|
+| P1 | B.3.6 : suppression des anciens écrans, après tests sur un deuxième téléphone | Les anciens écrans restent en place et le drapeau unifié est activé par défaut ; retirer les routes historiques seulement après validation sur un second appareil. |
 | P1 | Pagination chiffrée | `E2eeTransport.loadOlder` renvoie une page vide ; l'historique local reste limité au chargement initial. |
 | P2 | Frappe chiffrée | L'indicateur de frappe reste absent en E2EE (comportement volontaire actuel, à décider). |
 | P2 | Album en grille simplifiée | Les albums sont rendus dans une grille simplifiée, sans toutes les interactions de l'ancien écran. |
