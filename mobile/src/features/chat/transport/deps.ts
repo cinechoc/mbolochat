@@ -79,6 +79,7 @@ export interface E2eeTransportDeps {
     | 'openE2eeDatabase'
     | 'loadE2eeAccount'
     | 'listLocalMessages'
+    | 'listLocalMessagesBefore'
     | 'knownMessageKeys'
     | 'saveDraft'
     | 'loadDraft'

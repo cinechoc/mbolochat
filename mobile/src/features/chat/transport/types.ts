@@ -201,7 +201,7 @@ export interface ChatTransport {
   readonly capabilities: ChatCapabilities;
 
   loadInitial(): Promise<ChatSnapshot>;
-  loadOlder(beforeCreatedAt: string): Promise<ChatPage>;
+  loadOlder(beforeCreatedAt: string, beforeId?: string): Promise<ChatPage>;
   subscribe(handlers: ChatTransportHandlers): () => void;
   dispose(): Promise<void>;
 

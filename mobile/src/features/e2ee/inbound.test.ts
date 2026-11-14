@@ -5,7 +5,7 @@ import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
 import { api } from '@/lib/api';
 import type { Message } from '@/lib/types';
 import { persistIncoming } from './atomic';
-import { loadReactionSummaries, type E2eeAccountRow } from './db';
+import { listLocalMessages, listLocalMessagesBefore, loadReactionSummaries, type E2eeAccountRow } from './db';
 import * as socketModule from '@/lib/socket';
 import { migrateE2eeSchema } from './schema';
 import { decryptEnvelope, decryptIncoming } from './text';
@@ -906,6 +906,41 @@ describe('déchiffrement entrant — stickers v3', () => {
     expect(read(fixture, 'SELECT sticker_ref FROM e2ee_messages')).toEqual([
       { sticker_ref: KNOWN },
     ]);
+  });
+});
+
+describe('pagination locale — horodatages égaux', () => {
+  it('ne perd ni ne répète aucun message au passage de page', async () => {
+    const fixture = await seeded();
+    for (let index = 0; index < 120; index += 1) {
+      await fixture.handle.runAsync(
+        `INSERT INTO e2ee_messages
+           (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine)
+         VALUES (?, 'conv-1', 'peer-1', 'Pair', ?, '2026-01-01T00:00:00Z', NULL, 0)`,
+        `m${String(index).padStart(3, '0')}`,
+        `message-${index}`,
+      );
+    }
+    const all = await listLocalMessages(fixture.db, 'conv-1', 200);
+    expect(all).toHaveLength(120);
+    let cursor = all[1];
+    const seen = new Set<string>([all[0].id, all[1].id]);
+    for (let page = 0; page < 3; page += 1) {
+      const rows = await listLocalMessagesBefore(
+        fixture.db,
+        'conv-1',
+        cursor.created_at,
+        cursor.id,
+        50,
+      );
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        expect(seen.has(row.id)).toBe(false);
+        seen.add(row.id);
+      }
+      cursor = rows[rows.length - 1];
+    }
+    expect(seen.size).toBe(120);
   });
 });
 

@@ -77,7 +77,7 @@ export function useChatMessages(input: {
   const loadOlder = useCallback(async () => {
     if (!transport || !state.hasMore || state.messages.length === 0) return;
     const oldest = state.messages[0];
-    const page = await transport.loadOlder(oldest.createdAt);
+    const page = await transport.loadOlder(oldest.createdAt, oldest.id);
     for (const message of page.messages) {
       dispatch({ type: 'upsert', message });
     }

@@ -308,6 +308,8 @@ export interface StoredE2eeMessage {
   deleted?: number | null;
   /** Auteur vérifié de la suppression, pour audit local uniquement. */
   deleted_by?: string | null;
+  /** Ordre d'insertion SQLite, utilisé uniquement comme départage de pagination. */
+  rowid?: number;
 }
 
 export async function saveLocalMessage(
@@ -517,14 +519,49 @@ export async function loadLocalMessage(
   return db.getFirstAsync<StoredE2eeMessage>('SELECT * FROM e2ee_messages WHERE id = ?', id);
 }
 
+/**
+ * Page d'historique antérieure à un message, en lecture seule.
+ *
+ * L'identifiant départage les horodatages égaux via `rowid` : deux messages
+ * reçus dans la même milliseconde ne peuvent ni disparaître ni être relus deux
+ * fois au passage d'une page. `limit + 1` est demandé par l'appelant pour
+ * savoir s'il reste une page.
+ */
+export async function listLocalMessagesBefore(
+  db: SQLiteDatabase,
+  conversationId: string,
+  beforeCreatedAt: string,
+  beforeId: string,
+  limit = 50,
+): Promise<StoredE2eeMessage[]> {
+  return db.getAllAsync<StoredE2eeMessage>(
+    `WITH cursor AS (
+       SELECT rowid AS cursor_rowid FROM e2ee_messages WHERE id = ?
+     )
+     SELECT message.rowid AS rowid, message.* FROM e2ee_messages AS message, cursor
+      WHERE message.conversation_id = ?
+        AND COALESCE(message.hidden, 0) = 0
+        AND (message.created_at < ? OR
+             (message.created_at = ? AND message.rowid < cursor.cursor_rowid))
+      ORDER BY message.created_at DESC, message.rowid DESC
+      LIMIT ?`,
+    beforeId,
+    conversationId,
+    beforeCreatedAt,
+    beforeCreatedAt,
+    limit,
+  );
+}
+
 export async function listLocalMessages(
   db: SQLiteDatabase,
   conversationId: string,
   limit = 200,
 ): Promise<StoredE2eeMessage[]> {
   return db.getAllAsync<StoredE2eeMessage>(
-    `SELECT * FROM e2ee_messages WHERE conversation_id = ? AND COALESCE(hidden, 0) = 0
-     ORDER BY created_at DESC LIMIT ?`,
+    `SELECT rowid AS rowid, * FROM e2ee_messages
+      WHERE conversation_id = ? AND COALESCE(hidden, 0) = 0
+      ORDER BY created_at DESC, rowid DESC LIMIT ?`,
     conversationId,
     limit,
   );

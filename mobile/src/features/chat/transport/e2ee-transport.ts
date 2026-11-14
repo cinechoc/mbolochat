@@ -19,6 +19,7 @@ import {
   type OutgoingAsset,
 } from './types';
 
+const LOCAL_PAGE_SIZE = 50;
 const TYPING_REFRESH_MS = 2_500;
 const TYPING_EXPIRY_MS = 4_000;
 
@@ -138,18 +139,40 @@ export class E2eeTransport implements ChatTransport {
     }
     this.ready = true;
     this.flushAcks();
+    const oldest = this.oldestVisible();
+    const probe = oldest
+      ? await this.deps.db.listLocalMessagesBefore(
+          db,
+          this.conversationId,
+          oldest.created_at,
+          oldest.id,
+          1,
+        )
+      : [];
     return {
       messages: [...this.index.values()],
       receipts: this.receipts,
-      hasMore: false,
+      hasMore: probe.length > 0,
       unreadCount: 0,
     };
   }
 
-  async loadOlder(): Promise<ChatPage> {
-    // La pagination locale chiffrée n'est pas encore livrée : l'écran conserve
-    // l'historique déjà chargé, sans promesse supplémentaire.
-    return { messages: [], hasMore: false };
+  async loadOlder(beforeCreatedAt: string, beforeId?: string): Promise<ChatPage> {
+    const { db } = await this.credentials();
+    const cursor =
+      (beforeId ? this.stored.get(beforeId) : undefined) ??
+      this.oldestVisible(beforeCreatedAt);
+    if (!cursor) return { messages: [], hasMore: false };
+    const rows = await this.deps.db.listLocalMessagesBefore(
+      db,
+      this.conversationId,
+      cursor.created_at,
+      cursor.id,
+      LOCAL_PAGE_SIZE + 1,
+    );
+    const page = rows.slice(0, LOCAL_PAGE_SIZE);
+    const views = page.map((stored) => this.absorb(stored, false));
+    return { messages: views, hasMore: rows.length > LOCAL_PAGE_SIZE };
   }
 
   async loadDraft(): Promise<string> {
@@ -555,6 +578,22 @@ export class E2eeTransport implements ChatTransport {
     });
     this.index.upsert(view);
     return view;
+  }
+
+  private oldestVisible(atOrBefore?: string): StoredE2eeMessage | null {
+    let oldest: StoredE2eeMessage | null = null;
+    for (const stored of this.stored.values()) {
+      if (stored.hidden === 1) continue;
+      if (atOrBefore && stored.created_at > atOrBefore) continue;
+      if (
+        !oldest ||
+        stored.created_at < oldest.created_at ||
+        (stored.created_at === oldest.created_at && (stored.rowid ?? 0) < (oldest.rowid ?? 0))
+      ) {
+        oldest = stored;
+      }
+    }
+    return oldest;
   }
 
   private deliveryOf(stored: StoredE2eeMessage): ChatMessageView['state'] {

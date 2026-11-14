@@ -144,7 +144,7 @@ export class ClassicTransport implements ChatTransport {
     };
   }
 
-  async loadOlder(beforeCreatedAt: string): Promise<ChatPage> {
+  async loadOlder(beforeCreatedAt: string, _beforeId?: string): Promise<ChatPage> {
     const older = await this.deps.api.listMessages(this.token, this.conversationId, {
       before: beforeCreatedAt,
       limit: PAGE_SIZE,

@@ -120,6 +120,7 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
     })),
     loadE2eeAccount: vi.fn(async () => ACCOUNT),
     listLocalMessages: vi.fn(async () => seed),
+    listLocalMessagesBefore: vi.fn(async () => [] as StoredE2eeMessage[]),
     knownMessageKeys: vi.fn(async () => ({
       ids: new Set(seed.map((message) => message.id)),
       clientIds: new Set<string>(),
@@ -431,6 +432,33 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     expect(removed).toContainEqual({ id: 'a', forEveryone: true });
     expect(fakes.socketDeps.deleteMessage).not.toHaveBeenCalled();
     off();
+    await transport.dispose();
+  });
+
+  it('pagine l’historique local par 50, sans doublon', async () => {
+    const fakes = createFakes(SEED);
+    const oldestPages = [
+      Array.from({ length: 51 }, (_, index) =>
+        stored(`old-${String(index).padStart(2, '0')}`, '2025-12-31T00:00:00.000Z'),
+      ),
+      Array.from({ length: 10 }, (_, index) =>
+        stored(`last-${String(index).padStart(2, '0')}`, '2025-12-30T00:00:00.000Z'),
+      ),
+    ];
+    const transport = new E2eeTransport(fakes.deps, options);
+    await transport.loadInitial();
+    fakes.db.listLocalMessagesBefore.mockReset();
+    fakes.db.listLocalMessagesBefore.mockImplementation(async () => oldestPages.shift() ?? []);
+
+    const first = await transport.loadOlder('2026-01-01T00:00:01.000Z', 'a');
+    expect(first.messages).toHaveLength(50);
+    expect(first.hasMore).toBe(true);
+    expect(new Set(first.messages.map((message) => message.id)).size).toBe(50);
+
+    const second = await transport.loadOlder('2025-12-31T00:00:00.000Z', 'old-49');
+    expect(second.messages).toHaveLength(10);
+    expect(second.hasMore).toBe(false);
+    expect(new Set([...first.messages, ...second.messages].map((message) => message.id)).size).toBe(60);
     await transport.dispose();
   });
 
