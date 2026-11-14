@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from 'react';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 
+import { loadVoiceSpeed, type VoiceSpeed } from './voiceSpeed';
+
 /**
  * Lecture des notes vocales.
  *
@@ -22,6 +24,7 @@ let state: PlaybackState = IDLE;
 let player: AudioPlayer | null = null;
 let subscription: { remove: () => void } | null = null;
 let finished = false;
+let speedControlEnabled = false;
 const listeners = new Set<() => void>();
 
 function setState(patch: Partial<PlaybackState>) {
@@ -47,6 +50,7 @@ export async function stopVoicePlayback() {
   }
   player = null;
   finished = false;
+  speedControlEnabled = false;
   setState(IDLE);
 }
 
@@ -55,12 +59,21 @@ async function loadVoicePlayer(
   id: string,
   uri: string,
   durationHintMs: number,
+  options: { speedControl?: boolean } = {},
 ): Promise<AudioPlayer> {
   await stopVoicePlayback();
   await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
 
+  speedControlEnabled = options.speedControl === true;
+  const speed = speedControlEnabled ? await loadVoiceSpeed() : 1;
+
   const next = createAudioPlayer({ uri }, { updateInterval: 100 });
   player = next;
+  if (speedControlEnabled) {
+    // Conserve la hauteur naturelle de la voix à toutes les vitesses.
+    next.shouldCorrectPitch = true;
+    next.setPlaybackRate(speed, 'high');
+  }
   setState({ id, playing: false, positionMs: 0, durationMs: durationHintMs });
 
   subscription = next.addListener('playbackStatusUpdate', (s) => {
@@ -89,6 +102,7 @@ export async function toggleVoicePlayback(
   id: string,
   uri: string,
   durationHintMs: number,
+  options: { speedControl?: boolean } = {},
 ): Promise<boolean> {
   // Même note : pause / reprise / relecture depuis le début.
   if (state.id === id && player) {
@@ -105,9 +119,16 @@ export async function toggleVoicePlayback(
   }
 
   // Autre note : on charge sans jouer, puis on démarre.
-  const next = await loadVoicePlayer(id, uri, durationHintMs);
+  const next = await loadVoicePlayer(id, uri, durationHintMs, options);
   next.play();
   return true;
+}
+
+/** Applique une vitesse au lecteur courant sans pause ni changement de position. */
+export function setVoicePlaybackSpeed(speed: VoiceSpeed): void {
+  if (!player || !speedControlEnabled) return;
+  player.shouldCorrectPitch = true;
+  player.setPlaybackRate(speed, 'high');
 }
 
 /** Attend le chargement du fichier avant un seek (sinon le seek est ignoré). */
@@ -143,10 +164,11 @@ export async function seekVoicePlayback(
   uri: string,
   durationHintMs: number,
   ratio: number,
+  options: { speedControl?: boolean } = {},
 ): Promise<void> {
   const r = Math.min(1, Math.max(0, ratio));
   const wasActive = state.id === id && !!player;
-  if (!wasActive) await loadVoicePlayer(id, uri, durationHintMs); // charge SANS jouer
+  if (!wasActive) await loadVoicePlayer(id, uri, durationHintMs, options); // charge SANS jouer
   const current = player;
   if (!current) return;
   const wasPlaying = wasActive && current.playing; // lu AVANT le seek

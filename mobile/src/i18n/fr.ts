@@ -132,6 +132,10 @@ export const fr = {
   media: {
     uploadProgress: 'Progression de l’envoi',
   },
+  voicePlayback: {
+    speedValue: (rate: number) => `${String(rate).replace('.', ',')}x`,
+    speedAccessibilityLabel: (value: string) => `Vitesse de lecture, ${value.replace('x', ' fois')}`,
+  },
   e2eeChat: {
     title: 'Discussion',
     send: 'Envoyer',

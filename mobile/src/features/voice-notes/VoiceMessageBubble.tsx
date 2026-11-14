@@ -13,8 +13,15 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { lockSwipe, unlockSwipe } from '@/lib/swipe-lock';
 import { MAX_DURATION_MS, toWaveform } from './useVoiceRecorder';
-import { seekVoicePlayback, toggleVoicePlayback, useVoicePlayback } from './voicePlayback';
+import {
+  seekVoicePlayback,
+  setVoicePlaybackSpeed,
+  toggleVoicePlayback,
+  useVoicePlayback,
+} from './voicePlayback';
+import { nextVoiceSpeed, setVoiceSpeed, useVoiceSpeed } from './voiceSpeed';
 import { Radii } from '@/constants/theme';
+import { fr } from '@/i18n/fr';
 
 type Props = {
   /** Identifiant UNIQUE du message (sert à savoir quelle note est en lecture). */
@@ -36,6 +43,8 @@ type Props = {
   foregroundColor?: string;
   barOffColor?: string;
   barOnColor?: string;
+  /** Pastille et vitesse mémorisée : réservé au chemin clair de l'écran unifié. */
+  speedControl?: boolean;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -78,6 +87,7 @@ function VoiceMessageBubbleBase({
   foregroundColor = '#1A1A1A',
   barOffColor,
   barOnColor,
+  speedControl = false,
   style,
 }: Props) {
   const { width: screenW } = useWindowDimensions();
@@ -111,12 +121,12 @@ function VoiceMessageBubbleBase({
 
   const onPress = useCallback(async () => {
     try {
-      const started = await toggleVoicePlayback(id, uri, durationMs);
+      const started = await toggleVoicePlayback(id, uri, durationMs, { speedControl });
       if (started && unplayed) onFirstPlay?.(id);
     } catch (e) {
       console.warn('[VoiceMessageBubble] lecture impossible', e);
     }
-  }, [id, uri, durationMs, unplayed, onFirstPlay]);
+  }, [id, uri, durationMs, unplayed, onFirstPlay, speedControl]);
 
   const ratioFromX = useCallback(
     (x: number) => Math.min(1, Math.max(0, (x - track.current.x) / Math.max(1, track.current.width))),
@@ -137,7 +147,7 @@ function VoiceMessageBubbleBase({
         // On garde le temps du doigt affiché tant que le lecteur n'est pas prêt :
         // le seek attend le chargement pour ne pas être ignoré.
         setScrub(ratio);
-        void seekVoicePlayback(id, uri, durationMs, ratio)
+        void seekVoicePlayback(id, uri, durationMs, ratio, { speedControl })
           .catch(() => undefined)
           .finally(() => setScrub(null));
       })
@@ -147,7 +157,7 @@ function VoiceMessageBubbleBase({
       });
 
     return pan;
-  }, [id, uri, durationMs, ratioFromX]);
+  }, [id, uri, durationMs, ratioFromX, speedControl]);
 
   useEffect(() => () => unlockSwipe(), []);
 
@@ -200,6 +210,7 @@ function VoiceMessageBubbleBase({
             ))}
           </View>
           <Text style={[styles.duration, { color: foregroundColor }]}>{label}</Text>
+          {speedControl && active && playback.playing ? <VoiceSpeedPill /> : null}
         </View>
       </GestureDetector>
       {!isMine && unplayed && <View style={styles.unplayedDot} />}
@@ -208,6 +219,26 @@ function VoiceMessageBubbleBase({
 }
 
 export const VoiceMessageBubble = memo(VoiceMessageBubbleBase);
+
+function VoiceSpeedPill() {
+  const speed = useVoiceSpeed();
+  const label = fr.voicePlayback.speedValue(speed);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={fr.voicePlayback.speedAccessibilityLabel(label)}
+      onPress={() => {
+        const next = nextVoiceSpeed(speed);
+        setVoicePlaybackSpeed(next);
+        void setVoiceSpeed(next);
+      }}
+      style={styles.speedHit}>
+      <View style={styles.speedPill}>
+        <Text style={styles.speedText}>{label}</Text>
+      </View>
+    </Pressable>
+  );
+}
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', marginVertical: 2 },
@@ -237,5 +268,24 @@ const styles = StyleSheet.create({
   waveform: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 28 },
   bar: { width: 2.5, borderRadius: Radii.full},
   duration: { minWidth: 34, textAlign: 'right', fontSize: 13, fontVariant: ['tabular-nums'] },
+  speedHit: {
+    position: 'absolute',
+    top: -18,
+    right: 2,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  speedPill: {
+    minWidth: 28,
+    height: 17,
+    borderRadius: Radii.full,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  speedText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700', fontVariant: ['tabular-nums'] },
   unplayedDot: { width: 8, height: 8, borderRadius: Radii.full, backgroundColor: '#FA5151', marginLeft: 6 },
 });

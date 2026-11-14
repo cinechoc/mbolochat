@@ -318,6 +318,7 @@ function MessageBody({
           foregroundColor={chat.primaryText}
           barOffColor={chat.voiceBarOff}
           barOnColor={chat.voiceBarOn}
+          speedControl
         />
         {failed ? (
           <RetryActions message={message} chat={chat} onRetry={onRetry} onDiscard={onDiscard} />
