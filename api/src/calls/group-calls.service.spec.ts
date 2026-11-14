@@ -279,7 +279,7 @@ describe('GroupCallsService', () => {
     // Cinquième caméra refusée, sans diffusion aux autres.
     expect(service.setVideo('u5', started.callId, true)).toEqual({ ok: false, error: 'full' });
     const announced = new Set(events('gcall:video').map((entry) => entry.payload.userId));
-    expect([...announced].sort()).toEqual(['u1', 'u2', 'u3', 'u4']);
+    expect([...announced].sort((a, b) => a.localeCompare(b))).toEqual(['u1', 'u2', 'u3', 'u4']);
 
     // Couper une caméra libère la place.
     expect(service.setVideo('u2', started.callId, false)).toEqual({ ok: true });

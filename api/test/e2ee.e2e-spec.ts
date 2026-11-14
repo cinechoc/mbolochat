@@ -1,6 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

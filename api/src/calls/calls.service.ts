@@ -13,7 +13,6 @@ import type { CallEndedPayload, CallInviteAck, CallOutcome, CallPeer } from './c
 export const CALL_RING_TIMEOUT_MS = 30_000;
 export const CALL_DISCONNECT_GRACE_MS = 10_000;
 
-const conversationRoomOf = (conversationId: string) => `conv:${conversationId}`;
 
 function formatCallDuration(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
