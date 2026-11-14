@@ -37,6 +37,13 @@ import { useEmojiFavorites } from '../emoji/useEmojiFavorites';
 import { useRecentEmoji } from '../emoji/useRecentEmoji';
 import { deleteBackward, insertAt } from '../emoji/emojiUtils';
 import { useVoiceRecorder, type VoiceNote } from '../voice-notes/useVoiceRecorder';
+import {
+  initialVoiceGesture,
+  LONG_PRESS_MS,
+  reduceVoiceGesture,
+  type VoiceGestureEvent,
+  type VoiceGestureZone,
+} from './voice-gesture';
 import { RecordingTimeline } from './RecordingTimeline';
 import { attachPanelCap, keyboardPanelHeight } from './panelSize';
 import { Radii, Type, type ThemePalette, type ThemeScheme } from '@/constants/theme';
@@ -168,12 +175,15 @@ export function ChatComposer({
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [searchActive, setSearchActive] = useState(false);
   const [forcedSelection, setForcedSelection] = useState<Selection | null>(null);
-  const [cancelling, setCancelling] = useState(false);
+  /** Zone de glissement active pendant l'enregistrement (annuler/verrouiller). */
+  const [zone, setZone] = useState<VoiceGestureZone>('none');
   const [locked, setLocked] = useState(false);
   const [sendOptionsOpen, setSendOptionsOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const cancellingRef = useRef(false);
-  const grantAtRef = useRef(0);
+  const gestureRef = useRef(initialVoiceGesture());
+  /** Posé à la demande de verrouillage ; consommé quand la capture démarre. */
+  const lockRequestedRef = useRef(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const inputRef = useRef<TextInputInstance>(null);
@@ -359,6 +369,7 @@ export function ChatComposer({
   useEffect(
     () => () => {
       if (noticeTimer.current) clearTimeout(noticeTimer.current);
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
     },
     [],
   );
@@ -367,13 +378,13 @@ export function ChatComposer({
     onSend: onSendVoice,
     onPermissionDenied: onVoicePermissionDenied,
     onError: onVoiceError,
-    onTooShort: () => showNotice('Message trop court'),
+    onTooShort: () => showNotice(fr.chat.voiceRecord.tooShort),
   });
   const recording = status === 'recording' || status === 'starting';
-  const lockRequestedRef = useRef(false);
 
-  // Fin d'enregistrement (envoi, annulation, limite 60 s) : on relâche le verrou.
-  // Un tap court arme le verrou dès que la capture démarre réellement.
+  // Fin d'enregistrement (envoi, annulation, limite 60 s) : on relâche le verrou
+  // et le geste. Une demande de verrouillage posée pendant la préparation de la
+  // capture est consommée dès que celle-ci démarre réellement.
   // L'état vient du module natif d'enregistrement : il n'est pas dérivable au rendu.
   useEffect(() => {
     if (recording && lockRequestedRef.current) {
@@ -384,12 +395,53 @@ export function ChatComposer({
     if (status === 'idle') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocked(false);
+      setZone('none');
+      gestureRef.current = initialVoiceGesture();
       lockRequestedRef.current = false;
     }
   }, [recording, status]);
 
-  // Tap court = enregistrement verrouillé ; appui maintenu puis relâche = envoi.
-  const TAP_MS = 400;
+  // Le geste passe par la machine à états pure (voice-gesture.ts) : capture,
+  // haptique et rendu ne réagissent qu'aux transitions, pas aux évènements bruts.
+  const dispatchGesture = useCallback(
+    (event: VoiceGestureEvent) => {
+      const { next, effect } = reduceVoiceGesture(gestureRef.current, event);
+      gestureRef.current = next;
+      switch (effect) {
+        case 'start':
+          setZone('none');
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+          void start();
+          break;
+        case 'enterCancel':
+        case 'enterLock':
+          setZone(next.zone);
+          Haptics.selectionAsync().catch(() => {});
+          break;
+        case 'leaveZone':
+          setZone('none');
+          break;
+        case 'send':
+          setZone('none');
+          release(false);
+          break;
+        case 'cancel':
+          setZone('none');
+          release(true);
+          break;
+        case 'lock':
+          setZone('none');
+          lockRequestedRef.current = true;
+          break;
+        case 'none':
+          break;
+      }
+    },
+    [start, release],
+  );
+
+  // Appui long = capture ; glisser à gauche = annuler ; glisser vers le haut =
+  // verrouiller ; relâcher sans zone = envoi immédiat.
   // PanResponder lit des refs dans ses callbacks : ceux-ci ne s'exécutent
   // qu'après un geste, jamais pendant le rendu.
   const voicePan = useMemo(
@@ -404,38 +456,32 @@ export function ChatComposer({
           searchActiveRef.current = false;
           // Pas de Keyboard.dismiss() : le champ reste monté/focus et le
           // clavier ouvert pendant l'enregistrement (comportement WhatsApp).
-          cancellingRef.current = false;
-          setCancelling(false);
-          // eslint-disable-next-line react-hooks/purity
-          grantAtRef.current = Date.now();
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-          void start();
+          dispatchGesture({ type: 'press' });
+          longPressTimer.current = setTimeout(() => {
+            longPressTimer.current = null;
+            dispatchGesture({ type: 'tick', heldMs: LONG_PRESS_MS });
+          }, LONG_PRESS_MS);
         },
         onPanResponderMove: (_event, gesture) => {
-          const next = gesture.dy < -60;
-          if (next !== cancellingRef.current) {
-            cancellingRef.current = next;
-            setCancelling(next);
-            Haptics.selectionAsync().catch(() => {});
-          }
+          dispatchGesture({ type: 'move', dx: gesture.dx, dy: gesture.dy });
         },
         onPanResponderRelease: () => {
-          // eslint-disable-next-line react-hooks/purity
-          if (Date.now() - grantAtRef.current < TAP_MS && !cancellingRef.current) {
-            lockRequestedRef.current = true;
-            return;
+          if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
           }
-          release(cancellingRef.current);
-          cancellingRef.current = false;
-          setCancelling(false);
+          dispatchGesture({ type: 'release' });
         },
         onPanResponderTerminate: () => {
-          release(true);
-          cancellingRef.current = false;
-          setCancelling(false);
+          if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
+          }
+          dispatchGesture({ type: 'release', forceCancel: true });
         },
       }),
-    [disabled, start, release],
+    [disabled, dispatchGesture],
   );
 
   const togglePanel = (target: 'emoji' | 'plus') => {
@@ -538,12 +584,14 @@ export function ChatComposer({
                 <RecordingTimeline
                   levels={levels}
                   elapsedMs={elapsedMs}
-                  cancelling={cancelling}
+                  zone={zone}
+                  showHints={!locked}
                   colors={{
                     bar: t.sendBg,
                     cancel: theme.danger,
                     text: t.inputText,
                     dot: t.sendBg,
+                    hint: t.subtle,
                   }}
                 />
               </View>
@@ -554,7 +602,7 @@ export function ChatComposer({
                   release(true);
                   setLocked(false);
                 }}
-                label="Annuler l'enregistrement"
+                label={fr.chat.voiceRecord.cancelRecording}
               >
                 <MaterialCommunityIcons
                   name="close-circle-outline"
@@ -567,7 +615,7 @@ export function ChatComposer({
                 {...voicePan.panHandlers}
                 accessible
                 accessibilityRole="button"
-                accessibilityLabel="Appui long pour enregistrer, tap pour verrouiller"
+                accessibilityLabel={fr.chat.voiceRecord.micHint}
                 style={styles.fieldButton}
               >
                 <WaveformIcon color={recording ? t.sendBg : t.icon} size={22} />

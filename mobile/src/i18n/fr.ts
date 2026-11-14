@@ -196,6 +196,15 @@ export const fr = {
       micDeniedTitle: 'Micro non autorisé',
       micDeniedBody: 'Autorise le micro dans les réglages pour envoyer un message vocal.',
     },
+    voiceRecord: {
+      micHint: 'Appui long pour enregistrer',
+      hintCancel: 'Glisser à gauche pour annuler 🗑️',
+      hintLock: 'Glisser vers le haut pour verrouiller 🔒',
+      releaseToCancel: 'Relâcher pour annuler',
+      releaseToLock: 'Relâcher pour verrouiller',
+      cancelRecording: 'Annuler l’enregistrement',
+      tooShort: 'Message trop court',
+    },
   },
   media: {
     uploadProgress: 'Progression de l’envoi',
