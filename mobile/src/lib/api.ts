@@ -3,6 +3,7 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 
 import { API_URL } from './config';
+import { refreshAccessToken } from './token-refresh';
 import type {
   AuthResult,
   ConversationLinkItem,
@@ -56,40 +57,7 @@ function deviceHeaders(): Record<string, string> {
 
 const REQUEST_TIMEOUT_MS = 15000;
 
-let refreshInFlight: Promise<string> | null = null;
-
-async function doRefresh(refreshToken: string): Promise<string> {
-  const response = await fetch(`${API_URL}/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
-    credentials: 'include',
-  });
-  if (!response.ok) {
-    throw new ApiError(response.status, 'Refresh failed');
-  }
-  const data = (await response.json()) as { accessToken: string; refreshToken?: string };
-  // update stored refresh if rotated
-  const { getStoredRefreshToken, storeTokens } = await import('./token-storage');
-  const currentRefresh = (await getStoredRefreshToken()) ?? refreshToken;
-  await storeTokens(data.accessToken, data.refreshToken ?? currentRefresh);
-  return data.accessToken;
-}
-
-export async function refreshAccessToken(): Promise<string> {
-  if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = (async () => {
-    try {
-      const { getStoredRefreshToken } = await import('./token-storage');
-      const rt = await getStoredRefreshToken();
-      if (!rt) throw new ApiError(401, 'No refresh token');
-      return await doRefresh(rt);
-    } finally {
-      refreshInFlight = null;
-    }
-  })();
-  return refreshInFlight;
-}
+export { refreshAccessToken } from './token-refresh';
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const controller = new AbortController();

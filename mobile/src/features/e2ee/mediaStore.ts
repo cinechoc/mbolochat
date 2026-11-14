@@ -3,6 +3,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
+import { refreshAccessToken } from '@/lib/token-refresh';
 import { API_URL } from '@/lib/config';
 import {
   isDurableMediaReferenced,
@@ -168,6 +169,35 @@ export interface OpenForViewInput {
 }
 
 /**
+ * Un refus 401 sur un téléchargement direct signifie que l'access token a
+ * expiré : la couche API le rafraîchit, puis on rejoue une seule fois. Les
+ * autres échecs (réseau, 404) ne doivent pas déclencher de refresh.
+ */
+function isUnauthorizedDownload(cause: unknown): boolean {
+  return cause instanceof Error && /status:\s*401\b/.test(cause.message);
+}
+
+async function downloadCiphertext(
+  id: string,
+  destination: File,
+  token: string,
+): Promise<void> {
+  const url = `${API_URL}/uploads/${encodeURIComponent(id)}`;
+  const options = (accessToken: string) => ({
+    headers: { Authorization: `Bearer ${accessToken}` },
+    idempotent: true,
+  });
+  try {
+    await File.downloadFileAsync(url, destination, options(token));
+  } catch (cause) {
+    if (!isUnauthorizedDownload(cause)) throw cause;
+    if (destination.exists) destination.delete();
+    const refreshed = await refreshAccessToken();
+    await File.downloadFileAsync(url, destination, options(refreshed));
+  }
+}
+
+/**
  * Rend un média lisible : télécharge son ciphertext, le déchiffre dans le
  * dossier privé et renvoie l'URI locale. Toute erreur — réseau, empreinte
  * invalide, clé refusée — laisse le dossier propre : jamais de clair partiel.
@@ -178,10 +208,7 @@ export async function openForView(input: OpenForViewInput): Promise<string> {
   const cipher = new File(directory, CIPHER_NAME);
   const plain = new File(directory, `${PLAIN_NAME}.${extensionForMime(input.mime)}`);
   try {
-    await File.downloadFileAsync(`${API_URL}/uploads/${encodeURIComponent(id)}`, cipher, {
-      headers: { Authorization: `Bearer ${input.token}` },
-      idempotent: true,
-    });
+    await downloadCiphertext(id, cipher, input.token);
     await MboloCrypto.decryptFile(
       fileSystemPath(cipher.uri),
       fileSystemPath(plain.uri),
@@ -219,10 +246,7 @@ export async function loadThumbnailDataUrl(input: ThumbnailInput): Promise<strin
   const cipher = new File(directory, CIPHER_NAME);
   const plain = new File(directory, `${PLAIN_NAME}.${extensionForMime(input.mime)}`);
   try {
-    await File.downloadFileAsync(`${API_URL}/uploads/${encodeURIComponent(id)}`, cipher, {
-      headers: { Authorization: `Bearer ${input.token}` },
-      idempotent: true,
-    });
+    await downloadCiphertext(id, cipher, input.token);
     await MboloCrypto.decryptFile(
       fileSystemPath(cipher.uri),
       fileSystemPath(plain.uri),

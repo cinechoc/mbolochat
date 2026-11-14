@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
+import { refreshAccessToken } from '@/lib/token-refresh';
 import {
   extensionForMime,
   fileSystemPath,
@@ -16,10 +17,17 @@ vi.mock('expo-sqlite', () => ({
   openDatabaseAsync: vi.fn(),
 }));
 
+vi.mock('@/lib/token-refresh', () => ({
+  refreshAccessToken: vi.fn(async () => 'jeton-frais'),
+}));
+
 /** Système de fichiers simulé : on ne garde que ce qui existe encore. */
 const existing = new Set<string>();
 let downloadsShouldFail = false;
+let nextDownloadStatus: number | null = null;
+const queuedDownloadStatuses: number[] = [];
 let lastDownload: { url: string; headers?: Record<string, string> } | null = null;
+const downloadHeaders: (Record<string, string> | undefined)[] = [];
 
 function join(parts: { uri?: string }[]): string {
   const raw = parts
@@ -75,12 +83,24 @@ vi.mock('expo-file-system', () => {
     get exists(): boolean {
       return existing.has(this.uri);
     }
+    delete(): void {
+      existing.delete(this.uri);
+    }
     static downloadFileAsync(
       url: string,
       destination: File,
       options?: { headers?: Record<string, string> },
     ): Promise<File> {
       lastDownload = { url, headers: options?.headers };
+      downloadHeaders.push(options?.headers);
+      const queuedStatus = queuedDownloadStatuses.shift() ?? null;
+      const status = queuedStatus ?? nextDownloadStatus;
+      if (status !== null) {
+        nextDownloadStatus = null;
+        return Promise.reject(
+          new Error(`Unable to download a file: response has status: ${status}`),
+        );
+      }
       if (downloadsShouldFail) return Promise.reject(new Error('UnableToDownload 404'));
       existing.add(destination.uri);
       return Promise.resolve(destination);
@@ -116,9 +136,13 @@ const blob = {
 beforeEach(() => {
   existing.clear();
   downloadsShouldFail = false;
+  nextDownloadStatus = null;
+  queuedDownloadStatuses.length = 0;
   lastDownload = null;
+  downloadHeaders.length = 0;
   vi.clearAllMocks();
   cryptoMock.decryptFile.mockResolvedValue({ plaintext_size: 10 } as never);
+  vi.mocked(refreshAccessToken).mockResolvedValue('jeton-frais');
 });
 
 describe('médias chiffrés — dossier privé', () => {
@@ -148,6 +172,48 @@ describe('médias chiffrés — dossier privé', () => {
     await expect(openForView({ token: 'jeton', blob, mime: 'image/jpeg' })).rejects.toThrow(
       'sha256_mismatch',
     );
+    expect(mediaLeftovers()).toHaveLength(0);
+  });
+
+  it('rafraîchit le jeton et rejoue une fois après un 401', async () => {
+    nextDownloadStatus = 401;
+    const uri = await openForView({ token: 'jeton-expire', blob, mime: 'image/jpeg' });
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(downloadHeaders.map((headers) => headers?.Authorization)).toEqual([
+      'Bearer jeton-expire',
+      'Bearer jeton-frais',
+    ]);
+    expect(uri).toContain('mbolo-e2ee-media/upload-1/plain.jpg');
+    expect(cryptoMock.decryptFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('ne rafraîchit pas le jeton sur une erreur qui n’est pas un 401', async () => {
+    nextDownloadStatus = 404;
+    await expect(openForView({ token: 'jeton', blob, mime: 'image/jpeg' })).rejects.toThrow();
+    expect(refreshAccessToken).not.toHaveBeenCalled();
+    expect(mediaLeftovers()).toHaveLength(0);
+  });
+
+  it('ne rejoue qu’une seule fois quand la nouvelle tentative est encore refusée', async () => {
+    queuedDownloadStatuses.push(401, 401);
+    await expect(
+      openForView({ token: 'jeton-expire', blob, mime: 'image/jpeg' }),
+    ).rejects.toThrow('status: 401');
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(downloadHeaders.map((headers) => headers?.Authorization)).toEqual([
+      'Bearer jeton-expire',
+      'Bearer jeton-frais',
+    ]);
+    expect(mediaLeftovers()).toHaveLength(0);
+  });
+
+  it('ne relance pas de téléchargement si le rafraîchissement échoue', async () => {
+    nextDownloadStatus = 401;
+    vi.mocked(refreshAccessToken).mockRejectedValue(new Error('Refresh failed (401)'));
+    await expect(openForView({ token: 'jeton-expire', blob, mime: 'image/jpeg' })).rejects.toThrow(
+      'Refresh failed (401)',
+    );
+    expect(downloadHeaders).toHaveLength(1);
     expect(mediaLeftovers()).toHaveLength(0);
   });
 

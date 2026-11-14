@@ -10,6 +10,17 @@ const REFRESH_KEY = 'mbolochat_refresh_token';
  */
 let cachedAccessToken: string | null = null;
 
+/**
+ * Génération de la session locale. Elle change à chaque déconnexion pour
+ * qu'un rafraîchissement déjà en vol ne puisse pas réécrire les jetons d'un
+ * compte que l'utilisateur vient de quitter.
+ */
+let authSessionEpoch = 0;
+
+export function getAuthSessionEpoch(): number {
+  return authSessionEpoch;
+}
+
 export function getCachedAccessToken(): string | null {
   return cachedAccessToken;
 }
@@ -61,6 +72,7 @@ export async function storeAccessToken(accessToken: string): Promise<void> {
 }
 
 export async function clearStoredTokens(): Promise<void> {
+  authSessionEpoch += 1;
   cachedAccessToken = null;
   if (Platform.OS === 'web') {
     webStorage()?.removeItem(ACCESS_KEY);
