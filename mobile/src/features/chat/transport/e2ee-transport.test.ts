@@ -166,6 +166,18 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
         reaction_action: 'add',
       }),
     })),
+    sendEncryptedSticker: vi.fn(async ({ stickerRef }: { stickerRef: string }) => ({
+      clientId: 'sticker-1',
+      serverMessage: serverMessage('sticker-1', '2026-01-01T00:00:12.000Z', {
+        sender: identity('me'),
+      }),
+      stored: stored('sticker-1', '2026-01-01T00:00:12.000Z', {
+        sender_id: 'me',
+        sender_name: 'me',
+        body: '',
+        sticker_ref: stickerRef,
+      }),
+    })),
     decryptIncoming: vi.fn(async ({ message }: { message: Message }) => ({
       text: '',
       account: ACCOUNT,
@@ -349,6 +361,20 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
       }),
     );
     expect(fakes.socketDeps.deleteMessage).not.toHaveBeenCalled();
+    await transport.dispose();
+  });
+
+  it('envoie un sticker de catalogue en v:3 chiffré', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new E2eeTransport(fakes.deps, options);
+    await transport.sendSticker('mbolo-panther-2d/amour');
+    expect(fakes.crypto.sendEncryptedSticker).toHaveBeenCalledWith(
+      expect.objectContaining({ stickerRef: 'mbolo-panther-2d/amour' }),
+    );
+    expect(fakes.socket.emit).not.toHaveBeenCalledWith(
+      'message:send',
+      expect.objectContaining({ content: expect.stringContaining('mbolo-panther') }),
+    );
     await transport.dispose();
   });
 

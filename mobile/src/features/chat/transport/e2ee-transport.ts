@@ -26,7 +26,7 @@ const E2EE_CAPABILITIES: ChatCapabilities = {
   replies: true,
   reactions: true,
   deleteForEveryone: false,
-  stickers: false,
+  stickers: true,
   gifs: false,
   forwarded: true,
   voice: true,
@@ -306,8 +306,21 @@ export class E2eeTransport implements ChatTransport {
     );
   }
 
-  async sendSticker(): Promise<void> {
-    throw new UnsupportedCapabilityError('stickers');
+  async sendSticker(ref: string): Promise<void> {
+    if (!this.capabilities.stickers) {
+      throw new UnsupportedCapabilityError('stickers');
+    }
+    const { db, account } = await this.credentials();
+    const result = await this.deps.crypto.sendEncryptedSticker({
+      token: this.token,
+      db,
+      account,
+      conversation: this.summary,
+      currentUserId: this.currentUser.id,
+      currentUserName: this.currentUser.displayName,
+      stickerRef: ref,
+    });
+    this.absorb(result.stored, true);
   }
 
   async sendPersonalSticker(_sticker: PersonalSticker): Promise<void> {
