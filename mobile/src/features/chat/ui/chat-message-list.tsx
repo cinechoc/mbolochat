@@ -1,4 +1,10 @@
-import { useCallback, type ComponentProps, type ReactElement, type RefObject } from 'react';
+import {
+  useCallback,
+  useRef,
+  type ComponentProps,
+  type ReactElement,
+  type RefObject,
+} from 'react';
 import { FlatList, StyleSheet } from 'react-native';
 
 import type { ChatRow } from '../model/rows';
@@ -44,12 +50,32 @@ export function ChatMessageList({
   onRetry,
   onDiscard,
   onOpenMedia,
+  onOpenViewOnce,
   onOpenAlbum,
   onToggleReaction,
   onPressAvatar,
   onSeenBy,
+  pinnedMessageIds,
 }: ChatMessageListProps) {
   const keyExtractor = useCallback((row: ChatRow) => row.key, []);
+  const retriedIndexRef = useRef<number | null>(null);
+  const onScrollToIndexFailed = useCallback(
+    (info: { index: number; averageItemLength: number }) => {
+      if (retriedIndexRef.current === info.index) return;
+      retriedIndexRef.current = info.index;
+      listRef.current?.scrollToOffset({
+        offset: info.averageItemLength * info.index,
+        animated: false,
+      });
+      setTimeout(() => {
+        listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.35, animated: true });
+        setTimeout(() => {
+          retriedIndexRef.current = null;
+        }, 500);
+      }, 120);
+    },
+    [listRef],
+  );
   const renderItem = useCallback(
     ({ item }: { item: ChatRow }) => (
       <ChatMessageRow
@@ -68,10 +94,12 @@ export function ChatMessageList({
         onRetry={onRetry}
         onDiscard={onDiscard}
         onOpenMedia={onOpenMedia}
+        onOpenViewOnce={onOpenViewOnce}
         onOpenAlbum={onOpenAlbum}
         onToggleReaction={onToggleReaction}
         onPressAvatar={onPressAvatar}
         onSeenBy={onSeenBy}
+        pinnedMessageIds={pinnedMessageIds}
       />
     ),
     [
@@ -89,10 +117,12 @@ export function ChatMessageList({
       onRetry,
       onDiscard,
       onOpenMedia,
+      onOpenViewOnce,
       onOpenAlbum,
       onToggleReaction,
       onPressAvatar,
       onSeenBy,
+      pinnedMessageIds,
     ],
   );
 
@@ -114,6 +144,7 @@ export function ChatMessageList({
       removeClippedSubviews
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={styles.content}
+      onScrollToIndexFailed={onScrollToIndexFailed}
       ListEmptyComponent={emptyComponent ?? undefined}
       viewabilityConfig={viewabilityConfig}
       onViewableItemsChanged={onViewableItemsChanged}

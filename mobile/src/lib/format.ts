@@ -170,6 +170,8 @@ export function conversationPreview(
   const isGroup = conversation.type === 'GROUP';
   const body = last.deleted
     ? 'Message supprimé'
+    : last.viewOnce
+      ? 'Message à lecture unique'
     : last.type === 'sticker'
       ? 'Sticker'
       : last.attachment

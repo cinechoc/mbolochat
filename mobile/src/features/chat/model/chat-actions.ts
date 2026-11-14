@@ -7,7 +7,6 @@ export interface ChatActionIcons {
   reply?: SheetIcon;
   copy?: SheetIcon;
   edit?: SheetIcon;
-  trash?: SheetIcon;
   trash2?: SheetIcon;
 }
 
@@ -27,15 +26,15 @@ export interface ChatActionsInput {
   onReply: (message: ChatMessageView) => void;
   onCopy: (message: ChatMessageView) => void;
   onEdit: (message: ChatMessageView) => void;
-  onDeleteForMe: (message: ChatMessageView) => void;
-  onDeleteForAll: (message: ChatMessageView) => void;
+  /** Ouvre le choix « pour moi » / « pour tout le monde ». */
+  onDelete: (message: ChatMessageView) => void;
   extra?: SheetAction[];
   /** Horloge injectable pour tester la fenêtre de modification. */
   now?: number;
 }
 
 /**
- * Actions du menu d'appui long, filtrées **uniquement** par `capabilities`.
+ * Actions du menu d’appui long, filtrées **uniquement** par `capabilities`.
  * Fonction pure : le hook ne fait que memoïser le résultat.
  */
 export function buildChatActions({
@@ -45,15 +44,15 @@ export function buildChatActions({
   onReply,
   onCopy,
   onEdit,
-  onDeleteForMe,
-  onDeleteForAll,
+  onDelete,
   extra = [],
   now = Date.now(),
 }: ChatActionsInput): SheetAction[] {
-  if (!message) return [];
+  if (!message || message.deleted) return [];
   const waiting = message.state === 'pending' || message.state === 'failed';
-  const actions: SheetAction[] = [...extra];
-  if (capabilities.replies && !waiting && !message.deleted) {
+  const viewOnce = message.viewOnce === true;
+  const actions: SheetAction[] = [];
+  if (capabilities.replies && !waiting && !viewOnce) {
     actions.push({
       key: 'reply',
       label: fr.chat.menu.reply,
@@ -61,12 +60,21 @@ export function buildChatActions({
       onPress: () => onReply(message),
     });
   }
+  if (message.body && !viewOnce) {
+    actions.push({
+      key: 'copy',
+      label: fr.chat.menu.copy,
+      icon: icons?.copy,
+      onPress: () => onCopy(message),
+    });
+  }
+  actions.push(...extra);
   if (
     capabilities.edit &&
     message.mine &&
     !waiting &&
-    !message.deleted &&
     !message.unreadable &&
+    !viewOnce &&
     message.type === 'text' &&
     !message.attachment &&
     !message.stickerRef &&
@@ -81,29 +89,12 @@ export function buildChatActions({
       onPress: () => onEdit(message),
     });
   }
-  if (message.body) {
-    actions.push({
-      key: 'copy',
-      label: fr.chat.menu.copy,
-      icon: icons?.copy,
-      onPress: () => onCopy(message),
-    });
-  }
   actions.push({
-    key: 'delete-me',
-    label: waiting ? fr.chat.menu.delete : fr.chat.menu.deleteForMe,
+    key: 'delete',
+    label: fr.chat.menu.delete,
     icon: icons?.trash2,
     destructive: true,
-    onPress: () => onDeleteForMe(message),
+    onPress: () => onDelete(message),
   });
-  if (capabilities.deleteForEveryone && !waiting && !message.deleted && message.mine) {
-    actions.push({
-      key: 'delete-all',
-      label: fr.chat.menu.deleteForAll,
-      icon: icons?.trash,
-      destructive: true,
-      onPress: () => onDeleteForAll(message),
-    });
-  }
   return actions;
 }

@@ -11,20 +11,28 @@ function sameMessages(a: readonly { id: string }[], b: readonly { id: string }[]
  * l'objet de rangée recréé à chaque construction.
  */
 export function sameChatMessageRow(
-  previous: Pick<ChatMessageRowProps, 'row' | 'currentUser' | 'capabilities' | 'chat' | 'windowWidth' | 'token'>,
-  next: Pick<ChatMessageRowProps, 'row' | 'currentUser' | 'capabilities' | 'chat' | 'windowWidth' | 'token'>,
+  previous: Pick<
+    ChatMessageRowProps,
+    'row' | 'currentUser' | 'capabilities' | 'chat' | 'windowWidth' | 'token' | 'pinnedMessageIds'
+  >,
+  next: Pick<
+    ChatMessageRowProps,
+    'row' | 'currentUser' | 'capabilities' | 'chat' | 'windowWidth' | 'token' | 'pinnedMessageIds'
+  >,
 ): boolean {
   if (previous.row.type !== next.row.type) return false;
   if (previous.row.type === 'message' && next.row.type === 'message') {
     return (
       previous.row.message === next.row.message &&
-      previous.row.continuation === next.row.continuation
+      previous.row.continuation === next.row.continuation &&
+      previous.pinnedMessageIds === next.pinnedMessageIds
     );
   }
   if (previous.row.type === 'album' && next.row.type === 'album') {
     return (
       sameMessages(previous.row.messages, next.row.messages) &&
-      previous.row.continuation === next.row.continuation
+      previous.row.continuation === next.row.continuation &&
+      previous.pinnedMessageIds === next.pinnedMessageIds
     );
   }
   return (
@@ -33,7 +41,8 @@ export function sameChatMessageRow(
     previous.capabilities === next.capabilities &&
     previous.chat === next.chat &&
     previous.windowWidth === next.windowWidth &&
-    previous.token === next.token
+    previous.token === next.token &&
+    previous.pinnedMessageIds === next.pinnedMessageIds
   );
 }
 

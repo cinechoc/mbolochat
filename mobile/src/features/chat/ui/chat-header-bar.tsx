@@ -14,7 +14,6 @@ export function ChatHeaderBar({
   subtitle,
   mode,
   presenceUserId,
-  avatar,
   onPressTitle,
   titleAccessibilityLabel,
   right,
@@ -24,7 +23,6 @@ export function ChatHeaderBar({
   subtitle: string;
   mode: ChatMode | 'blocked';
   presenceUserId?: string;
-  avatar?: ReactNode;
   onPressTitle?: () => void;
   titleAccessibilityLabel?: string;
   right?: ReactNode;
@@ -41,7 +39,6 @@ export function ChatHeaderBar({
       title={title}
       subtitle={subtitle ? `${subtitle} · ${security}` : security}
       presenceUserId={presenceUserId}
-      avatar={avatar}
       onPressTitle={onPressTitle}
       titleAccessibilityLabel={
         titleAccessibilityLabel ?? (onPressTitle ? `${title} — ${security}` : undefined)

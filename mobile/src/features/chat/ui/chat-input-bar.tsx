@@ -9,6 +9,7 @@ import { ChatReplyBar } from '@/features/chat/ui/chat-reply-bar';
 import type { RecentGif } from '@/features/media/GifPanel';
 import type { PersonalSticker } from '@/features/stickers/stickerLibrary';
 import type { VoiceNote } from '@/features/voice-notes/useVoiceRecorder';
+import type { TextSendOptions } from '../model/send-options';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { fr } from '@/i18n/fr';
@@ -31,7 +32,7 @@ export interface ChatInputBarProps {
   availableHeight?: number;
   mentionCandidates?: { id: string; username: string; displayName: string }[];
   recentGifs: RecentGif[];
-  onSendText: (text: string) => void | Promise<void>;
+  onSendText: (text: string, options?: TextSendOptions) => void | Promise<void>;
   onSendSticker: (ref: string) => void;
   onSendPersonalSticker: (sticker: PersonalSticker) => void;
   onSendGif: (gif: RecentGif) => void;
@@ -139,6 +140,8 @@ export function ChatInputBar({
         availableHeight={availableHeight}
         sections={capabilities.stickers || capabilities.gifs ? undefined : ['emoji']}
         onSendText={onSendText}
+        sendOptionsEnabled={capabilities.sendOptions && !editing}
+        linkPreviewsEnabled={!capabilities.encrypted}
         onSendSticker={(ref) => {
           if (!capabilities.stickers) return;
           onSendSticker(ref);

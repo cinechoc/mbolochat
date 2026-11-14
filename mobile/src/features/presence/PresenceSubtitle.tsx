@@ -68,13 +68,14 @@ export function PresenceSubtitle({ userId, onlineColor, offlineColor }: Presence
 
 const styles = StyleSheet.create({
   line: {
+    alignSelf: 'stretch',
     height: 14,
     justifyContent: 'center',
   },
   text: {
     fontSize: 11,
     lineHeight: 14,
-    textAlign: 'center',
+    textAlign: 'left',
   },
   placeholder: {
     opacity: 0,

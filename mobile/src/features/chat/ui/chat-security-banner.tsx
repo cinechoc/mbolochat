@@ -8,8 +8,8 @@ import { fr } from '@/i18n/fr';
 import type { ChatMode } from '../transport/types';
 
 /**
- * Mention de sécurité permanente de l'écran : elle ne prétend jamais au
- * chiffrement pour une conversation historique.
+ * Mention de sécurité de l'état vide : elle ne prétend jamais au chiffrement
+ * pour une conversation historique, et disparaît dès le premier message.
  */
 export function ChatSecurityBanner({ mode }: { mode: ChatMode | 'blocked' }) {
   const theme = useTheme();
@@ -22,7 +22,10 @@ export function ChatSecurityBanner({ mode }: { mode: ChatMode | 'blocked' }) {
   const Icon = mode === 'e2ee' ? Lock : Unlock;
   return (
     <View
-      style={[styles.banner, { backgroundColor: theme.backgroundElement }]}
+      style={[
+        styles.banner,
+        { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+      ]}
       accessibilityRole="text"
       accessibilityLabel={label}>
       <Icon size={13} strokeWidth={2.4} color={theme.textSecondary} />
@@ -38,10 +41,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'center',
     gap: Spacing.one,
-    paddingVertical: Spacing.half,
-    borderRadius: Radii.sm,
-    marginHorizontal: Spacing.three,
-    marginTop: Spacing.half,
+    paddingHorizontal: Spacing.threeHalf,
+    paddingVertical: Spacing.one,
+    marginBottom: Spacing.two,
+    borderRadius: Radii.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    opacity: 0.88,
   },
 });

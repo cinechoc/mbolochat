@@ -252,4 +252,17 @@ describe('ClassicTransport — anti-downgrade et outbox', () => {
     expect(received.filter((id) => id === 'c')).toHaveLength(1);
     await transport.dispose();
   });
+
+  it('efface une lecture unique localement même si le serveur est injoignable', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new ClassicTransport(fakes.deps, options);
+    await transport.loadInitial();
+    fakes.socketDeps.deleteMessage.mockRejectedValueOnce(new Error('hors ligne'));
+
+    await transport.consumeViewOnce('a');
+
+    const cached = fakes.cache.setMessages.mock.calls.at(-1)?.[1] as Message[];
+    expect(cached.map((item) => item.id)).toEqual(['b']);
+    await transport.dispose();
+  });
 });

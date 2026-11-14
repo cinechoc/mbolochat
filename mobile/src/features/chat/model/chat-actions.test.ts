@@ -20,6 +20,7 @@ const CLASSIC: ChatCapabilities = {
   encrypted: false,
   pagination: 'server',
   receipts: 'ticks',
+  sendOptions: true,
 };
 
 const E2EE: ChatCapabilities = {
@@ -75,8 +76,7 @@ const callbacks = () => ({
   onReply: vi.fn(),
   onCopy: vi.fn(),
   onEdit: vi.fn(),
-  onDeleteForMe: vi.fn(),
-  onDeleteForAll: vi.fn(),
+  onDelete: vi.fn(),
 });
 
 describe('buildChatActions', () => {
@@ -86,24 +86,19 @@ describe('buildChatActions', () => {
       capabilities: CLASSIC,
       ...callbacks(),
     });
-    expect(actions.map((action) => action.key)).toEqual([
-      'reply',
-      'copy',
-      'delete-me',
-      'delete-all',
-    ]);
-    expect(actions.find((action) => action.key === 'delete-all')?.destructive).toBe(true);
+    expect(actions.map((action) => action.key)).toEqual(['reply', 'copy', 'delete']);
+    expect(actions.find((action) => action.key === 'delete')?.destructive).toBe(true);
   });
 
-  it('masque « pour tous » en chiffré et sur le message d’un autre', () => {
+  it('garde une seule action de suppression : le choix est demandé ensuite', () => {
     const e2ee = buildChatActions({ message: view(), capabilities: E2EE, ...callbacks() });
-    expect(e2ee.map((action) => action.key)).toEqual(['reply', 'copy', 'delete-me']);
+    expect(e2ee.map((action) => action.key)).toEqual(['reply', 'copy', 'delete']);
     const other = buildChatActions({
       message: view({ mine: false }),
       capabilities: CLASSIC,
       ...callbacks(),
     });
-    expect(other.some((action) => action.key === 'delete-all')).toBe(false);
+    expect(other.filter((action) => action.key === 'delete')).toHaveLength(1);
   });
 
   it('réduit les actions d’un message en attente', () => {
@@ -112,17 +107,26 @@ describe('buildChatActions', () => {
       capabilities: CLASSIC,
       ...callbacks(),
     });
-    expect(actions.map((action) => action.key)).toEqual(['copy', 'delete-me']);
+    expect(actions.map((action) => action.key)).toEqual(['copy', 'delete']);
     expect(actions[1]?.label).toBe('Supprimer');
   });
 
-  it('n’offre rien sur un message supprimé pour tous, sauf copier vide', () => {
+  it('ne laisse que la suppression sur un message à lecture unique', () => {
+    const actions = buildChatActions({
+      message: view({ viewOnce: true }),
+      capabilities: CLASSIC,
+      ...callbacks(),
+    });
+    expect(actions.map((action) => action.key)).toEqual(['delete']);
+  });
+
+  it('n’offre aucune action sur un message supprimé pour tous', () => {
     const actions = buildChatActions({
       message: view({ deleted: true, body: '' }),
       capabilities: CLASSIC,
       ...callbacks(),
     });
-    expect(actions.map((action) => action.key)).toEqual(['delete-me']);
+    expect(actions).toEqual([]);
   });
 
   it('propose la modification chiffrée seulement dans la fenêtre et sous 5 révisions', () => {
@@ -162,7 +166,7 @@ describe('buildChatActions', () => {
       ...callbacks(),
       extra,
     });
-    expect(actions[0]).toBe(extra[0]);
+    expect(actions.map((action) => action.key)).toEqual(['reply', 'copy', 'info', 'delete']);
   });
 
   it('renvoie un tableau vide sans message', () => {

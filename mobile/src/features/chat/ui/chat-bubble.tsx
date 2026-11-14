@@ -47,24 +47,24 @@ export const ChatBubble = memo(function ChatBubble({
 
 export const chatBubbleStyles = StyleSheet.create({
   bubble: {
-    borderRadius: Radii.lg,
+    borderRadius: Radii.sm,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     gap: Spacing.half,
   },
-  /** Coin côté expéditeur légèrement plus petit : donne la direction de la bulle. */
+  /** Coin côté expéditeur plus fermé : géométrie WeChat, sans arrondi mou. */
   bubbleMineEdge: { borderTopRightRadius: Radii.xs },
   bubbleTheirsEdge: { borderTopLeftRadius: Radii.xs },
   tail: {
     position: 'absolute',
-    width: 10,
-    height: 10,
-    borderRadius: Radii.xs,
-    top: 13,
+    width: 8,
+    height: 8,
+    borderRadius: 2,
+    top: 11,
     transform: [{ rotate: '45deg' }],
   },
-  tailLeft: { left: -4 },
-  tailRight: { right: -4 },
+  tailLeft: { left: -3 },
+  tailRight: { right: -3 },
 });
 
 const styles = chatBubbleStyles;

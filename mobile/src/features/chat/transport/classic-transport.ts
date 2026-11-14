@@ -10,6 +10,7 @@ import type {
   ReactionSummary,
 } from '@/lib/types';
 import { classicMessageToView } from '../model/message-view';
+import { normalizedSendOptions, type TextSendOptions } from '../model/send-options';
 import { groupReceipts, mergeMessages, quoteOfMessage } from '../model/merge';
 import type { ClassicTransportDeps, ClassicTransportOptions } from './deps';
 import {
@@ -47,6 +48,7 @@ const CLASSIC_CAPABILITIES: ChatCapabilities = {
   encrypted: false,
   pagination: 'server',
   receipts: 'ticks',
+  sendOptions: true,
 };
 
 interface DeletedPayload {
@@ -278,7 +280,11 @@ export class ClassicTransport implements ChatTransport {
     this.unsubscribe();
   }
 
-  async sendText(text: string, replyToId: string | null): Promise<void> {
+  async sendText(
+    text: string,
+    replyToId: string | null,
+    options?: TextSendOptions,
+  ): Promise<void> {
     if (!this.capabilities.replies && replyToId) {
       throw new UnsupportedCapabilityError('replies');
     }
@@ -288,6 +294,7 @@ export class ClassicTransport implements ChatTransport {
       conversationId: this.conversationId,
       content,
       replyTo: replyToId,
+      ...normalizedSendOptions(options),
     });
     await this.deps.outbox.drain(this.token);
   }
@@ -423,6 +430,21 @@ export class ClassicTransport implements ChatTransport {
       this.deps.cache.setMessages(this.conversationId, this.messages);
       this.handlers?.onMessageRemoved(id, false);
     }
+  }
+
+  async consumeViewOnce(id: string): Promise<void> {
+    const waiting = this.queued.some((item) => item.clientId === id);
+    if (waiting) {
+      await this.deps.outbox.discard(id);
+      await this.refreshQueued();
+      return;
+    }
+    this.messages = this.messages.filter((message) => message.id !== id);
+    this.deps.cache.setMessages(this.conversationId, this.messages);
+    this.handlers?.onMessageRemoved(id, false);
+    void this.deps.socket
+      .deleteMessage(this.token, this.conversationId, id, false)
+      .catch(() => undefined);
   }
 
   async toggleReaction(id: string, reaction: string): Promise<void> {

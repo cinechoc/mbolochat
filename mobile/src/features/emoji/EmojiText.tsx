@@ -1,7 +1,17 @@
 import React, { memo, useMemo } from 'react';
-import { Image, StyleProp, StyleSheet, Text, TextProps, TextStyle, ImageStyle } from 'react-native';
+import {
+  Image,
+  Platform,
+  StyleProp,
+  StyleSheet,
+  Text,
+  TextProps,
+  TextStyle,
+  ImageStyle,
+} from 'react-native';
 import { EMOJI_LARGE_SOURCES, EMOJI_SOURCES } from './emojiCatalog';
 import { emojiOnlyCount, splitEmoji } from './emojiUtils';
+import { parseFormattedText } from '@/features/chat/model/text-format';
 
 /**
  * Décalage vertical (en fraction de la taille) de l'emoji dans une ligne de texte.
@@ -78,16 +88,31 @@ type MessageTextProps = Omit<TextProps, 'children'> & { text: string };
 
 /** Texte d'un message : 1 à 3 emoji seuls s'affichent en grand, comme sur WeChat/WhatsApp. */
 export const MessageText = memo(function MessageText({ text, style, ...rest }: MessageTextProps) {
-  const count = useMemo(() => emojiOnlyCount(text), [text]);
+  const segments = useMemo(() => parseFormattedText(text), [text]);
+  const plain = useMemo(() => segments.map((segment) => segment.text).join(''), [segments]);
+  const count = useMemo(() => emojiOnlyCount(plain), [plain]);
   const jumbo: TextStyle | undefined =
     count === 0 ? undefined : { fontSize: count === 1 ? 38 : count === 2 ? 32 : 28 };
   return (
-    <EmojiText
-      style={[style, jumbo]}
-      emojiScale={count ? 1.1 : 1.25}
-      large={count > 0}
-      {...rest}>
-      {text}
-    </EmojiText>
+    <Text style={[style, jumbo]} {...rest}>
+      {segments.map((segment, index) => (
+        <EmojiText
+          key={index}
+          style={[
+            style,
+            jumbo,
+            segment.bold ? { fontWeight: '700' } : null,
+            segment.italic ? { fontStyle: 'italic' } : null,
+            segment.strike ? { textDecorationLine: 'line-through' } : null,
+            segment.mono
+              ? { fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }) }
+              : null,
+          ]}
+          emojiScale={count ? 1.1 : 1.25}
+          large={count > 0}>
+          {segment.text}
+        </EmojiText>
+      ))}
+    </Text>
   );
 });

@@ -2,6 +2,7 @@ import type { E2eeInitFailure } from '@/features/e2ee/initState';
 import type { RecentGif } from '@/features/media/GifPanel';
 import type { PersonalSticker } from '@/features/stickers/stickerLibrary';
 import type { VoiceNote } from '@/features/voice-notes/useVoiceRecorder';
+import type { TextSendOptions } from '../model/send-options';
 import type {
   ConversationSummary,
   Gender,
@@ -37,6 +38,8 @@ export interface ChatCapabilities {
   encrypted: boolean;
   pagination: 'server' | 'local';
   receipts: 'ticks' | 'delivered-opened';
+  /** Programmation, envoi silencieux et lecture unique (mode clair uniquement). */
+  sendOptions: boolean;
 }
 
 /** Capacités qui commandent une méthode et peuvent donc être refusées. */
@@ -51,7 +54,8 @@ export type GatedCapability =
   | 'typing'
   | 'edit'
   | 'ephemeral'
-  | 'calls';
+  | 'calls'
+  | 'sendOptions';
 
 /** Refus typé d'une méthode non supportée par le mode courant. */
 export class UnsupportedCapabilityError extends Error {
@@ -150,6 +154,12 @@ export interface ChatMessageView {
   quoteId: string | null;
   quote: MessageQuote | null;
   reactions: ReactionSummary[];
+  /** Envoi silencieux (mode clair). */
+  silent?: boolean;
+  /** Lecture unique : contenu masqué jusqu’à ouverture. */
+  viewOnce?: boolean;
+  /** Date programme locale, seulement pour une bulle en attente. */
+  scheduledAt?: string | null;
   stickerRef: string | null;
   attachment: ChatAttachmentView | null;
   state: ChatDeliveryState;
@@ -215,7 +225,11 @@ export interface ChatTransport {
   subscribe(handlers: ChatTransportHandlers): () => void;
   dispose(): Promise<void>;
 
-  sendText(text: string, replyToId: string | null): Promise<void>;
+  sendText(
+    text: string,
+    replyToId: string | null,
+    options?: TextSendOptions,
+  ): Promise<void>;
   sendMedia(asset: OutgoingAsset, caption: string, replyToId: string | null): Promise<void>;
   sendSticker(ref: string): Promise<void>;
   sendPersonalSticker(sticker: PersonalSticker): Promise<void>;
@@ -225,6 +239,8 @@ export interface ChatTransport {
   forwardText(target: ConversationSummary, text: string): Promise<void>;
 
   deleteMessage(id: string, forEveryone: boolean): Promise<void>;
+  /** Efface une lecture unique localement, puis masque la copie serveur sans bloquer. */
+  consumeViewOnce?: (id: string) => Promise<void>;
   editMessage(id: string, text: string): Promise<void>;
   toggleReaction(id: string, reaction: string): Promise<void>;
   markRead(ids?: string[]): Promise<void>;

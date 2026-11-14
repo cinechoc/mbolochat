@@ -1,6 +1,16 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
-import { ChevronDown, Phone, ShieldCheck, Star, StarOff, Timer, Video } from 'lucide-react-native';
+import {
+  ChevronDown,
+  Phone,
+  Pin,
+  ShieldCheck,
+  Star,
+  StarOff,
+  Timer,
+  Video,
+  X,
+} from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import {
   Alert,
@@ -20,14 +30,18 @@ import { BlurTarget } from '@/components/blur-target';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { CHAT_TIME_GAP_MS, useChatColors } from '@/constants/chat-theme';
-import { Spacing } from '@/constants/theme';
+import { Radii, Spacing } from '@/constants/theme';
 import { useCalls } from '@/features/calls/CallProvider';
 import { ChatEmptyState } from '@/features/chat/ui/chat-empty-state';
 import { ChatHeaderBar } from '@/features/chat/ui/chat-header-bar';
+import { ChatHeaderMenu } from '@/features/chat/ui/chat-header-menu';
+import { MessageActionOverlay } from '@/features/chat/ui/message-action-overlay';
+import { ViewOnceModal } from '@/features/chat/ui/view-once-modal';
 import { ChatInputBar } from '@/features/chat/ui/chat-input-bar';
 import { ChatMessageList } from '@/features/chat/ui/chat-message-list';
 import { ChatSecurityBanner } from '@/features/chat/ui/chat-security-banner';
 import type { MediaOpenRequest } from '@/features/chat/ui/chat-message-row';
+import type { BubbleAnchor } from '@/components/swipeable-bubble';
 import { mediaUrl } from '@/features/media/mediaUrl';
 import { createMediaLeaseRegistry } from '../model/media-leases';
 import { canMarkEncryptedRead } from '../model/read-gate';
@@ -47,8 +61,7 @@ import {
 } from '@/features/e2ee/read-visibility';
 import type { E2eeListRow } from '@/features/e2ee/rows';
 import { getPresenceRecord } from '@/features/presence/presenceStore';
-import { REACTION_STICKERS, onConnection } from '@/lib/socket';
-import { StickerView } from '@/features/stickers/StickerView';
+import { onConnection } from '@/lib/socket';
 import { findSticker } from '@/features/stickers/stickerPacks';
 import {
   receivedStickerId,
@@ -71,6 +84,11 @@ import { useChatActions } from '../hooks/use-chat-actions';
 import { useChatTransport } from '../hooks/use-chat-transport';
 import { useChatMedia } from '../hooks/use-chat-media';
 import { identityOf } from '../model/message-view';
+import {
+  loadPinnedMessageIds,
+  savePinnedMessageIds,
+  togglePinnedMessageId,
+} from '../model/pinned-messages';
 import type {
   ChatCapabilities,
   ChatMessageView,
@@ -97,6 +115,7 @@ const EMPTY_CAPABILITIES: ChatCapabilities = {
   encrypted: false,
   pagination: 'server',
   receipts: 'ticks',
+  sendOptions: false,
 };
 
 const READ_VIEWABILITY_CONFIG = {
@@ -135,12 +154,15 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const replyToId = replyTo?.id ?? null;
   const [menuFor, setMenuFor] = useState<ChatMessageView | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<BubbleAnchor | null>(null);
+  const [pinnedIds, setPinnedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [seenFor, setSeenFor] = useState<ChatMessageView | null>(null);
   const [infoFor, setInfoFor] = useState<ChatMessageView | null>(null);
   const [ephemeralOpen, setEphemeralOpen] = useState(false);
   const [forwardFor, setForwardFor] = useState<ChatMessageView | null>(null);
   const [forwardTargets, setForwardTargets] = useState<ConversationSummary[]>([]);
   const [forwardLoading, setForwardLoading] = useState(false);
+  const [viewOnceFor, setViewOnceFor] = useState<ChatMessageView | null>(null);
   const [chatAreaHeight, setChatAreaHeight] = useState(0);
   const media = useChatMedia();
   const { openImage, openVideo, closeImage, closeVideo } = media;
@@ -240,6 +262,15 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     });
     return () => subscription.remove();
   }, []);
+  useEffect(() => {
+    let active = true;
+    void loadPinnedMessageIds(conversationId).then((ids) => {
+      if (active) setPinnedIds(new Set(ids));
+    });
+    return () => {
+      active = false;
+    };
+  }, [conversationId]);
   useFocusEffect(
     useCallback(() => {
       setFocused(true);
@@ -251,6 +282,12 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     () => new Map(messages.map((message) => [message.id, message] as const)),
     [messages],
   );
+
+  const pinnedMessage = useMemo(() => {
+    if (pinnedIds.size === 0) return null;
+    const pinned = messages.filter((message) => pinnedIds.has(message.id) && !message.deleted);
+    return pinned.at(-1) ?? null;
+  }, [messages, pinnedIds]);
 
   const quoteResolver = useCallback(
     (id: string | null) => {
@@ -304,100 +341,101 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
 
   const headerRight = useMemo(() => {
     if (!transport) return null;
-    const securityButton =
-      transport.mode === 'e2ee' && summary?.type === 'DIRECT' && directPeer ? (
-        <Pressable
-          onPress={() =>
+    const menuActions: SheetAction[] = [];
+    if (transport.mode === 'e2ee' && summary?.type === 'DIRECT') {
+      if (directPeer) {
+        menuActions.push({
+          key: 'security',
+          label: fr.e2eeChat.security.open,
+          icon: ShieldCheck,
+          onPress: () =>
             router.push(
               {
                 pathname: '/security-code',
                 params: { peerId: directPeer.id, conversationId },
               } as never,
-            )
-          }
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={fr.e2eeChat.security.open}>
-          <ShieldCheck size={24} color={chat.headerText} />
-        </Pressable>
-      ) : null;
-    const ephemeralButton =
-      transport.mode === 'e2ee' && summary?.type === 'DIRECT' ? (
-        <Pressable
-          onPress={() => setEphemeralOpen(true)}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={fr.chat.unified.ephemeralLabel}>
-          <Timer
-            size={23}
-            color={ephemeralSeconds > 0 ? chat.headerText : chat.secondaryText}
-          />
-        </Pressable>
-      ) : null;
-    if (!transport.capabilities.calls) {
-      return (
-        <View style={styles.headerActions}>
-          {securityButton}
-          {ephemeralButton}
-          <Pressable
-            onPress={showCallsUnavailable}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: true }}
-            accessibilityLabel={fr.e2eeChat.callVideoUnavailable}
-            style={styles.headerActionDisabled}>
-            <Video size={26} color={chat.headerText} />
-          </Pressable>
-          <Pressable
-            onPress={showCallsUnavailable}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: true }}
-            accessibilityLabel={fr.e2eeChat.callVoiceUnavailable}
-            style={styles.headerActionDisabled}>
-            <View style={styles.phoneFlipped}>
-              <Phone size={22} color={chat.headerText} />
-            </View>
-          </Pressable>
-        </View>
-      );
+            ),
+        });
+      }
+      menuActions.push({
+        key: 'ephemeral',
+        label: fr.chat.unified.ephemeralLabel,
+        icon: Timer,
+        onPress: () => setEphemeralOpen(true),
+      });
     }
     const group = summary?.type === 'GROUP';
+    const videoButton = transport.capabilities.calls ? (
+      <Pressable
+        onPress={() =>
+          group
+            ? void calls.startGroupCall(conversationId, { video: true })
+            : void calls.startCall(conversationId, { video: true })
+        }
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={
+          group ? fr.chat.unified.groupCallVideo : fr.chat.unified.callVideo
+        }>
+        <Video size={26} color={chat.headerText} />
+      </Pressable>
+    ) : (
+      <Pressable
+        onPress={showCallsUnavailable}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: true }}
+        accessibilityLabel={fr.e2eeChat.callVideoUnavailable}
+        style={styles.headerActionDisabled}>
+        <Video size={26} color={chat.headerText} />
+      </Pressable>
+    );
+    const callButton = transport.capabilities.calls ? (
+      <Pressable
+        onPress={() =>
+          group
+            ? void calls.startGroupCall(conversationId, { video: false })
+            : void calls.startCall(conversationId, { video: false })
+        }
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={
+          group ? fr.chat.unified.groupCallVoice : fr.chat.unified.callVoice
+        }>
+        <View style={styles.phoneFlipped}>
+          <Phone size={22} color={chat.headerText} />
+        </View>
+      </Pressable>
+    ) : (
+      <Pressable
+        onPress={showCallsUnavailable}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: true }}
+        accessibilityLabel={fr.e2eeChat.callVoiceUnavailable}
+        style={styles.headerActionDisabled}>
+        <View style={styles.phoneFlipped}>
+          <Phone size={22} color={chat.headerText} />
+        </View>
+      </Pressable>
+    );
     return (
       <View style={styles.headerActions}>
-        {securityButton}
-        {ephemeralButton}
-        <Pressable
-          onPress={() =>
-            group
-              ? void calls.startGroupCall(conversationId, { video: true })
-              : void calls.startCall(conversationId, { video: true })
-          }
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={
-            group ? fr.chat.unified.groupCallVideo : fr.chat.unified.callVideo
-          }>
-          <Video size={26} color={chat.headerText} />
-        </Pressable>
-        <Pressable
-          onPress={() =>
-            group
-              ? void calls.startGroupCall(conversationId, { video: false })
-              : void calls.startCall(conversationId, { video: false })
-          }
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={
-            group ? fr.chat.unified.groupCallVoice : fr.chat.unified.callVoice
-          }>
-          <View style={styles.phoneFlipped}>
-            <Phone size={22} color={chat.headerText} />
-          </View>
-        </Pressable>
+        {videoButton}
+        {callButton}
+        <ChatHeaderMenu actions={menuActions} tintColor={chat.headerText} />
       </View>
     );
-  }, [transport, summary?.type, directPeer, calls, conversationId, router, chat.headerText, chat.secondaryText, ephemeralSeconds, showCallsUnavailable]);
+  }, [
+    transport,
+    summary?.type,
+    directPeer,
+    calls,
+    conversationId,
+    router,
+    chat.headerText,
+    showCallsUnavailable,
+  ]);
 
   const applyEphemeral = useCallback(
     (ttlSeconds: number) => {
@@ -437,6 +475,73 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
         .finally(() => setForwardLoading(false));
     },
     [token, conversationId],
+  );
+
+  const closeMessageMenu = useCallback(() => {
+    setMenuFor(null);
+    setMenuAnchor(null);
+  }, []);
+
+  const togglePin = useCallback(
+    (message: ChatMessageView) => {
+      const next = togglePinnedMessageId([...pinnedIds], message.id);
+      setPinnedIds(new Set(next));
+      void savePinnedMessageIds(conversationId, next);
+    },
+    [conversationId, pinnedIds],
+  );
+
+  const deleteMessageNow = useCallback(
+    async (message: ChatMessageView, forEveryone: boolean) => {
+      try {
+        await transport?.deleteMessage(message.id, forEveryone);
+        if (pinnedIds.has(message.id)) {
+          const next = [...pinnedIds].filter((id) => id !== message.id);
+          setPinnedIds(new Set(next));
+          void savePinnedMessageIds(conversationId, next);
+        }
+      } catch {
+        Alert.alert(fr.e2eeChat.error, fr.chat.errors.deleteFailed);
+      }
+    },
+    [transport, pinnedIds, conversationId],
+  );
+
+  const closeViewOnce = useCallback(() => {
+    const target = viewOnceFor;
+    setViewOnceFor(null);
+    if (target && transport?.consumeViewOnce) {
+      void transport.consumeViewOnce(target.id).catch(() => undefined);
+    } else if (target) {
+      void deleteMessageNow(target, false);
+    }
+  }, [deleteMessageNow, transport, viewOnceFor]);
+
+  const requestDelete = useCallback(
+    (message: ChatMessageView) => {
+      const waiting = message.state === 'pending' || message.state === 'failed';
+      const buttons: {
+        text: string;
+        style?: 'cancel' | 'destructive';
+        onPress?: () => void;
+      }[] = [
+        { text: fr.common.cancel, style: 'cancel' },
+        {
+          text: fr.chat.menu.deleteForMe,
+          style: 'destructive',
+          onPress: () => void deleteMessageNow(message, false),
+        },
+      ];
+      if (message.mine && transport?.capabilities.deleteForEveryone && !waiting) {
+        buttons.push({
+          text: fr.chat.menu.deleteForAll,
+          style: 'destructive',
+          onPress: () => void deleteMessageNow(message, true),
+        });
+      }
+      Alert.alert(fr.chat.unified.deleteTitle, fr.chat.unified.deleteBody, buttons);
+    },
+    [deleteMessageNow, transport],
   );
 
   type StickerMenuTarget =
@@ -486,7 +591,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   const toggleStickerFromMenu = useCallback(async () => {
     const target = stickerMenuTarget;
     if (!target) return;
-    setMenuFor(null);
+    closeMessageMenu();
     try {
       if (target.kind === 'received' && !target.saved) {
         await saveReceivedSticker({
@@ -514,19 +619,12 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
         favoriteError instanceof Error ? favoriteError.message : fr.chat.sticker.unavailableBody,
       );
     }
-  }, [stickerMenuTarget]);
+  }, [closeMessageMenu, stickerMenuTarget]);
 
   const extraActions = useMemo<SheetAction[]>(() => {
     if (!menuFor || !transport) return [];
+    if (menuFor.viewOnce) return [];
     const actions: SheetAction[] = [];
-    if (!transport.capabilities.encrypted && stickerMenuTarget) {
-      actions.push({
-        key: 'sticker-favorite',
-        label: stickerIsFavorite ? fr.chat.menu.removeFavorite : fr.chat.menu.addFavorite,
-        icon: stickerIsFavorite ? StarOff : Star,
-        onPress: () => void toggleStickerFromMenu(),
-      });
-    }
     if (
       transport.capabilities.forwarded &&
       menuFor.body &&
@@ -537,6 +635,23 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
         key: 'forward',
         label: fr.e2eeChat.forward,
         onPress: () => openForward(menuFor),
+      });
+    }
+    if (menuFor.state !== 'pending' && menuFor.state !== 'failed' && !menuFor.deleted) {
+      const pinned = pinnedIds.has(menuFor.id);
+      actions.push({
+        key: 'pin',
+        label: pinned ? fr.chat.unified.unpin : fr.chat.unified.pin,
+        icon: Pin,
+        onPress: () => togglePin(menuFor),
+      });
+    }
+    if (!transport.capabilities.encrypted && stickerMenuTarget) {
+      actions.push({
+        key: 'sticker-favorite',
+        label: stickerIsFavorite ? fr.chat.menu.removeFavorite : fr.chat.menu.addFavorite,
+        icon: stickerIsFavorite ? StarOff : Star,
+        onPress: () => void toggleStickerFromMenu(),
       });
     }
     if (transport.capabilities.encrypted) {
@@ -551,9 +666,11 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     menuFor,
     transport,
     openForward,
+    pinnedIds,
     stickerMenuTarget,
     stickerIsFavorite,
     toggleStickerFromMenu,
+    togglePin,
   ]);
 
   const menuActions = useChatActions({
@@ -562,25 +679,18 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     extra: extraActions,
     onReply: (message) => {
       setReplyTo(quoteOfView(message));
-      setMenuFor(null);
+      closeMessageMenu();
     },
     onCopy: (message) => {
-      setMenuFor(null);
+      closeMessageMenu();
       void copyMessage(message);
     },
     onEdit: (message) => {
-      setMenuFor(null);
+      closeMessageMenu();
       setReplyTo(null);
       setEditing({ id: message.id, text: message.body });
     },
-    onDeleteForMe: (message) => {
-      setMenuFor(null);
-      void transport?.deleteMessage(message.id, false);
-    },
-    onDeleteForAll: (message) => {
-      setMenuFor(null);
-      void transport?.deleteMessage(message.id, true);
-    },
+    onDelete: requestDelete,
   });
 
   const closeViewer = useCallback(() => {
@@ -631,14 +741,14 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   );
 
   const sendText = useCallback(
-    async (text: string) => {
+    async (text: string, options?: import('../model/send-options').TextSendOptions) => {
       if (!transport) return;
       try {
         if (editing) {
           await transport.editMessage(editing.id, text);
           setEditing(null);
         } else {
-          await transport.sendText(text, replyToId);
+          await transport.sendText(text, replyToId, options);
         }
         setReplyTo(null);
       } catch (error) {
@@ -730,6 +840,11 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
 
   const handleReply = useCallback((message: ChatMessageView) => {
     setReplyTo(quoteOfView(message));
+  }, []);
+
+  const handleLongPress = useCallback((message: ChatMessageView, anchor?: BubbleAnchor) => {
+    setMenuFor(message);
+    setMenuAnchor(anchor ?? null);
   }, []);
 
   const handleRetry = useCallback(
@@ -881,23 +996,49 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
         subtitle={subtitle}
         mode={mode}
         presenceUserId={summary?.type === 'DIRECT' && other ? other.id : undefined}
-        avatar={
-          isGroup && summary ? (
-            <Avatar
-              name={title}
-              uri={summary.avatarUrl}
-              emoji={summary.emoji}
-              color={summary.color}
-              variant="group"
-              size={34}
-            />
-          ) : undefined
-        }
         onPressTitle={onPressTitle}
         right={headerRight}
         blurTarget={blurTargetRef}
       />
-      <ChatSecurityBanner mode={mode} />
+      {pinnedMessage ? (
+        <View
+          style={[
+            styles.pinnedBar,
+            { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+          ]}>
+          <Pressable
+            onPress={() => scroll.scrollToMessage(pinnedMessage.id)}
+            accessibilityRole="button"
+            accessibilityLabel={fr.chat.unified.openPinnedMessage}
+            style={({ pressed }) => [styles.pinnedMain, pressed ? styles.pinnedPressed : null]}>
+            <View style={[styles.pinnedIcon, { backgroundColor: theme.accentSoft }]}>
+              <Pin size={15} color={theme.accent} />
+            </View>
+            <View style={styles.pinnedBody}>
+              <ThemedText type="micro" style={{ color: theme.accent, fontWeight: '600' }}>
+                {fr.chat.unified.pinnedMessage}
+              </ThemedText>
+              <ThemedText type="small" numberOfLines={1} ellipsizeMode="tail">
+                <ThemedText type="smallBold">{pinnedMessage.sender.displayName}</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {` · ${pinnedMessage.body || fr.chat.unified.messagePreviewFallback}`}
+                </ThemedText>
+              </ThemedText>
+            </View>
+          </Pressable>
+          <Pressable
+            onPress={() => togglePin(pinnedMessage)}
+            hitSlop={4}
+            accessibilityRole="button"
+            accessibilityLabel={fr.chat.unified.unpinPinnedMessage}
+            style={({ pressed }) => [
+              styles.pinnedUnpin,
+              pressed ? styles.pinnedPressed : null,
+            ]}>
+            <X size={19} color={theme.textSecondary} />
+          </Pressable>
+        </View>
+      ) : null}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
@@ -917,19 +1058,22 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
             resolveQuote={quoteResolver}
             seenByCountFor={seenByCountFor}
             onReply={handleReply}
-            onLongPress={setMenuFor}
+            onLongPress={handleLongPress}
             onRetry={handleRetry}
             onDiscard={handleDiscard}
             onOpenMedia={openMedia}
+            onOpenViewOnce={setViewOnceFor}
             onOpenAlbum={handleOpenAlbum}
             onToggleReaction={handleToggleReaction}
             onPressAvatar={openProfile}
             onSeenBy={setSeenFor}
+            pinnedMessageIds={pinnedIds}
             onScroll={scroll.onScroll}
             onEndReached={onEndReached}
             emptyComponent={
               ready ? (
                 <ChatEmptyState
+                  banner={<ChatSecurityBanner mode={mode} />}
                   avatar={
                     <Avatar
                       name={title}
@@ -1067,33 +1211,19 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
         ) : null}
       </KeyboardAvoidingView>
 
-      <ActionSheet
+      <MessageActionOverlay
         visible={menuFor !== null}
-        title={fr.chat.unified.messageOptions}
-        header={
-          menuFor && transport?.capabilities.reactions ? (
-            <View style={styles.reactionPicker}>
-              {REACTION_STICKERS.map((reaction) => {
-                const sticker = findSticker(reaction);
-                return (
-                  <Pressable
-                    key={reaction}
-                    accessibilityRole="button"
-                    accessibilityLabel={reaction}
-                    onPress={() => {
-                      void transport.toggleReaction(menuFor.id, reaction);
-                      setMenuFor(null);
-                    }}>
-                    {sticker ? <StickerView sticker={sticker} size={36} /> : null}
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : null
-        }
+        message={menuFor}
+        anchor={menuAnchor}
+        canReact={Boolean(transport?.capabilities.reactions)}
         actions={menuActions}
-        onClose={() => setMenuFor(null)}
+        onToggleReaction={(messageId, reaction) => {
+          void transport?.toggleReaction(messageId, reaction);
+        }}
+        onClose={closeMessageMenu}
       />
+
+      <ViewOnceModal message={viewOnceFor} onClose={closeViewOnce} />
 
       <ActionSheet
         visible={seenFor !== null}
@@ -1225,11 +1355,40 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
     borderRadius: 999,
   },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.threeHalf },
   headerActionDisabled: { opacity: 0.45 },
   phoneFlipped: { transform: [{ rotate: '135deg' }] },
   bubble: { maxWidth: 300 },
   banner: { paddingHorizontal: Spacing.three, paddingBottom: Spacing.one },
+  pinnedBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  pinnedMain: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingLeft: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  pinnedUnpin: {
+    width: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinnedIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: Radii.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinnedPressed: { opacity: 0.72 },
+  pinnedBody: { flex: 1, minWidth: 0, gap: 1 },
   typing: { paddingHorizontal: Spacing.three, paddingBottom: Spacing.one, fontStyle: 'italic' },
   jump: {
     position: 'absolute',
@@ -1240,12 +1399,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  reactionPicker: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
   },
   seenRow: { paddingVertical: Spacing.two, paddingHorizontal: Spacing.one },
 });

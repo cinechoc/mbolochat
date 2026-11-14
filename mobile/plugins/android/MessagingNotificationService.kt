@@ -118,8 +118,8 @@ class MessagingNotificationService : FirebaseMessagingService() {
       if (silent) "Messages (sans son)" else "Messages",
       NotificationManager.IMPORTANCE_HIGH,
     ).apply {
-      enableVibration(true)
-      vibrationPattern = longArrayOf(0, 200, 150, 200)
+      enableVibration(!silent)
+      if (!silent) vibrationPattern = longArrayOf(0, 200, 150, 200)
       lightColor = ContextCompat.getColor(this@MessagingNotificationService, R.color.notification_icon_color)
       if (silent) setSound(null, null)
     }
@@ -204,6 +204,10 @@ class MessagingNotificationService : FirebaseMessagingService() {
       .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
       .setGroup(GROUP_KEY)
       .setGroupSummary(false)
+
+    if (silent) {
+      builder.setVibrate(longArrayOf(0))
+    }
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       builder.setShortcutId(conversationId)

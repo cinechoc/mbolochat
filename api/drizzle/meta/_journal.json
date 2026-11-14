@@ -260,6 +260,13 @@
       "when": 1794123735825,
       "tag": "0036_message_events_fencing",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794681077570,
+      "tag": "0037_message_send_options",
+      "breakpoints": true
     }
   ]
 }

@@ -29,7 +29,9 @@ export function useChatDraft(input: {
     });
     bufferRef.current = buffer;
     return () => {
-      buffer.dispose();
+      // Le bouton retour peut arriver avant la temporisation de 300 ms : on
+      // écrit la dernière frappe avant de démonter la barre de saisie.
+      buffer.close();
       bufferRef.current = null;
     };
   }, [transport, saveDelayMs]);

@@ -1,13 +1,12 @@
 /**
  * Disposition « WeChat » des rangées de message.
  *
- * Contrairement à la conversation classique (avatar uniquement pour les
- * messages reçus), chaque message porte l'avatar de son expéditeur :
+ * Seuls les messages reçus portent l'avatar de leur expéditeur :
  *
- * - reçu  : avatar à gauche, bulle à droite de l'avatar (alignée à gauche) ;
- * - envoyé : bulle à gauche, avatar à droite (bulle alignée à droite) ;
+ * - reçu  : avatar rond à gauche, bulle à droite de l'avatar (alignée à gauche) ;
+ * - envoyé : bulle seule, alignée à droite, sans avatar de l'utilisateur ;
  * - messages consécutifs du même expéditeur : l'avatar n'est pas répété, mais
- *   sa place est **réservée** pour que les bulles restent alignées.
+ *   sa place est **réservée** pour que les bulles reçues restent alignées.
  *
  * Les valeurs renvoyées sont des noms de propriétés `alignItems`/côté, jamais
  * des nombres : la fonction reste pure et testable sans React Native.
@@ -29,8 +28,8 @@ export type MessageRowLayout = {
 export function messageRowLayout(mine: boolean, continuation: boolean): MessageRowLayout {
   if (mine) {
     return {
-      avatar: continuation ? 'none' : 'right',
-      spacer: continuation ? 'right' : 'none',
+      avatar: 'none',
+      spacer: 'none',
       align: 'flex-end',
       bubbleFirst: true,
     };

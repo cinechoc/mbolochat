@@ -70,4 +70,15 @@ describe('createDraftBuffer', () => {
     expect(save).not.toHaveBeenCalled();
     expect(buffer.pending()).toBeNull();
   });
+
+  it('close écrit la saisie en attente avant de libérer le minuteur', () => {
+    const save = vi.fn();
+    const { scheduler, run } = fakeScheduler();
+    const buffer = createDraftBuffer({ save, scheduler });
+    buffer.set('dernier mot');
+    buffer.close();
+    expect(save).toHaveBeenCalledWith('dernier mot');
+    run();
+    expect(save).toHaveBeenCalledTimes(1);
+  });
 });

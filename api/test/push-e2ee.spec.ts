@@ -28,4 +28,14 @@ describe('push E2EE', () => {
     expect(summary.body).toContain('Alice');
     expect(summary.body).toContain('texte en clair interdit');
   });
+
+  it('ne révèle pas le contenu d’un message à lecture unique', () => {
+    const summary = notificationSummary(
+      { ...message, encryption: 'none', viewOnce: true },
+      conversation,
+      true,
+    );
+    expect(summary.text).toBe('Message à lecture unique');
+    expect(summary.body).not.toContain('texte en clair interdit');
+  });
 });

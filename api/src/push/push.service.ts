@@ -37,6 +37,10 @@ interface ExpoTicket {
 interface ExpoPushMessage {
   to: string;
   priority: 'high';
+  /** `null` coupe explicitement le son d’un envoi silencieux. */
+  sound?: null;
+  /** `[0]` évite la vibration pour un envoi silencieux. */
+  vibrate?: number[];
   /** Expiration courte pour les appels (une sonnerie périmée ne sert à rien). */
   ttl?: number;
   /** Canal Android (les appels ont leur propre canal prioritaire). */
@@ -120,6 +124,8 @@ type PushMessage = {
   type: string;
   content: string;
   attachment: MessageAttachment | null;
+  silent?: boolean;
+  viewOnce?: boolean;
   sender: { displayName: string };
 };
 
@@ -153,7 +159,11 @@ export function notificationSummary(
       ? `${conversation.emoji} ${groupLabel}`
       : groupLabel
     : message.sender.displayName;
-  const text = notificationText(message, preview);
+  // Une lecture unique ne doit jamais apparaître en clair dans le centre de
+  // notifications : le destinataire découvrira le contenu dans l’application.
+  const text = message.viewOnce
+    ? 'Message à lecture unique'
+    : notificationText(message, preview);
   const body =
     conversation.type === 'GROUP' ? `${message.sender.displayName} : ${text}` : text;
   return { encrypted: false, title, text, body };
@@ -359,6 +369,7 @@ export class PushService {
       return {
         to: token,
         priority: 'high',
+        ...(message.silent ? { sound: null, vibrate: [0] } : {}),
         data: {
           type: 'message',
           title,
@@ -371,7 +382,7 @@ export class PushService {
           groupAvatarUrl: encrypted ? '' : (groupAvatar ?? ''),
           groupEmoji: encrypted ? '' : isGroup ? (conversation.emoji ?? '') : '',
           unreadCount: String(Math.max(1, unread)),
-          silent: prefs.notificationSound === false ? '1' : '0',
+          silent: prefs.notificationSound === false || message.silent ? '1' : '0',
         },
       };
     });

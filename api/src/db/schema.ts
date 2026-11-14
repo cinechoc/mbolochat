@@ -510,6 +510,10 @@ export const messages = pgTable(
      * suit le fil, et l'original garde sa place.
      */
     replyToId: text('reply_to_id'),
+    /** Envoi silencieux : pas de son ni de vibration à la réception. */
+    silent: boolean('silent').notNull().default(false),
+    /** Lecture unique : le client masque le contenu jusqu’à ouverture. */
+    viewOnce: boolean('view_once').notNull().default(false),
     /**
      * Supprimé pour tous. Le contenu et la pièce jointe sont effacés avec cette
      * date ; sans elle, un message vide ressemblerait à un message supprimé.

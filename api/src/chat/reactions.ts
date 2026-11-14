@@ -1,7 +1,6 @@
 /**
- * Réactions autorisées : des stickers de la panthère Mbolo, pas des emojis
- * Unicode. La liste est fermée pour garder un rendu cohérent et éviter qu'un
- * texte arbitraire serve de « réaction ».
+ * Réactions autorisées : des références fermées, rendues en emoji côté client.
+ * La liste est fermée pour éviter qu’un texte arbitraire serve de « réaction ».
  */
 export const PANTHER_REACTIONS = [
   'mbolo-panther-2d/amour',
@@ -9,6 +8,7 @@ export const PANTHER_REACTIONS = [
   'mbolo-panther-2d/pouce-leve',
   'mbolo-panther-2d/choc',
   'mbolo-panther-2d/tristesse',
+  'mbolo-panther-2d/priere',
   'mbolo-panther-2d/colere',
 ] as const;
 
@@ -18,11 +18,11 @@ export function isPantherReaction(value: unknown): value is PantherReaction {
   return typeof value === 'string' && (PANTHER_REACTIONS as readonly string[]).includes(value);
 }
 
-/** Résumé d'une réaction pour un message, du point de vue du lecteur. */
+/** Résumé d’une réaction pour un message, du point de vue du lecteur. */
 export interface ReactionSummary {
-  /** Référence de sticker, ex. « mbolo-panther-2d/amour ». */
+  /** Référence de réaction, ex. « mbolo-panther-2d/amour ». */
   reaction: string;
   count: number;
-  /** L'utilisateur courant a réagi avec ce sticker. */
+  /** L’utilisateur courant a réagi avec cette réaction. */
   mine: boolean;
 }

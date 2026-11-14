@@ -26,6 +26,12 @@ export interface NewOutboxItem {
   content: string;
   /** Message cité par une réponse. */
   replyTo?: string | null;
+  /** Envoi sans son ni vibration. */
+  silent?: boolean;
+  /** Lecture unique. */
+  viewOnce?: boolean;
+  /** Date ISO : la file attend cette échéance avant d’émettre. */
+  scheduledAt?: string | null;
   attachment?: {
     /** Absent pour un GIF externe : aucun fichier à importer. */
     localUri?: string;
@@ -82,6 +88,9 @@ export async function enqueue(input: NewOutboxItem): Promise<OutboxItem> {
     stickerRef: input.type === 'sticker' ? (input.stickerRef ?? null) : null,
     content: input.content,
     replyTo: input.replyTo ?? null,
+    silent: input.silent === true,
+    viewOnce: input.viewOnce === true,
+    scheduledAt: input.scheduledAt ? Date.parse(input.scheduledAt) : null,
     localUri: input.attachment?.localUri ?? null,
     kind: input.attachment?.kind ?? 'image',
     durationMs: input.attachment?.durationMs ?? null,
@@ -214,6 +223,8 @@ export function onSent(listener: (message: Message) => void): () => void {
 
 let draining: Promise<void> | null = null;
 let rerunRequested = false;
+let scheduledTimer: ReturnType<typeof setTimeout> | null = null;
+let scheduledFor: number | null = null;
 
 /**
  * Tente de faire partir tous les messages en attente. Un seul drain à la fois :
@@ -237,9 +248,43 @@ export function drain(token: string): Promise<void> {
   return draining;
 }
 
+function scheduleNextDrain(token: string, items: OutboxItem[]): void {
+  const now = Date.now();
+  const next = items.reduce<number | null>((earliest, item) => {
+    if (
+      item.status === 'failed' ||
+      item.scheduledAt === null ||
+      item.scheduledAt <= now
+    ) {
+      return earliest;
+    }
+    if (earliest === null || item.scheduledAt < earliest) return item.scheduledAt;
+    return earliest;
+  }, null);
+  if (next === null) {
+    if (scheduledTimer) clearTimeout(scheduledTimer);
+    scheduledTimer = null;
+    scheduledFor = null;
+    return;
+  }
+  if (scheduledTimer && scheduledFor !== null && scheduledFor <= next) return;
+  if (scheduledTimer) clearTimeout(scheduledTimer);
+  scheduledFor = next;
+  scheduledTimer = setTimeout(() => {
+    scheduledTimer = null;
+    scheduledFor = null;
+    void drain(token);
+  }, Math.max(0, next - Date.now()));
+}
+
 /** Deux uploads au maximum, dans l'ordre de création des bulles. */
 async function drainOnce(token: string): Promise<void> {
-  const waiting = (await listOutbox()).filter((item) => item.status !== 'failed');
+  const all = await listOutbox();
+  const now = Date.now();
+  const waiting = all.filter(
+    (item) => item.status !== 'failed' && (item.scheduledAt === null || item.scheduledAt <= now),
+  );
+  scheduleNextDrain(token, all);
   let cursor = 0;
   let stopped = false;
   const worker = async () => {
@@ -348,6 +393,8 @@ async function deliver(token: string, item: OutboxItem): Promise<boolean> {
           (item.kind === 'sticker' ? stickerMetaOf(item) : null) ?? undefined,
         clientId: item.clientId,
         replyToId: item.replyTo ?? undefined,
+        silent: item.silent || undefined,
+        viewOnce: item.viewOnce || undefined,
       })) as Message | { error?: string };
 
     if ('error' in result && result.error) {
@@ -458,6 +505,9 @@ export function pendingMessage(
     deleted: false,
     replyTo: item.replyTo ? (quoteOf?.(item.replyTo) ?? null) : null,
     reactions: [],
+    silent: item.silent,
+    viewOnce: item.viewOnce,
+    scheduledAt: item.scheduledAt ? new Date(item.scheduledAt).toISOString() : null,
     createdAt: new Date(item.createdAt).toISOString(),
     sender,
   };

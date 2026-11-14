@@ -43,12 +43,15 @@ export function configureNotificationHandler(): void {
     return;
   }
   module.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
+    handleNotification: async (notification) => {
+      const silent = notification.request.content.data?.silent;
+      return {
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: silent !== '1' && silent !== true,
+        shouldSetBadge: true,
+      };
+    },
   });
 }
 

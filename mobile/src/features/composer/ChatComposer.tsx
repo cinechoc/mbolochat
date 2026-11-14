@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import {
   Animated,
+  Alert,
   BackHandler,
   Keyboard,
   KeyboardEvent,
@@ -43,6 +44,11 @@ import { Glass } from '@/components/glass';
 import { useTheme } from '@/hooks/use-theme';
 import { useThemePreference } from '@/lib/theme-preference';
 import { restoreFailedText } from './failed-text';
+import { LinkPreviewCard } from '../chat/ui/link-preview-card';
+import { SendOptionsSheet } from '../chat/ui/send-options-sheet';
+import { firstHttpUrl } from '../chat/model/link-preview';
+import type { TextSendOptions } from '../chat/model/send-options';
+import { fr } from '@/i18n/fr';
 
 export type ComposerTheme = PanelTheme & {
   inputBg: string;
@@ -76,7 +82,11 @@ export function composerThemeFor(theme: ThemePalette, scheme: ThemeScheme): Comp
 type Panel = 'none' | 'emoji' | 'plus';
 
 type Props = {
-  onSendText: (text: string) => void | Promise<void>;
+  onSendText: (text: string, options?: TextSendOptions) => void | Promise<void>;
+  /** Programmation, envoi silencieux et lecture unique (mode clair). */
+  sendOptionsEnabled?: boolean;
+  /** Aperçu réseau des liens : désactivé en chiffré pour ne pas exposer l'URL. */
+  linkPreviewsEnabled?: boolean;
   /** Référence « pack/sticker » à envoyer comme message sticker. */
   onSendSticker: (ref: string) => void;
   /** Sticker personnel : l'image locale est importée puis envoyée comme sticker. */
@@ -125,6 +135,8 @@ type Selection = { start: number; end: number };
 
 export function ChatComposer({
   onSendText,
+  sendOptionsEnabled = false,
+  linkPreviewsEnabled = true,
   onSendSticker,
   onSendPersonalSticker,
   recentGifs,
@@ -157,6 +169,7 @@ export function ChatComposer({
   const [forcedSelection, setForcedSelection] = useState<Selection | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [locked, setLocked] = useState(false);
+  const [sendOptionsOpen, setSendOptionsOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const cancellingRef = useRef(false);
   const grantAtRef = useRef(0);
@@ -167,6 +180,15 @@ export function ChatComposer({
   const selectionRef = useRef<Selection>({ start: 0, end: 0 });
   /** Le clavier visible appartient à la recherche du panneau, pas au champ. */
   const searchActiveRef = useRef(false);
+
+  // Le brouillon est lu de façon asynchrone : il arrive après le premier rendu
+  // et ne doit pas remplacer une saisie que l'utilisateur a déjà commencée.
+  useEffect(() => {
+    if (!initialText || textRef.current.length > 0) return;
+    textRef.current = initialText;
+    selectionRef.current = { start: initialText.length, end: initialText.length };
+    setText(initialText);
+  }, [initialText]);
 
   /* ------------------------ Clavier et bouton retour ------------------------ */
 
@@ -269,13 +291,13 @@ export function ChatComposer({
   }, [commit]);
 
   const sendingRef = useRef(false);
-  const handleSend = useCallback(async () => {
+  const runSend = useCallback(async (options?: TextSendOptions) => {
     const value = textRef.current.trim();
     if (!value || sendingRef.current) return;
     sendingRef.current = true;
     commit('', 0);
     try {
-      await onSendText(value);
+      await onSendText(value, options);
     } catch {
       const restored = restoreFailedText(textRef.current, value);
       commit(restored, restored.length);
@@ -283,6 +305,25 @@ export function ChatComposer({
       sendingRef.current = false;
     }
   }, [commit, onSendText]);
+
+  const handleSend = useCallback(() => void runSend(), [runSend]);
+  const handleSendSilent = useCallback(() => void runSend({ silent: true }), [runSend]);
+  const handleSendViewOnce = useCallback(() => void runSend({ viewOnce: true }), [runSend]);
+  const handleSchedule = useCallback(
+    (date: Date) => void runSend({ scheduledAt: date.toISOString() }),
+    [runSend],
+  );
+
+  const openSendOptions = useCallback(() => {
+    if (!sendOptionsEnabled) {
+      Alert.alert(
+        fr.chat.specialOptionsUnavailable.title,
+        fr.chat.specialOptionsUnavailable.body,
+      );
+      return;
+    }
+    setSendOptionsOpen(true);
+  }, [sendOptionsEnabled]);
 
   const handleSelectionChange = useCallback(
     (e: TextInputSelectionChangeEvent) => {
@@ -401,6 +442,10 @@ export function ChatComposer({
   /* ------------------------------ Rendu ------------------------------ */
 
   const hasText = text.trim().length > 0;
+  const draftUrl = useMemo(
+    () => (hasText && linkPreviewsEnabled ? firstHttpUrl(text) : null),
+    [hasText, linkPreviewsEnabled, text],
+  );
   // Emojis et stickers prennent la place du clavier ; le panneau « + » s'en
   // sert seulement de plafond (il épouse son contenu, voir panelSize.ts).
   const panelHeight = keyboardPanelHeight(lastKeyboardHeight);
@@ -418,6 +463,11 @@ export function ChatComposer({
 
   return (
     <View>
+      {draftUrl ? (
+        <View style={styles.previewWrap}>
+          <LinkPreviewCard url={draftUrl} compact />
+        </View>
+      ) : null}
       {mention ? (
         <View
           style={[styles.mentionPanel, { backgroundColor: t.panelBg, borderColor: t.border }]}>
@@ -551,7 +601,12 @@ export function ChatComposer({
             }}
           />
         ) : hasText ? (
-          <SendButton background={t.sendBg} color={t.accentText} onPress={handleSend} />
+          <SendButton
+            background={t.sendBg}
+            color={t.accentText}
+            onPress={handleSend}
+            onLongPress={openSendOptions}
+          />
         ) : (
           <IconButton
             name={panel === 'plus' ? 'close-circle-outline' : 'plus-circle-outline'}
@@ -596,6 +651,13 @@ export function ChatComposer({
       )}
 
       {showBottomInset ? <View style={{ height: bottomInset }} /> : null}
+      <SendOptionsSheet
+        visible={sendOptionsOpen}
+        onClose={() => setSendOptionsOpen(false)}
+        onSendSilent={handleSendSilent}
+        onSendViewOnce={handleSendViewOnce}
+        onSchedule={handleSchedule}
+      />
     </View>
   );
 }
@@ -640,10 +702,16 @@ function FieldButton({ label, onPress, children }: FieldButtonProps) {
   );
 }
 
-type SendButtonProps = { background: string; color: string; onPress: () => void };
+type SendButtonProps = {
+  background: string;
+  color: string;
+  onPress: () => void;
+  onLongPress?: () => void;
+};
 
 /** Bouton d'envoi : pastille, avion en papier SVG, apparition élastique. */
-function SendButton({ background, color, onPress }: SendButtonProps) {
+function SendButton({ background, color, onPress, onLongPress }: SendButtonProps) {
+  const longPressed = useRef(false);
   // Valeur animée créée une seule fois, sans ref lue pendant le rendu.
   const [scale] = useState(() => new Animated.Value(0.55));
   useEffect(() => {
@@ -652,9 +720,25 @@ function SendButton({ background, color, onPress }: SendButtonProps) {
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
       <Pressable
-        onPress={onPress}
+        onPress={() => {
+          if (longPressed.current) {
+            longPressed.current = false;
+            return;
+          }
+          onPress();
+        }}
+        onLongPress={
+          onLongPress
+            ? () => {
+                longPressed.current = true;
+                onLongPress();
+              }
+            : undefined
+        }
+        delayLongPress={380}
         accessibilityRole="button"
         accessibilityLabel="Envoyer"
+        accessibilityHint={onLongPress ? fr.chat.sendOptions.title : undefined}
         style={({ pressed }) => [
           styles.send,
           { backgroundColor: background, shadowColor: background },
@@ -703,6 +787,7 @@ function WaveformIcon({ color, size = 26 }: { color: string; size?: number }) {
 }
 
 const styles = StyleSheet.create({
+  previewWrap: { paddingHorizontal: 16, paddingBottom: 4 },
   mentionPanel: {
     position: 'absolute',
     left: 8,

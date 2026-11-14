@@ -1,5 +1,5 @@
 import { Reply } from 'lucide-react-native';
-import { useCallback, useMemo, useRef, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, type ComponentRef, type ReactNode } from 'react';
 import {
   Animated,
   PanResponder,
@@ -20,25 +20,34 @@ const TRIGGER = 56;
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
+export interface BubbleAnchor {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface SwipeableBubbleProps {
   mine: boolean;
   onReply: () => void;
   onPress?: () => void;
-  onLongPress: () => void;
+  onLongPress: (anchor?: BubbleAnchor) => void;
+  /** La lecture unique ne doit pas pouvoir être citée par glissement. */
+  swipeEnabled?: boolean;
   style: StyleProp<ViewStyle>;
   accessibilityLabel: string;
   children: ReactNode;
 }
 
 /**
- * Glisser la bulle vers l'extérieur (droite pour un reçu, gauche pour un
- * envoyé) prépare une réponse, comme dans WhatsApp.
+ * Glisser une bulle vers la droite prépare une réponse. Un appui long mesure
+ * la bulle pour que l’écran puisse placer sa barre de réactions juste au-dessus.
  *
  * Le geste est revendiqué en phase capture uniquement pour un mouvement
  * horizontal : le vertical reste au défilement de la liste et le tap à la
  * bulle.
  */
-function useSwipeToReply(direction: 1 | -1, onReply: () => void) {
+function useSwipeToReply(onReply: () => void, enabled: boolean) {
   const offset = useMemo(() => new Animated.Value(0), []);
   const startPageXRef = useRef(0);
 
@@ -57,13 +66,13 @@ function useSwipeToReply(direction: 1 | -1, onReply: () => void) {
       PanResponder.create({
         onStartShouldSetPanResponderCapture: () => false,
         onMoveShouldSetPanResponderCapture: (_event, gesture) => {
-          if (isSwipeLocked()) {
+          if (!enabled || isSwipeLocked()) {
             return false;
           }
           return (
             Math.abs(gesture.dx) > ACTIVATION &&
             Math.abs(gesture.dx) > Math.abs(gesture.dy) &&
-            gesture.dx * direction > 0
+            gesture.dx > 0
           );
         },
         onPanResponderTerminationRequest: () => true,
@@ -71,15 +80,15 @@ function useSwipeToReply(direction: 1 | -1, onReply: () => void) {
           startPageXRef.current = event.nativeEvent.pageX - gesture.dx;
         },
         onPanResponderMove: (_event, gesture) => {
-          offset.setValue(direction * Math.min(MAX_OFFSET, Math.abs(gesture.dx)));
+          offset.setValue(Math.min(MAX_OFFSET, Math.abs(gesture.dx)));
         },
         onPanResponderRelease: (event) => {
           // Le dernier move peut manquer (machine lente) : la position du
           // relâchement donne la distance réellement parcourue.
-          const finalDx = (event.nativeEvent.pageX - startPageXRef.current) * direction;
+          const finalDx = event.nativeEvent.pageX - startPageXRef.current;
           const triggered = finalDx >= TRIGGER;
           if (triggered) {
-            offset.setValue(direction * MAX_OFFSET);
+            offset.setValue(MAX_OFFSET);
           }
           reset();
           if (triggered) {
@@ -88,10 +97,10 @@ function useSwipeToReply(direction: 1 | -1, onReply: () => void) {
         },
         onPanResponderTerminate: reset,
       }),
-    [direction, offset, onReply, reset],
+    [enabled, offset, onReply, reset],
   );
 
-  const inputRange = direction === 1 ? [0, TRIGGER] : [-TRIGGER, 0];
+  const inputRange = [0, TRIGGER];
   const opacity = offset.interpolate({ inputRange, outputRange: [0, 1], extrapolate: 'clamp' });
   const scale = offset.interpolate({ inputRange, outputRange: [0.6, 1], extrapolate: 'clamp' });
 
@@ -103,34 +112,49 @@ export function SwipeableBubble({
   onReply,
   onPress,
   onLongPress,
+  swipeEnabled = true,
   style,
   accessibilityLabel,
   children,
 }: SwipeableBubbleProps) {
   const theme = useTheme();
+  const bubbleRef = useRef<ComponentRef<typeof View> | null>(null);
   const { translateX, hintOpacity, hintScale, responder } = useSwipeToReply(
-    mine ? -1 : 1,
     onReply,
+    swipeEnabled,
   );
+  const handleLongPress = useCallback(() => {
+    const node = bubbleRef.current;
+    if (!node) {
+      onLongPress();
+      return;
+    }
+    node.measureInWindow((x, y, width, height) => {
+      onLongPress({ x, y, width, height });
+    });
+  }, [onLongPress]);
 
   return (
     <View
       {...responder.panHandlers}
       style={[styles.row, mine ? styles.rowMine : styles.rowTheirs]}>
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.hint,
-          mine ? styles.hintRight : styles.hintLeft,
-          { opacity: hintOpacity, transform: [{ scale: hintScale }] },
-        ]}>
-        <View style={[styles.hintBadge, { backgroundColor: theme.backgroundElement }]}>
-          <Reply size={16} strokeWidth={2.4} color={theme.textSecondary} />
-        </View>
-      </Animated.View>
+      {swipeEnabled ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.hint,
+            styles.hintLeft,
+            { opacity: hintOpacity, transform: [{ scale: hintScale }] },
+          ]}>
+          <View style={[styles.hintBadge, { backgroundColor: theme.backgroundElement }]}>
+            <Reply size={16} strokeWidth={2.4} color={theme.textSecondary} />
+          </View>
+        </Animated.View>
+      ) : null}
       <AnimatedPressable
+        ref={bubbleRef}
         onPress={onPress}
-        onLongPress={onLongPress}
+        onLongPress={handleLongPress}
         delayLongPress={320}
         style={[style, { transform: [{ translateX }] }]}
         accessibilityRole="button"
@@ -160,9 +184,6 @@ const styles = StyleSheet.create({
   },
   hintLeft: {
     left: 12,
-  },
-  hintRight: {
-    right: 12,
   },
   hintBadge: {
     width: 30,

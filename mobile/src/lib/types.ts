@@ -223,6 +223,12 @@ export interface Message {
   replyTo: MessageQuote | null;
   /** Réactions emoji agrégées. */
   reactions: ReactionSummary[];
+  /** Envoi silencieux : aucune notification sonore ni vibration. */
+  silent?: boolean;
+  /** Lecture unique : le contenu est masqué jusqu’à ouverture. */
+  viewOnce?: boolean;
+  /** Date locale planifiée, présente seulement dans la file d’envoi. */
+  scheduledAt?: string | null;
   createdAt: string;
   sender: SenderInfo;
 }

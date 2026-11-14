@@ -10,21 +10,19 @@ import { PresenceSubtitle } from '@/features/presence/PresenceSubtitle';
 
 /**
  * En-tête de conversation partagé : mêmes marges, mêmes tailles de texte, même
- * fond de verre, même couleur d'icônes. L'écran classique y ajoute l'avatar de
- * groupe, la présence et les appels ; l'écran chiffré y met son cadenas.
+ * fond de verre, même couleur d'icônes. Le titre est aligné à gauche, sans
+ * avatar, et occupe tout l'espace entre le retour et les actions.
  */
 export function ChatHeaderTitle({
   title,
   subtitle,
   presenceUserId,
-  avatar,
   onPress,
   onPressLabel,
 }: {
   title: string;
   subtitle: string;
   presenceUserId?: string;
-  avatar?: ReactNode;
   onPress?: () => void;
   /** Libellé d'accessibilité du titre cliquable (profil du correspondant). */
   onPressLabel?: string;
@@ -32,9 +30,11 @@ export function ChatHeaderTitle({
   const chat = useChatColors();
   const content = (
     <View style={styles.headerTitleBody}>
-      {avatar}
       <View style={styles.headerTitleText}>
-        <ThemedText numberOfLines={1} style={[styles.headerName, { color: chat.headerText }]}>
+        <ThemedText
+          numberOfLines={1}
+          ellipsizeMode="tail"
+          style={[styles.headerName, { color: chat.headerText }]}>
           {title}
         </ThemedText>
         {presenceUserId ? (
@@ -44,7 +44,10 @@ export function ChatHeaderTitle({
             offlineColor={chat.headerSubtitle}
           />
         ) : subtitle ? (
-          <ThemedText numberOfLines={1} style={[styles.headerSubtitle, { color: chat.headerSubtitle }]}>
+          <ThemedText
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            style={[styles.headerSubtitle, { color: chat.headerSubtitle }]}>
             {subtitle}
           </ThemedText>
         ) : null}
@@ -61,7 +64,8 @@ export function ChatHeaderTitle({
       onPress={onPress}
       hitSlop={8}
       accessibilityRole={onPressLabel ? 'button' : undefined}
-      accessibilityLabel={onPressLabel}>
+      accessibilityLabel={onPressLabel}
+      style={styles.headerTitlePressable}>
       {content}
     </Pressable>
   );
@@ -75,7 +79,6 @@ export function ChatHeaderScreen({
   title,
   subtitle,
   presenceUserId,
-  avatar,
   onPressTitle,
   titleAccessibilityLabel,
   right,
@@ -84,7 +87,6 @@ export function ChatHeaderScreen({
   title: string;
   subtitle: string;
   presenceUserId?: string;
-  avatar?: ReactNode;
   onPressTitle?: () => void;
   titleAccessibilityLabel?: string;
   right?: ReactNode;
@@ -94,7 +96,8 @@ export function ChatHeaderScreen({
   return (
     <Stack.Screen
       options={{
-        headerTitleAlign: 'center',
+        // Le titre occupe la zone entre la flèche de retour et les actions.
+        headerTitleAlign: 'left',
         headerShadowVisible: false,
         headerTintColor: chat.headerText,
         // Fond verre : le contenu défile dessous, le flou le masque sans le cacher.
@@ -110,7 +113,6 @@ export function ChatHeaderScreen({
             title={title}
             subtitle={subtitle}
             presenceUserId={presenceUserId}
-            avatar={avatar}
             onPress={onPressTitle}
             onPressLabel={titleAccessibilityLabel}
           />
@@ -123,24 +125,27 @@ export function ChatHeaderScreen({
 
 const styles = StyleSheet.create({
   headerBackground: { flex: 1 },
+  headerTitlePressable: { flex: 1 },
   headerTitleBody: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
-    maxWidth: 240,
+    minWidth: 0,
+    paddingLeft: Spacing.threeHalf,
+    paddingRight: Spacing.two,
   },
-  headerTitleText: { flexShrink: 1, alignItems: 'center' },
+  headerTitleText: { flex: 1, alignItems: 'flex-start', minWidth: 0 },
   headerName: {
     fontSize: 17,
     lineHeight: 22,
     fontWeight: '500',
-    textAlign: 'center',
+    textAlign: 'left',
   },
-  headerSubtitle: { fontSize: 11, lineHeight: 14, textAlign: 'center' },
+  headerSubtitle: { fontSize: 11, lineHeight: 14, textAlign: 'left' },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three,
+    gap: Spacing.threeHalf,
     paddingRight: Spacing.two,
   },
 });

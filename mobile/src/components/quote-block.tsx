@@ -60,10 +60,13 @@ export function QuoteBlock({
     <View style={[styles.quote, tone.quote]}>
       <View style={[styles.quoteBar, tone.bar]} />
       <View style={styles.quoteBody}>
-        <ThemedText type="smallBold" style={tone.name}>
+        <ThemedText type="smallBold" numberOfLines={1} ellipsizeMode="tail" style={tone.name}>
           {quote.senderName}
         </ThemedText>
-        <EmojiText numberOfLines={1} style={[styles.quotePreviewText, tone.text]}>
+        <EmojiText
+          numberOfLines={1}
+          ellipsizeMode="tail"
+          style={[styles.quotePreviewText, tone.text]}>
           {quoteText(quote)}
         </EmojiText>
       </View>
@@ -87,13 +90,19 @@ const styles = StyleSheet.create({
   /** Citation : barre colorée et aperçu sur une ligne, dans la bulle de la réponse. */
   quote: {
     flexDirection: 'row',
-    gap: Spacing.one,
+    alignSelf: 'stretch',
+    minWidth: 190,
+    maxWidth: '100%',
+    gap: Spacing.two,
     borderRadius: Radii.xs,
-    paddingVertical: 4,
+    paddingVertical: Spacing.one,
+    paddingRight: Spacing.one,
     overflow: 'hidden',
   },
   quoteBar: {
-    width: 3,
+    width: 4,
+    minHeight: 34,
+    borderRadius: Radii.full,
   },
   quotePreviewText: {
     fontSize: 14,
@@ -102,6 +111,8 @@ const styles = StyleSheet.create({
   },
   quoteBody: {
     flex: 1,
-    paddingRight: Spacing.two,
+    minWidth: 0,
+    gap: 1,
+    paddingRight: Spacing.one,
   },
 });

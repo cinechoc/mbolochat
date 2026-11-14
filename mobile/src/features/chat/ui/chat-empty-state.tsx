@@ -1,5 +1,11 @@
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Radii, Spacing } from '@/constants/theme';
@@ -11,12 +17,18 @@ import { useTheme } from '@/hooks/use-theme';
  * accueille exactement comme la conversation claire.
  */
 export function ChatEmptyState({
+  style,
+  banner,
   avatar,
   title,
   text,
   suggestions,
   onSuggestion,
 }: {
+  /** Style d'inversion fourni par la FlatList inversée. */
+  style?: StyleProp<ViewStyle>;
+  /** Mention de sécurité affichée uniquement tant que la conversation est vide. */
+  banner?: ReactNode;
   avatar: ReactNode;
   title: string;
   text: string;
@@ -25,7 +37,8 @@ export function ChatEmptyState({
 }) {
   const theme = useTheme();
   return (
-    <View pointerEvents="box-none" style={styles.empty}>
+    <View pointerEvents="box-none" style={[styles.empty, style]}>
+      {banner}
       {avatar}
       <ThemedText type="sectionTitle" style={styles.emptyTitle}>
         {title}

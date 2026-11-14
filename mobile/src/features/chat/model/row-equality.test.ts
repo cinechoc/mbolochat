@@ -30,6 +30,7 @@ const capabilities: ChatCapabilities = {
   encrypted: false,
   pagination: 'server',
   receipts: 'ticks',
+  sendOptions: false,
 };
 
 const message = (id: string): ChatMessageView => ({
@@ -56,6 +57,7 @@ const message = (id: string): ChatMessageView => ({
 });
 
 const chat = {} as never;
+const pinnedMessageIds = new Set<string>();
 
 function props(row: ChatRow) {
   return {
@@ -65,6 +67,7 @@ function props(row: ChatRow) {
     chat,
     windowWidth: 400,
     token: 'token',
+    pinnedMessageIds,
   };
 }
 
@@ -108,6 +111,17 @@ describe('sameChatMessageRow', () => {
         props({ key: 'album', type: 'album', messages: [a, b], continuation: false }),
         props({ key: 'album', type: 'album', messages: [a, message('b')], continuation: false }),
       ),
+    ).toBe(false);
+  });
+
+  it('re-rend une ligne quand son état épinglé change', () => {
+    const view = message('m1');
+    const row: ChatRow = { key: 'm1', type: 'message', message: view, continuation: false };
+    expect(
+      sameChatMessageRow(props(row), {
+        ...props(row),
+        pinnedMessageIds: new Set(['m1']),
+      }),
     ).toBe(false);
   });
 });

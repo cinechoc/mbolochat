@@ -1,4 +1,14 @@
-import { AlertTriangle, Check, CheckCheck, Clock, Phone } from 'lucide-react-native';
+import {
+  AlertTriangle,
+  BellOff,
+  Bomb,
+  CalendarClock,
+  Check,
+  CheckCheck,
+  Clock,
+  Phone,
+  Pin,
+} from 'lucide-react-native';
 import { memo, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
@@ -12,9 +22,10 @@ import { emojiOnlyCount, splitEmoji, type EmojiSegment } from '@/features/emoji/
 import { ChatBubble } from '@/features/chat/ui/chat-bubble';
 import { ChatDateSeparator, ChatMessageRow as ChatRowLayout, ChatTimeSeparator } from '@/features/chat/ui/chat-rows';
 import { QuoteBlock } from '@/components/quote-block';
-import { SwipeableBubble } from '@/components/swipeable-bubble';
+import { SwipeableBubble, type BubbleAnchor } from '@/components/swipeable-bubble';
 import { ThemedText } from '@/components/themed-text';
 import { GifMessageBubble } from '@/features/media/GifMessageBubble';
+import { LinkPreviewInText } from './link-preview-card';
 import {
   DocumentMessageBubble,
   ImageMessageBubble,
@@ -22,11 +33,12 @@ import {
 } from '@/features/media/MediaMessage';
 import { mediaUrl } from '@/features/media/mediaUrl';
 import { StickerMessageBubble } from '@/features/stickers/StickerMessageBubble';
-import { findSticker } from '@/features/stickers/stickerPacks';
-import { StickerMessage, StickerView } from '@/features/stickers/StickerView';
+import { reactionPresentation } from '@/features/stickers/reactionPresentation';
+import { StickerMessage } from '@/features/stickers/StickerView';
 import { VoiceMessageBubble } from '@/features/voice-notes/VoiceMessageBubble';
 import { useTheme } from '@/hooks/use-theme';
 import { fr } from '@/i18n/fr';
+import { formatClock } from '@/lib/format';
 import { useTextScale } from '@/lib/text-scale';
 import type { MessageQuote } from '@/lib/types';
 import type { ChatRow } from '../model/rows';
@@ -57,13 +69,16 @@ export interface ChatMessageRowProps {
   seenByCountFor?: (message: ChatMessageView) => number;
   onOpenAlbum?: (messages: ChatMessageView[], index: number) => void;
   onReply: (message: ChatMessageView) => void;
-  onLongPress: (message: ChatMessageView) => void;
+  onLongPress: (message: ChatMessageView, anchor?: BubbleAnchor) => void;
   onRetry: (message: ChatMessageView) => void;
   onDiscard: (message: ChatMessageView) => void;
   onOpenMedia: (request: MediaOpenRequest) => void;
+  onOpenViewOnce: (message: ChatMessageView) => void;
   onToggleReaction: (message: ChatMessageView, reaction: string) => void;
   onPressAvatar?: (userId: string) => void;
   onSeenBy?: (message: ChatMessageView) => void;
+  /** Messages épinglés dans cette conversation, pour marquer leur bulle. */
+  pinnedMessageIds?: ReadonlySet<string>;
 }
 
 const TICK_ICON = {
@@ -92,33 +107,61 @@ function ReceiptBadge({
   chat: ChatPalette;
 }) {
   if (!message.mine || message.state === 'none') return null;
-  if (capabilities.receipts === 'delivered-opened') {
-    if (message.state === 'read') {
-      return (
-        <ThemedText type="micro" themeColor="textSecondary" accessibilityLabel={fr.e2eeChat.receiptRead}>
-          {fr.e2eeChat.receiptRead}
-        </ThemedText>
-      );
-    }
-    if (message.state === 'delivered') {
-      return (
-        <ThemedText
-          type="micro"
-          themeColor="textSecondary"
-          accessibilityLabel={fr.e2eeChat.receiptDelivered}>
-          {fr.e2eeChat.receiptDelivered}
-        </ThemedText>
-      );
-    }
-    return null;
-  }
   const state = message.state;
   const Icon = TICK_ICON[state];
   const color =
     state === 'read' ? chat.tickRead : state === 'failed' ? chat.error : chat.tick;
+  const label =
+    capabilities.receipts === 'delivered-opened' && state === 'delivered'
+      ? fr.e2eeChat.receiptDelivered
+      : capabilities.receipts === 'delivered-opened' && state === 'read'
+        ? fr.e2eeChat.receiptRead
+        : TICK_LABEL[state];
   return (
-    <View accessible accessibilityLabel={TICK_LABEL[state]}>
-      <Icon size={state === 'failed' ? 14 : 16} strokeWidth={2.6} color={color} />
+    <View accessible accessibilityLabel={label}>
+      <Icon size={state === 'failed' ? 13 : 14} strokeWidth={2.6} color={color} />
+    </View>
+  );
+}
+
+function MessageMeta({
+  message,
+  capabilities,
+  chat,
+}: {
+  message: ChatMessageView;
+  capabilities: ChatCapabilities;
+  chat: ChatPalette;
+}) {
+  const scheduled =
+    message.state === 'pending' && message.scheduledAt ? message.scheduledAt : null;
+  return (
+    <View style={styles.metaRow}>
+      {scheduled ? (
+        <View accessible accessibilityLabel={fr.chat.sendOptions.schedule}>
+          <CalendarClock size={12} strokeWidth={2.4} color={chat.secondaryText} />
+        </View>
+      ) : null}
+      <ThemedText
+        type="micro"
+        style={[styles.metaTime, { color: message.mine ? chat.mineText : chat.theirText }]}>
+        {formatClock(scheduled ?? message.createdAt)}
+      </ThemedText>
+      {message.edited ? (
+        <ThemedText
+          type="micro"
+          style={[styles.metaTime, { color: message.mine ? chat.mineText : chat.theirText }]}>
+          {fr.chat.unified.edited}
+        </ThemedText>
+      ) : null}
+      {message.silent ? (
+        <View accessible accessibilityLabel={fr.chat.sendOptions.silent}>
+          <BellOff size={12} strokeWidth={2.4} color={chat.secondaryText} />
+        </View>
+      ) : null}
+      {scheduled ? null : (
+        <ReceiptBadge message={message} capabilities={capabilities} chat={chat} />
+      )}
     </View>
   );
 }
@@ -173,20 +216,16 @@ function ReactionChips({
   const theme = useTheme();
   if (message.reactions.length === 0) return null;
   return (
-    <View style={[styles.reactions, message.mine ? styles.reactionsMine : null]}>
+    <View style={[styles.reactions, message.mine ? styles.reactionsMine : styles.reactionsTheirs]}>
       {message.reactions.map((reaction) => {
-        const sticker = findSticker(reaction.reaction);
-        const label = sticker
-          ? sticker.kind === 'image'
-            ? (sticker.name ?? sticker.alt)
-            : sticker.label
-          : fr.chat.unified.reactionFallback;
+        const presentation = reactionPresentation(reaction.reaction);
+        if (!presentation) return null;
         return (
           <Pressable
             key={reaction.reaction}
             onPress={() => onToggle(message, reaction.reaction)}
             accessibilityRole="button"
-            accessibilityLabel={`${label}, ${reaction.count}`}
+            accessibilityLabel={`${presentation.label}, ${reaction.count}`}
             style={[
               styles.reactionChip,
               {
@@ -194,7 +233,7 @@ function ReactionChips({
                 borderColor: reaction.mine ? theme.accent : theme.border,
               },
             ]}>
-            {sticker ? <StickerView sticker={sticker} size={22} /> : null}
+            <ThemedText style={styles.reactionEmoji}>{presentation.emoji}</ThemedText>
             {reaction.count > 1 ? (
               <ThemedText type="micro" themeColor="textSecondary">
                 {reaction.count}
@@ -218,6 +257,7 @@ function MessageBody({
   onRetry,
   onDiscard,
   onOpenMedia,
+  onOpenViewOnce,
   token,
 }: {
   message: ChatMessageView;
@@ -226,10 +266,11 @@ function MessageBody({
   chat: ChatPalette;
   bubbleStyle: { maxWidth: number };
   onReply: (message: ChatMessageView) => void;
-  onLongPress: (message: ChatMessageView) => void;
+  onLongPress: (message: ChatMessageView, anchor?: BubbleAnchor) => void;
   onRetry: (message: ChatMessageView) => void;
   onDiscard: (message: ChatMessageView) => void;
   onOpenMedia: (request: MediaOpenRequest) => void;
+  onOpenViewOnce: (message: ChatMessageView) => void;
   token: string;
 }) {
   const textScale = useTextScale();
@@ -239,17 +280,41 @@ function MessageBody({
   const accessibleLabel = failed
     ? fr.chat.retrySend
     : fr.chat.unified.messageOptions;
+  const meta = <MessageMeta message={message} capabilities={capabilities} chat={chat} />;
 
   const swipe = (content: ReactNode) => (
     <SwipeableBubble
       mine={message.mine}
       onReply={() => onReply(message)}
-      onLongPress={() => onLongPress(message)}
+      onLongPress={(anchor) => onLongPress(message, anchor)}
+      swipeEnabled={!message.viewOnce}
       style={bubbleStyle}
       accessibilityLabel={accessibleLabel}>
       {content}
     </SwipeableBubble>
   );
+
+  if (message.viewOnce) {
+    return swipe(
+      <View style={[styles.viewOnceBlock, message.mine ? styles.alignEnd : null]}>
+        <Pressable
+          onPress={() => onOpenViewOnce(message)}
+          accessibilityRole="button"
+          accessibilityLabel={fr.chat.viewOnce.opening}
+          style={({ pressed }) => [
+            styles.viewOnceButton,
+            { borderColor: chat.border, backgroundColor: chat.theirBubble },
+            pressed && { opacity: 0.72 },
+          ]}>
+          <Bomb size={20} strokeWidth={2.1} color={chat.primaryText} />
+          <ThemedText type="smallBold" style={{ color: chat.primaryText }}>
+            {fr.chat.viewOnce.opening}
+          </ThemedText>
+        </Pressable>
+        {meta}
+      </View>,
+    );
+  }
 
   if (message.stickerRef) {
     return swipe(
@@ -260,6 +325,7 @@ function MessageBody({
           </View>
         ) : null}
         <StickerMessage stickerRef={message.stickerRef} size={140} />
+        {meta}
       </View>,
     );
   }
@@ -299,6 +365,7 @@ function MessageBody({
               })
             }
           />
+          {meta}
         </View>,
       );
     }
@@ -323,6 +390,7 @@ function MessageBody({
         {failed ? (
           <RetryActions message={message} chat={chat} onRetry={onRetry} onDiscard={onDiscard} />
         ) : null}
+        {meta}
       </View>,
     );
   }
@@ -350,6 +418,7 @@ function MessageBody({
         {failed ? (
           <RetryActions message={message} chat={chat} onRetry={onRetry} onDiscard={onDiscard} />
         ) : null}
+        {meta}
       </View>,
     );
   }
@@ -430,13 +499,15 @@ function MessageBody({
           />
         )}
         {message.body ? (
-          <ThemedText style={[styles.caption, { color: chat.primaryText }]}>
-            {message.body}
-          </ThemedText>
+          <>
+            {!capabilities.encrypted ? <LinkPreviewInText text={message.body} /> : null}
+            <MessageText text={message.body} style={[styles.caption, { color: chat.primaryText }]} />
+          </>
         ) : null}
         {failed ? (
           <RetryActions message={message} chat={chat} onRetry={onRetry} onDiscard={onDiscard} />
         ) : null}
+        {meta}
       </View>,
     );
   }
@@ -464,14 +535,10 @@ function MessageBody({
         ) : (
           <MessageText text={trimmed} style={[styles.emojiText, { color: chat.primaryText }]} />
         )}
-        {message.edited ? (
-          <ThemedText type="micro" themeColor="textSecondary">
-            {fr.chat.unified.edited}
-          </ThemedText>
-        ) : null}
         {failed ? (
           <RetryActions message={message} chat={chat} onRetry={onRetry} onDiscard={onDiscard} />
         ) : null}
+        {meta}
       </View>,
     );
   }
@@ -479,6 +546,7 @@ function MessageBody({
   return swipe(
     <ChatBubble mine={message.mine}>
       {quote ? <QuoteBlock quote={quote} mine={message.mine} /> : null}
+      {!capabilities.encrypted ? <LinkPreviewInText text={message.body} /> : null}
       {message.unreadable ? (
         <ThemedText type="small" style={[styles.unreadable, { color: chat.secondaryText }]}>
           {fr.chat.unified.unreadableMessage}
@@ -498,20 +566,17 @@ function MessageBody({
           ]}
         />
       )}
-      {message.edited ? (
-        <ThemedText type="micro" themeColor="textSecondary">
-          {fr.chat.unified.edited}
-        </ThemedText>
-      ) : null}
       {failed ? (
         <RetryActions message={message} chat={chat} onRetry={onRetry} onDiscard={onDiscard} />
       ) : null}
+      {meta}
     </ChatBubble>,
   );
 }
 
 function ChatMessageRowComponent(props: ChatMessageRowProps) {
   const { row, currentUser, isGroup, capabilities, chat, token } = props;
+  const theme = useTheme();
 
   if (row.type === 'date') {
     return <ChatDateSeparator label={row.label} />;
@@ -592,17 +657,27 @@ function ChatMessageRowComponent(props: ChatMessageRowProps) {
   }
   if (message.deleted) {
     return (
-      <View style={styles.systemRow}>
-        <ThemedText style={{ color: chat.systemText }}>
-          {capabilities.encrypted
-            ? fr.chat.unified.deletedForEveryoneEncrypted
-            : fr.chat.unified.deletedMessage}
-        </ThemedText>
-      </View>
+      <ChatRowLayout
+        mine={message.mine}
+        continuation={row.continuation}
+        avatarName={message.mine ? currentUser.displayName : message.sender.displayName}
+        avatarUri={message.mine ? currentUser.avatarUrl : message.sender.avatarUrl}
+        gender={message.mine ? currentUser.gender : message.sender.gender}>
+        <View
+          style={[
+            styles.deletedBubble,
+            { backgroundColor: chat.theirBubble, borderColor: chat.border },
+          ]}>
+          <ThemedText type="small" style={[styles.deletedText, { color: chat.secondaryText }]}>
+            {fr.chat.unified.deletedForEveryone}
+          </ThemedText>
+        </View>
+      </ChatRowLayout>
     );
   }
 
   const quote = message.quote ?? props.resolveQuote(message.quoteId);
+  const pinned = props.pinnedMessageIds?.has(message.id) ?? false;
   return (
     <ChatRowLayout
       mine={message.mine}
@@ -623,35 +698,41 @@ function ChatMessageRowComponent(props: ChatMessageRowProps) {
             {message.sender.displayName}
           </ThemedText>
         ) : null}
-        <MessageBody
-          message={message}
-          quote={quote}
-          capabilities={capabilities}
-          chat={chat}
-          bubbleStyle={props.bubbleStyle}
-          onReply={props.onReply}
-          onLongPress={props.onLongPress}
-          onRetry={props.onRetry}
-          onDiscard={props.onDiscard}
-          onOpenMedia={props.onOpenMedia}
-          token={token}
-        />
-        {capabilities.reactions ? (
-          <ReactionChips
+        <View
+          style={[
+            styles.messageStack,
+            message.reactions.length > 0 ? styles.messageStackWithReactions : null,
+          ]}>
+          {pinned ? (
+            <View
+              accessible
+              accessibilityLabel={fr.chat.unified.pinnedMessage}
+              pointerEvents="none"
+              style={[
+                styles.pinBadge,
+                { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+              ]}>
+              <Pin size={10} strokeWidth={2.6} color={theme.accent} />
+            </View>
+          ) : null}
+          <MessageBody
             message={message}
-            onToggle={props.onToggleReaction}
+            quote={quote}
+            capabilities={capabilities}
+            chat={chat}
+            bubbleStyle={props.bubbleStyle}
+            onReply={props.onReply}
+            onLongPress={props.onLongPress}
+            onRetry={props.onRetry}
+            onDiscard={props.onDiscard}
+            onOpenMedia={props.onOpenMedia}
+            onOpenViewOnce={props.onOpenViewOnce}
+            token={token}
           />
-        ) : null}
-        {message.mine && capabilities.receipts === 'ticks' ? (
-          <View style={styles.ticksRow}>
-            <ReceiptBadge message={message} capabilities={capabilities} chat={chat} />
-          </View>
-        ) : null}
-        {message.mine && capabilities.receipts === 'delivered-opened' ? (
-          <View style={styles.ticksRow}>
-            <ReceiptBadge message={message} capabilities={capabilities} chat={chat} />
-          </View>
-        ) : null}
+          {capabilities.reactions && !message.viewOnce ? (
+            <ReactionChips message={message} onToggle={props.onToggleReaction} />
+          ) : null}
+        </View>
         {message.mine && isGroup && (props.seenByCountFor?.(message) ?? 0) > 0 ? (
           <Pressable
             onPress={() => props.onSeenBy?.(message)}
@@ -682,23 +763,73 @@ const styles = StyleSheet.create({
   caption: { fontSize: 15, lineHeight: 20 },
   emojiBlock: { maxWidth: 180, gap: 4 },
   emojiText: { textAlign: 'center' },
+  viewOnceBlock: { gap: 4, maxWidth: '100%' },
+  viewOnceButton: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radii.sm,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
   text: { fontSize: 16, lineHeight: 21 },
   unreadable: { fontStyle: 'italic', opacity: 0.8 },
   failedBlock: { gap: Spacing.half, maxWidth: '100%' },
   failedText: { fontSize: 11, lineHeight: 14 },
   failedActions: { flexDirection: 'row', gap: Spacing.three },
-  reactions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.one, marginTop: Spacing.half },
-  reactionsMine: { justifyContent: 'flex-end' },
+  messageStack: { position: 'relative', maxWidth: '100%' },
+  pinBadge: {
+    position: 'absolute',
+    left: 4,
+    top: -10,
+    width: 18,
+    height: 18,
+    borderRadius: Radii.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 3,
+  },
+  messageStackWithReactions: { marginBottom: Spacing.threeHalf },
+  reactions: {
+    position: 'absolute',
+    bottom: -9,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.one,
+    zIndex: 2,
+  },
+  reactionsTheirs: { right: 6, justifyContent: 'flex-end' },
+  reactionsMine: { left: 6 },
   reactionChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
-    paddingHorizontal: 4,
-    paddingVertical: 2,
+    gap: 3,
+    minHeight: 24,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: Radii.full,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  reactionEmoji: { fontSize: 14, lineHeight: 18 },
+  deletedBubble: {
+    maxWidth: '100%',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: Radii.sm,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  ticksRow: { flexDirection: 'row', alignSelf: 'flex-end', marginTop: Spacing.half },
+  deletedText: { fontStyle: 'italic' },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 3,
+    marginTop: Spacing.half,
+  },
+  metaTime: { fontSize: 10, lineHeight: 12, opacity: 0.66 },
   seenBy: { alignSelf: 'flex-end' },
   senderName: { fontSize: 12, lineHeight: 16 },
   systemRow: {

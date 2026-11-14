@@ -13,10 +13,10 @@ describe('disposition WeChat des rangées', () => {
     });
   });
 
-  it('message envoyé : avatar à droite, bulle alignée à droite', () => {
+  it('message envoyé : aucun avatar, bulle alignée à droite', () => {
     const layout = messageRowLayout(true, false);
     expect(layout).toMatchObject({
-      avatar: 'right',
+      avatar: 'none',
       spacer: 'none',
       align: 'flex-end',
       bubbleFirst: true,
@@ -33,27 +33,29 @@ describe('disposition WeChat des rangées', () => {
     });
   });
 
-  it('continuation envoyée : pas d’avatar, place réservée à droite', () => {
+  it('continuation envoyée : toujours aucun avatar ni espace réservé', () => {
     const layout = messageRowLayout(true, true);
     expect(layout).toMatchObject({
       avatar: 'none',
-      spacer: 'right',
+      spacer: 'none',
       align: 'flex-end',
       bubbleFirst: true,
     });
   });
 
-  it('la place de l’avatar est toujours réservée, même sans avatar dessiné', () => {
-    for (const mine of [true, false]) {
-      const side = mine ? 'right' : 'left';
-      const first = messageRowLayout(mine, false);
-      const next = messageRowLayout(mine, true);
-      // L'avatar n'est dessiné qu'une fois par groupe, mais sa colonne existe
-      // toujours : sans cela les bulles se décaleraient d'une ligne à l'autre.
-      expect(first.avatar).toBe(side);
-      expect(first.spacer).toBe('none');
-      expect(next.avatar).toBe('none');
-      expect(next.spacer).toBe(side);
+  it('réserve la place de l’avatar uniquement pour les messages reçus', () => {
+    const first = messageRowLayout(false, false);
+    const next = messageRowLayout(false, true);
+    // L'avatar n'est dessiné qu'une fois par groupe, mais sa colonne existe
+    // toujours à gauche : sans cela les bulles reçues se décaleraient.
+    expect(first.avatar).toBe('left');
+    expect(first.spacer).toBe('none');
+    expect(next.avatar).toBe('none');
+    expect(next.spacer).toBe('left');
+    for (const continuation of [false, true]) {
+      const sent = messageRowLayout(true, continuation);
+      expect(sent.avatar).toBe('none');
+      expect(sent.spacer).toBe('none');
     }
   });
 });

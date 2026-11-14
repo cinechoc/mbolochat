@@ -89,6 +89,10 @@ export interface MessageDto {
   clientId: string | null;
   /** Message retiré pour tous : contenu et pièce jointe ne sont plus en base. */
   deleted: boolean;
+  /** Envoi silencieux : le push ne doit ni sonner ni vibrer. */
+  silent: boolean;
+  /** Lecture unique : les clients masquent le contenu avant ouverture. */
+  viewOnce: boolean;
   /** Citation d'une réponse, null pour un message simple. */
   replyTo: MessageQuoteDto | null;
   /** Réactions emoji agrégées, dans l'ordre d'affichage. */
@@ -281,6 +285,8 @@ const messageColumns = {
   attachment: messages.attachment,
   encryptedAttachment: messages.encryptedAttachment,
   clientId: messages.clientId,
+  silent: messages.silent,
+  viewOnce: messages.viewOnce,
   deletedAt: messages.deletedAt,
   replyToId: messages.replyToId,
   createdAt: messages.createdAt,
@@ -311,6 +317,8 @@ interface MessageRow {
   attachment: MessageAttachment | null;
   encryptedAttachment: E2eeAttachmentRef | null;
   clientId: string | null;
+  silent: boolean;
+  viewOnce: boolean;
   deletedAt: Date | null;
   replyToId: string | null;
   createdAt: Date;
@@ -362,6 +370,8 @@ function toMessageDto(row: MessageRow, reactions: ReactionSummary[] = []): Messa
     encryptedAttachment: deleted ? null : (row.encryptedAttachment ?? null),
     clientId: row.clientId ?? null,
     deleted,
+    silent: row.silent,
+    viewOnce: row.viewOnce,
     replyTo: toQuoteDto(row),
     reactions,
     createdAt: row.createdAt,
@@ -1243,6 +1253,8 @@ export class ConversationsService {
       encryptedAttachment: null,
       clientId: null,
       deleted: false,
+      silent: false,
+      viewOnce: false,
       replyTo: null,
       reactions: [],
       createdAt: stored.createdAt,
@@ -1842,6 +1854,8 @@ export class ConversationsService {
     payload?: string,
     senderDeviceId?: string,
     payloadType?: 'prekey' | 'normal',
+    silent = false,
+    viewOnce = false,
   ): Promise<MessageDto> {
     if (!isMessageType(messageType)) {
       throw new BadRequestException('Type de message invalide');
@@ -2028,6 +2042,8 @@ export class ConversationsService {
           encryptedAttachment: encryption === 'v1' ? encryptedAttachment : null,
           clientId: clientId ?? null,
           replyToId: replyToId ?? null,
+          silent,
+          viewOnce,
         })
         .onConflictDoNothing({ target: [messages.senderId, messages.clientId] })
         .returning();
@@ -2083,6 +2099,8 @@ export class ConversationsService {
       encryptedAttachment: stored.encryptedAttachment ?? null,
       clientId: stored.clientId ?? null,
       deleted: stored.deletedAt !== null,
+      silent: stored.silent,
+      viewOnce: stored.viewOnce,
       // Un envoi sur deux ne cite rien : on ne paie la jointure que si c'est le cas.
       replyTo: stored.replyToId ? await this.quoteOf(stored.replyToId) : null,
       reactions: [],
@@ -2279,6 +2297,8 @@ export class ConversationsService {
       attachment: MessageAttachment | null;
       encryptedAttachment: E2eeAttachmentRef | null;
       clientId: string | null;
+      silent: boolean;
+      viewOnce: boolean;
       deletedAt: Date | string | null;
       createdAt: Date;
       senderId: string;
@@ -2300,6 +2320,8 @@ export class ConversationsService {
         m.attachment,
         m.encrypted_attachment as "encryptedAttachment",
         m.client_id as "clientId",
+        m.silent,
+        m.view_once as "viewOnce",
         m.deleted_at as "deletedAt",
         m.created_at as "createdAt",
         u.id as "senderId",
@@ -2324,7 +2346,8 @@ export class ConversationsService {
         id: row.id,
         conversationId: row.conversationId,
         type: messageTypeOf(row.type),
-        content: deleted ? '' : row.content,
+        // Une lecture unique ne doit pas apparaître dans l'aperçu de la liste.
+        content: deleted || row.viewOnce ? '' : row.content,
         encryption: row.encryption === 'v1' ? 'v1' : 'none',
         payload: deleted ? null : (row.payload ?? null),
         payloadType:
@@ -2335,6 +2358,8 @@ export class ConversationsService {
         encryptedAttachment: deleted ? null : (row.encryptedAttachment ?? null),
         clientId: row.clientId ?? null,
         deleted,
+        silent: row.silent,
+        viewOnce: row.viewOnce,
         // L'aperçu d'une liste n'affiche pas la citation : jointure inutile ici.
         replyTo: null,
         // Les réactions ne servent pas dans l'aperçu de la liste.

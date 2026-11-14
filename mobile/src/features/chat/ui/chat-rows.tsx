@@ -21,8 +21,12 @@ export function ChatDateSeparator({ label }: { label: string }) {
   const theme = useTheme();
   return (
     <View style={styles.dateRow}>
-      <ThemedView style={[styles.datePill, { backgroundColor: theme.backgroundElement }]}>
-        <ThemedText type="small" style={[styles.dateText, { color: chat.dateText }]}>
+      <ThemedView
+        style={[
+          styles.datePill,
+          { backgroundColor: theme.backgroundElement, borderColor: theme.border },
+        ]}>
+        <ThemedText type="micro" style={[styles.dateText, { color: chat.dateText }]}>
           {label}
         </ThemedText>
       </ThemedView>
@@ -65,7 +69,9 @@ export function ChatMessageRow({
   const layout = messageRowLayout(mine, Boolean(continuation));
   const avatar =
     layout.avatar === 'none' ? (
-      <View style={styles.avatarSpacer} />
+      layout.spacer === 'left' ? (
+        <View style={styles.avatarSpacer} />
+      ) : null
     ) : (
       <Pressable
         disabled={!onAvatarPress}
@@ -78,8 +84,7 @@ export function ChatMessageRow({
           uri={avatarUri ?? undefined}
           size={ROW_AVATAR_SIZE}
           gender={gender}
-          shape="rounded"
-          style={styles.messageAvatar}
+          shape="circle"
         />
       </Pressable>
     );
@@ -87,7 +92,11 @@ export function ChatMessageRow({
     <View style={[styles.bubbleColumn, { alignItems: layout.align }]}>{children}</View>
   );
   return (
-    <View style={styles.messageRow}>
+    <View
+      style={[
+        styles.messageRow,
+        continuation ? styles.messageRowContinuation : styles.messageRowNewGroup,
+      ]}>
       {layout.bubbleFirst ? column : avatar}
       {layout.bubbleFirst ? avatar : column}
     </View>
@@ -97,23 +106,24 @@ export function ChatMessageRow({
 export const chatRowStyles = StyleSheet.create({
   dateRow: { alignItems: 'center', paddingVertical: Spacing.two },
   datePill: {
-    paddingHorizontal: Spacing.two,
-    paddingVertical: 3,
-    borderRadius: Radii.sm,
+    paddingHorizontal: Spacing.threeHalf,
+    paddingVertical: Spacing.one,
+    borderRadius: Radii.full,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   dateText: { fontSize: 11, lineHeight: 14 },
   timeRow: { alignItems: 'center', paddingVertical: Spacing.one },
   timeText: { fontSize: 11, lineHeight: 14 },
   messageRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'flex-end',
     gap: Spacing.two,
-    marginVertical: Spacing.one,
   },
+  messageRowContinuation: { marginTop: Spacing.one },
+  messageRowNewGroup: { marginTop: Spacing.threeHalf },
   bubbleColumn: { flex: 1, minWidth: 0 },
-  /** Réserve la place de l'avatar pour les messages consécutifs. */
+  /** Réserve la place de l'avatar rond des messages reçus consécutifs. */
   avatarSpacer: { width: ROW_AVATAR_SIZE },
-  messageAvatar: { borderRadius: Radii.md },
 });
 
 const styles = chatRowStyles;

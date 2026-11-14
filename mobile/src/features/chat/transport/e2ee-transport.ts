@@ -7,6 +7,7 @@ import { isEphemeralTtl } from '@/features/e2ee/payload';
 import type { Message, MessageReceipt, ReactionSummary } from '@/lib/types';
 import { MessageIndex } from '../model/message-index';
 import { storedMessageToView } from '../model/message-view';
+import type { TextSendOptions } from '../model/send-options';
 import type { E2eeTransportDeps, E2eeTransportOptions } from './deps';
 import {
   PlaintextConversationError,
@@ -42,6 +43,7 @@ const E2EE_CAPABILITIES: ChatCapabilities = {
   encrypted: true,
   pagination: 'local',
   receipts: 'delivered-opened',
+  sendOptions: false,
 };
 
 interface ReceiptPayload {
@@ -271,7 +273,14 @@ export class E2eeTransport implements ChatTransport {
     await db?.closeAsync().catch(() => undefined);
   }
 
-  async sendText(text: string, replyToId: string | null): Promise<void> {
+  async sendText(
+    text: string,
+    replyToId: string | null,
+    options?: TextSendOptions,
+  ): Promise<void> {
+    if (options) {
+      throw new UnsupportedCapabilityError('sendOptions');
+    }
     if (!this.capabilities.replies) {
       throw new UnsupportedCapabilityError('replies');
     }
@@ -491,6 +500,17 @@ export class E2eeTransport implements ChatTransport {
     await this.deps.db.deleteLocalMessage(db, id).catch(() => undefined);
     this.handlers?.onMessageRemoved(id, false);
     await this.deps.socket.deleteMessage(this.token, this.conversationId, id, false);
+  }
+
+  async consumeViewOnce(id: string): Promise<void> {
+    const { db } = await this.credentials();
+    this.stored.delete(id);
+    this.index.remove(id);
+    await this.deps.db.deleteLocalMessage(db, id).catch(() => undefined);
+    this.handlers?.onMessageRemoved(id, false);
+    void this.deps.socket
+      .deleteMessage(this.token, this.conversationId, id, false)
+      .catch(() => undefined);
   }
 
   async toggleReaction(id: string, reaction: string): Promise<void> {

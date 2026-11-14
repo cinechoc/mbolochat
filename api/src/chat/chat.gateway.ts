@@ -150,6 +150,10 @@ export class ChatGateway
       sticker?: unknown;
       clientId?: string;
       replyToId?: string;
+      /** Envoi sans son ni vibration chez le destinataire. */
+      silent?: boolean;
+      /** Lecture unique : contenu masqué jusqu’à ouverture. */
+      viewOnce?: boolean;
       /** `v1` : enveloppe chiffrée opaque (conversation E2EE). */
       encryption?: 'none' | 'v1';
       /** Enveloppe chiffrée base64. */
@@ -187,6 +191,14 @@ export class ChatGateway
       typeof body?.replyToId === 'string' && body.replyToId.length > 0 && body.replyToId.length <= 64
         ? body.replyToId
         : undefined;
+    if (body?.silent !== undefined && typeof body.silent !== 'boolean') {
+      throw new WsException('silent doit être un booléen');
+    }
+    if (body?.viewOnce !== undefined && typeof body.viewOnce !== 'boolean') {
+      throw new WsException('viewOnce doit être un booléen');
+    }
+    const silent = body?.silent === true;
+    const viewOnce = body?.viewOnce === true;
     // Pièce jointe GIF externe (GIPHY) : le client a choisi l'URL dans l'API
     // GIPHY ; le serveur se contente de vérifier l'allowlist des CDN.
     let gifAttachment: ReturnType<typeof normalizeGifAttachment> | null = null;
@@ -264,6 +276,8 @@ export class ChatGateway
         envelopePayload,
         deviceId,
         payloadType,
+        silent,
+        viewOnce,
       )
       .catch((error: unknown) => {
         // L'acquittement porte l'erreur : le client peut l'afficher

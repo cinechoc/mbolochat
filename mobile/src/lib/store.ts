@@ -21,6 +21,12 @@ export interface OutboxItem {
   content: string;
   /** Message cité par une réponse. */
   replyTo: string | null;
+  /** Envoi sans son ni vibration. */
+  silent: boolean;
+  /** Lecture unique : le contenu est masqué côté interface. */
+  viewOnce: boolean;
+  /** Envoi différé : timestamp local, null pour un envoi immédiat. */
+  scheduledAt: number | null;
   /** Média en attente d'import : chemin local, pas sur le serveur. */
   localUri: string | null;
   /** Ce que porte ce fichier local. GIF : pièce jointe externe sans import. */
@@ -102,6 +108,9 @@ type Row = {
   sticker_ref: string | null;
   content: string;
   reply_to: string | null;
+  silent: number;
+  view_once: number;
+  scheduled_at: number | null;
   local_uri: string | null;
   kind: string;
   duration_ms: number | null;
@@ -126,6 +135,9 @@ create table if not exists outbox (
   sticker_ref text,
   content text not null default '',
   reply_to text,
+  silent integer not null default 0,
+  view_once integer not null default 0,
+  scheduled_at integer,
   local_uri text,
   kind text not null default 'image',
   duration_ms integer,
@@ -156,6 +168,9 @@ const toParams = (item: OutboxItem): Record<string, string | number | null> => (
   $sticker_ref: item.stickerRef,
   $content: item.content,
   $reply_to: item.replyTo,
+  $silent: item.silent ? 1 : 0,
+  $view_once: item.viewOnce ? 1 : 0,
+  $scheduled_at: item.scheduledAt,
   $local_uri: item.localUri,
   $kind: item.kind,
   $duration_ms: item.durationMs,
@@ -179,6 +194,9 @@ const fromRow = (row: Row): OutboxItem => ({
   stickerRef: row.sticker_ref,
   content: row.content,
   replyTo: row.reply_to,
+  silent: row.silent === 1,
+  viewOnce: row.view_once === 1,
+  scheduledAt: row.scheduled_at,
   localUri: row.local_uri,
   kind:
     row.kind === 'audio' ||
@@ -237,6 +255,12 @@ async function openSqlite(): Promise<Database> {
     await instance.execAsync("alter table outbox add column message_type text not null default 'text';");
   if (!names.has('sticker_ref'))
     await instance.execAsync('alter table outbox add column sticker_ref text;');
+  if (!names.has('silent'))
+    await instance.execAsync('alter table outbox add column silent integer not null default 0;');
+  if (!names.has('view_once'))
+    await instance.execAsync('alter table outbox add column view_once integer not null default 0;');
+  if (!names.has('scheduled_at'))
+    await instance.execAsync('alter table outbox add column scheduled_at integer;');
   return instance;
 }
 
@@ -244,13 +268,16 @@ function sqliteStore(db: Database): LocalStore {
   return {
     async save(item) {
       await db.runAsync(
-        `insert into outbox (client_id, conversation_id, message_type, sticker_ref, content, reply_to, local_uri, kind, duration_ms, mime, width, height, name, size, upload_id, external, status, attempts, error, created_at)
-         values ($client_id, $conversation_id, $message_type, $sticker_ref, $content, $reply_to, $local_uri, $kind, $duration_ms, $mime, $width, $height, $name, $size, $upload_id, $external, $status, $attempts, $error, $created_at)
+        `insert into outbox (client_id, conversation_id, message_type, sticker_ref, content, reply_to, silent, view_once, scheduled_at, local_uri, kind, duration_ms, mime, width, height, name, size, upload_id, external, status, attempts, error, created_at)
+         values ($client_id, $conversation_id, $message_type, $sticker_ref, $content, $reply_to, $silent, $view_once, $scheduled_at, $local_uri, $kind, $duration_ms, $mime, $width, $height, $name, $size, $upload_id, $external, $status, $attempts, $error, $created_at)
          on conflict (client_id) do update set
            message_type = excluded.message_type,
            sticker_ref = excluded.sticker_ref,
            content = excluded.content,
            reply_to = excluded.reply_to,
+           silent = excluded.silent,
+           view_once = excluded.view_once,
+           scheduled_at = excluded.scheduled_at,
            local_uri = excluded.local_uri,
            kind = excluded.kind,
            duration_ms = excluded.duration_ms,

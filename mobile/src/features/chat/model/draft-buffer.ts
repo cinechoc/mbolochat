@@ -14,6 +14,8 @@ export interface DraftBuffer {
   flush(): void;
   pending(): string | null;
   dispose(): void;
+  /** Écrit la dernière valeur puis libère le minuteur (démontage de l’écran). */
+  close(): void;
 }
 
 const defaultScheduler: DraftScheduler = {
@@ -62,6 +64,10 @@ export function createDraftBuffer({
     dispose() {
       cancel();
       pending = null;
+    },
+    close() {
+      flush();
+      cancel();
     },
   };
 }
