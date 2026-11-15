@@ -68,6 +68,72 @@ Le seul workflow CI est `.github/workflows/crypto.yml`. **Aucun CI TypeScript** 
 - **Config** : URL, délais, limites et règles métier en constantes nommées ou variables d'environnement. Le backend est l'autorité pour l'autorisation et la validation.
 - **UI** : textes en français ; nouveaux libellés centralisés dans `mobile/src/i18n/fr.ts`. Couleurs, rayons et espacements via `mobile/src/constants/theme.ts` (`useTheme`, `ThemedText`, `ThemedView`), jamais en dur, thèmes clair et sombre.
 
+## UI/UX & qualité du code — règles strictes
+
+Ces règles complètent la règle **UI** ci-dessus et s'appliquent à toute modification visible ou comportementale.
+
+### 1. Interface professionnelle
+
+- Produire des interfaces de qualité production, pas des prototypes génériques.
+- Suivre les principes du design mobile moderne.
+- Maintenir une cohérence visuelle dans toute l'application.
+- Éviter les mises en page amateurs, la décoration inutile et les espacements incohérents.
+- Chaque écran doit paraître fini et soigné.
+
+### 2. Design system
+
+- Centraliser les design tokens.
+- Réutiliser les couleurs, la typographie, les espacements, les dimensions, les rayons et les ombres.
+- Ne jamais dupliquer inutilement des valeurs de design.
+- Prendre en charge les thèmes clair et sombre de façon cohérente.
+- Si un token manque, l'ajouter à `mobile/src/constants/theme.ts` plutôt que d'écrire une valeur en dur.
+
+### 3. Performance
+
+- Réduire les rendus inutiles des composants.
+- Optimiser les listes, les images, la navigation et les animations.
+- Ne pas exécuter d'opérations coûteuses sur le thread UI.
+- N'utiliser la mémoïsation que lorsqu'elle apporte un gain mesurable.
+- Éviter les dépendances inutiles et l'abstraction excessive.
+
+### 4. Architecture
+
+- Construire des composants réutilisables et maintenables.
+- Séparer la logique métier de la présentation.
+- Éviter la duplication de code.
+- Garder des composants ciblés et de taille raisonnable.
+- Respecter l'architecture existante (`src/app`, `features`, `lib`, `components`).
+
+### 5. Qualité UX
+
+- Implémenter les états de chargement, vide, erreur, succès et hors ligne.
+- Fournir un retour visuel clair pour chaque interaction.
+- Garantir une navigation fluide et des interactions intuitives.
+- Prévenir les décalages de mise en page et les incohérences visuelles.
+
+### 6. Accessibilité & responsive
+
+- Prendre en charge différentes tailles d'écran.
+- Respecter la mise à l'échelle système des polices lorsque c'est approprié.
+- Maintenir un contraste suffisant.
+- Fournir des libellés accessibles et des zones tactiles suffisamment grandes.
+
+### 7. Validation
+
+- Inspecter l'application réellement en cours d'exécution.
+- Tester les interactions et la navigation réelles.
+- Vérifier les débordements, les coupures et les défauts visuels.
+- Lancer les vérifications de types, le lint et les tests pertinents.
+- Ne jamais déclarer une fonctionnalité terminée sans l'avoir vérifiée.
+
+### 8. Discipline de développement
+
+- Inspecter le code existant avant toute modification.
+- Éviter les réécritures inutiles.
+- Préserver les fonctionnalités qui marchent.
+- Ne jamais introduire de fausses données ni de placeholders codés en dur dans une fonctionnalité de production.
+- Préférer des solutions simples, efficaces et maintenables à une complexité inutile.
+
 ## Pièges spécifiques
 
 - **Machine aux ressources limitées** : ne jamais lancer `expo prebuild` ni build lourd localement. Si un build est nécessaire, `npm run build:android` dans Waydroid (déjà en marche sur la machine), ou demander à l'utilisateur de lancer un build EAS de son côté.
