@@ -1,15 +1,82 @@
-import { deleteDatabaseAsync, openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
+import {
+  defaultDatabaseDirectory,
+  deleteDatabaseAsync,
+  openDatabaseAsync,
+  type SQLiteDatabase,
+} from 'expo-sqlite';
 
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
 import type { ReactionSummary } from '@/lib/types';
 import { isReactionRef } from '../stickers/reactionRules';
 import { migrateE2eeSchema } from './schema';
 
-const DATABASE_NAME = 'mbolo-e2ee.db';
+/** Base historique : elle reste attachée à son propriétaire lors de la migration. */
+const LEGACY_DATABASE_NAME = 'mbolo-e2ee.db';
+const DATABASE_PREFIX = 'mbolo-e2ee-';
+const QUARANTINE_DIRECTORY = 'mbolo-e2ee-quarantine';
+
+/** Nom stable et sûr de la base chiffrée propre à un compte. */
+export function e2eeDatabaseNameForUser(userId: string): string {
+  const safe = userId.replace(/[^A-Za-z0-9._-]/g, '_');
+  return `${DATABASE_PREFIX}${safe || 'unknown'}.db`;
+}
+
+/** Une ouverture réussie est mémorisée pour la vie du processus. */
+const databaseByUser = new Map<string, string>();
+
+function databaseDirectoryUri(): string {
+  const directory = String(defaultDatabaseDirectory).replace(/\/+$/, '');
+  return directory.startsWith('file://') ? directory : `file://${directory}`;
+}
+
+function databaseUri(name: string): string {
+  return `${databaseDirectoryUri()}/${name}`;
+}
+
+async function databaseExists(name: string): Promise<boolean> {
+  try {
+    // Import paresseux : les tests et les chemins sans routage de compte ne
+    // doivent pas charger le module natif de fichiers.
+    const { File } = await import('expo-file-system');
+    return new File(databaseUri(name)).exists;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Déplace une base illisible (et ses journaux WAL/SHM) dans un dossier de
+ * quarantaine au lieu de l'effacer. L'utilisateur peut ainsi retrouver un
+ * fichier pour diagnostic, et aucun historique n'est supprimé silencieusement.
+ */
+async function quarantineDatabase(databaseName: string, reason: string): Promise<string | null> {
+  const { Directory, File } = await import('expo-file-system');
+  const stamp = new Date().toISOString().replace(/[^0-9A-Za-z.-]/g, '-');
+  const target = new Directory(
+    databaseDirectoryUri(),
+    QUARANTINE_DIRECTORY,
+    `${stamp}-${reason}`,
+  );
+  let moved = false;
+  for (const suffix of ['', '-wal', '-shm']) {
+    const source = new File(databaseUri(`${databaseName}${suffix}`));
+    if (!source.exists) {
+      continue;
+    }
+    if (!moved) {
+      target.create({ intermediates: true, idempotent: true });
+      moved = true;
+    }
+    await source.move(new File(target, `${databaseName}${suffix}`));
+  }
+  return moved ? target.uri : null;
+}
 
 export interface E2eeAccountRow {
   account_pickle: string;
   device_id: string | null;
+  /** Compte propriétaire : une base ne doit jamais servir deux identités. */
+  user_id?: string | null;
   identity_key: string;
   signing_key: string;
   fallback_key?: string | null;
@@ -28,24 +95,102 @@ export interface E2eeDatabase {
  * le Keystore ; elle ne transite ici que le temps du PRAGMA key (risque accepté
  * pour la v1, documenté dans le rapport).
  */
-export async function openE2eeDatabase(): Promise<E2eeDatabase> {
+/**
+ * Une seule ouverture/migration à la fois.
+ *
+ * Plusieurs écrans et services ouvrent la base au même moment (bootstrap,
+ * file des messages programmés, transport de conversation). Deux connexions
+ * SQLCipher qui migrent un fichier neuf en parallèle peuvent voir un schéma
+ * partiel et laisser `e2ee_account` absente : le bootstrap échoue alors au
+ * premier login, alors que la base est saine. La porte est relâchée dès que
+ * l'ouverture est terminée, pas pendant l'usage de la connexion.
+ */
+let openGate: Promise<unknown> = Promise.resolve();
+
+export function openE2eeDatabase(userId?: string): Promise<E2eeDatabase> {
+  const run = () => openE2eeDatabaseUnlocked(userId);
+  const next = openGate.then(run, run);
+  openGate = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+/**
+ * Choisit la base d'un compte sans jamais détruire celle d'un autre.
+ *
+ * La base historique n'a pas de nom par compte. On ne la rattache qu'à son
+ * propriétaire déjà inscrit (ou au premier compte d'une base pré-migration).
+ * Tous les autres comptes reçoivent un fichier dédié. Une ouverture ultérieure
+ * retrouve ainsi exactement la même identité, les mêmes sessions et le même
+ * historique, même après un passage par un autre compte.
+ */
+async function openE2eeDatabaseUnlocked(userId?: string): Promise<E2eeDatabase> {
   const keys = await MboloCrypto.ensureKeys();
-  if (keys.recovered) {
+  const { key } = await MboloCrypto.sqlCipherKey();
+  let sqlKey = key;
+  try {
+    const databaseName = userId
+      ? databaseByUser.get(userId) ?? (await selectDatabaseForUser(userId, sqlKey))
+      : LEGACY_DATABASE_NAME;
+    const opened = await openDatabase(databaseName, sqlKey, keys.recovered);
+    if (userId) databaseByUser.set(userId, databaseName);
+    return opened;
+  } finally {
+    sqlKey = '';
+  }
+}
+
+async function selectDatabaseForUser(userId: string, sqlKey: string): Promise<string> {
+  const scoped = e2eeDatabaseNameForUser(userId);
+  if (await databaseExists(scoped)) return scoped;
+  if (!(await databaseExists(LEGACY_DATABASE_NAME))) return scoped;
+
+  // Lecture seule du propriétaire de la base historique : aucun schéma ni
+  // contenu n'est modifié ici.
+  let legacy: SQLiteDatabase | null = null;
+  try {
+    legacy = await openDatabaseAsync(LEGACY_DATABASE_NAME);
+    await legacy.execAsync(`PRAGMA key = "x'${sqlKey}'"`);
+    const table = await legacy.getFirstAsync<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'e2ee_account'",
+    );
+    if (!table) return scoped;
+    const account = await legacy.getFirstAsync<{ user_id: string | null }>(
+      'SELECT user_id FROM e2ee_account WHERE id = 1',
+    );
+    return account && (!account.user_id || account.user_id === userId)
+      ? LEGACY_DATABASE_NAME
+      : scoped;
+  } catch {
+    // Une base historique illisible ne doit pas empêcher le compte courant
+    // d'ouvrir sa propre base. Le diagnostic de la base historique suivra.
+    return scoped;
+  } finally {
+    await legacy?.closeAsync().catch(() => undefined);
+  }
+}
+
+async function openDatabase(
+  databaseName: string,
+  sqlKey: string,
+  keysRecovered: boolean,
+): Promise<E2eeDatabase> {
+  if (keysRecovered) {
     // Identité recréée : les clés qui ouvraient les médias temporaires ont
     // disparu, ces fichiers sont désormais illisibles et ne doivent pas rester.
     // Import paresseux : la base ne doit pas dépendre du système de fichiers.
     const { sweepSecureMedia } = await import('./mediaStore');
     sweepSecureMedia();
-    await deleteDatabaseAsync(DATABASE_NAME);
+    await quarantineDatabase(databaseName, 'keys-recovered');
   }
-  const { key } = await MboloCrypto.sqlCipherKey();
-  let sqlKey = key;
   let db: SQLiteDatabase | null = null;
   try {
     let version = null as { cipher_version: string } | null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        db = await openDatabaseAsync(DATABASE_NAME);
+        db = await openDatabaseAsync(databaseName);
         await db.execAsync(`PRAGMA key = "x'${sqlKey}'"`);
         version = await db.getFirstAsync<{ cipher_version: string }>('PRAGMA cipher_version');
         if (!version?.cipher_version) {
@@ -56,14 +201,14 @@ export async function openE2eeDatabase(): Promise<E2eeDatabase> {
         await db.getFirstAsync<{ c: number }>('SELECT count(*) AS c FROM sqlite_master');
         break;
       } catch (cause) {
-        // Fichier illisible avec cette clé (suppression de récupération qui a
-        // échoué, corruption) : on repart d'une base propre plutôt que de
-        // laisser l'app bloquée sur un fichier indéchiffrable.
+        // Fichier illisible avec cette clé (corruption, changement de clé) :
+        // on met l'ancien fichier en quarantaine puis on repart d'une base
+        // neuve. Ne jamais supprimer une base potentiellement récupérable.
         if (attempt === 1 || !String(cause).includes('file is not a database')) {
           throw cause;
         }
         await db?.closeAsync().catch(() => undefined);
-        await deleteDatabaseAsync(DATABASE_NAME);
+        await quarantineDatabase(databaseName, 'unreadable');
       }
     }
     if (!db || !version) {
@@ -72,18 +217,25 @@ export async function openE2eeDatabase(): Promise<E2eeDatabase> {
     // Schéma versionné : création des tables historiques puis migrations
     // unitaires. Un second passage sur une base à jour n'écrit rien.
     await migrateE2eeSchema(db);
-    return { db, recovered: keys.recovered, cipherVersion: version.cipher_version };
+    return { db, recovered: keysRecovered, cipherVersion: version.cipher_version };
   } finally {
-    sqlKey = '';
+    // La clé ne vit que le temps de l'ouverture.
   }
 }
 
 export async function loadE2eeAccount(db: SQLiteDatabase): Promise<E2eeAccountRow | null> {
   return db.getFirstAsync<E2eeAccountRow>(
-    `SELECT account_pickle, device_id, identity_key, signing_key,
+    `SELECT account_pickle, device_id, user_id, identity_key, signing_key,
             fallback_key, fallback_signature, fallback_key_id
      FROM e2ee_account WHERE id = 1`,
   );
+}
+
+/** Efface explicitement la base locale chiffrée d'un compte (jamais automatique). */
+export async function deleteE2eeDatabase(userId?: string): Promise<void> {
+  const name = userId ? e2eeDatabaseNameForUser(userId) : LEGACY_DATABASE_NAME;
+  databaseByUser.delete(userId ?? '');
+  await deleteDatabaseAsync(name);
 }
 
 export async function saveE2eeAccount(
@@ -103,12 +255,13 @@ export async function saveE2eeAccountWith(
 ): Promise<void> {
   await writer.runAsync(
     `INSERT INTO e2ee_account
-       (id, account_pickle, device_id, identity_key, signing_key,
+       (id, account_pickle, device_id, user_id, identity_key, signing_key,
         fallback_key, fallback_signature, fallback_key_id, created_at)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        account_pickle = excluded.account_pickle,
        device_id = excluded.device_id,
+       user_id = excluded.user_id,
        identity_key = excluded.identity_key,
        signing_key = excluded.signing_key,
        fallback_key = excluded.fallback_key,
@@ -116,6 +269,7 @@ export async function saveE2eeAccountWith(
        fallback_key_id = excluded.fallback_key_id`,
     account.account_pickle,
     account.device_id,
+    account.user_id ?? null,
     account.identity_key,
     account.signing_key,
     account.fallback_key ?? null,
@@ -513,6 +667,9 @@ export async function saveLocalMessageWith(
         edited_at, edit_revision, silent, view_once, preview_json, scheduled_at, send_error)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
+       sender_id = excluded.sender_id,
+       sender_name = excluded.sender_name,
+       mine = excluded.mine,
        body = CASE
          WHEN e2ee_messages.content_kind IS NULL
               AND e2ee_messages.edit_revision > 0
@@ -564,6 +721,23 @@ export async function saveLocalMessageWith(
     message.scheduled_at ?? null,
     message.send_error ?? null,
   );
+  // Une tombstone de lecture unique prime sur toute réinsertion, notamment
+  // lorsqu'une synchronisation renvoie un message consommé après une coupure.
+  // Les champs sensibles sont retirés dans la même écriture.
+  await writer.runAsync(
+    `UPDATE e2ee_messages
+        SET body = '', media_meta = NULL, local_cipher_uri = NULL, upload_id = NULL,
+            local_thumb_cipher_uri = NULL, thumb_upload_id = NULL, sticker_ref = NULL,
+            quote_id = NULL, unreadable_reason = NULL, raw_payload = NULL,
+            preview_json = NULL, silent = 0, view_once = 0, scheduled_at = NULL,
+            hidden = 1
+      WHERE id = ?
+        AND EXISTS (
+          SELECT 1 FROM e2ee_view_once_consumed WHERE message_id = ?
+        )`,
+    message.id,
+    message.id,
+  );
 }
 
 /** Ligne provisoire (avant accusé serveur) : id = clientId, renommée après ack. */
@@ -584,9 +758,14 @@ export async function renameLocalMessage(
 export async function markLocalMessageSendError(
   db: SQLiteDatabase,
   id: string,
-  error = 'send_failed',
+  error: string | null = 'send_failed',
 ): Promise<void> {
-  await db.runAsync('UPDATE e2ee_messages SET send_error = ? WHERE id = ?', error, id);
+  await db.runAsync(
+    'UPDATE e2ee_messages SET send_error = ? WHERE id = ? OR client_id = ?',
+    error,
+    id,
+    id,
+  );
 }
 
 /** Remet un envoi programmé en attente immédiate après une action utilisateur. */
@@ -604,6 +783,73 @@ export async function retryScheduledMessage(
 
 export async function deleteLocalMessage(db: SQLiteDatabase, id: string): Promise<void> {
   await db.runAsync('DELETE FROM e2ee_messages WHERE id = ?', id);
+}
+
+/**
+ * Consomme une lecture unique de façon durable.
+ *
+ * La tombstone est chiffrée par SQLCipher et survit à la disparition de la
+ * bulle. Le message local est vidé au lieu d'être supprimé : ainsi une
+ * synchronisation tardive ne peut pas réinsérer son contenu, et la reprise du
+ * masquage serveur dispose encore de son identifiant.
+ */
+export async function consumeLocalViewOnce(
+  db: SQLiteDatabase,
+  messageId: string,
+  conversationId: string,
+  consumedAt = new Date().toISOString(),
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO e2ee_view_once_consumed
+       (message_id, conversation_id, server_hidden, created_at)
+     VALUES (?, ?, 0, ?)
+     ON CONFLICT(message_id) DO NOTHING`,
+    messageId,
+    conversationId,
+    consumedAt,
+  );
+  await db.runAsync(
+    `UPDATE e2ee_messages
+        SET body = '', media_meta = NULL, local_cipher_uri = NULL, upload_id = NULL,
+            local_thumb_cipher_uri = NULL, thumb_upload_id = NULL, sticker_ref = NULL,
+            quote_id = NULL, unreadable_reason = NULL, raw_payload = NULL,
+            preview_json = NULL, silent = 0, view_once = 0, scheduled_at = NULL,
+            hidden = 1
+      WHERE id = ? AND conversation_id = ?`,
+    messageId,
+    conversationId,
+  );
+}
+
+export interface PendingViewOnceConsumption {
+  message_id: string;
+  conversation_id: string;
+}
+
+/** Lectures uniques encore à masquer côté serveur pour ce compte. */
+export async function listPendingViewOnceConsumptions(
+  db: SQLiteDatabase,
+  limit = 20,
+): Promise<PendingViewOnceConsumption[]> {
+  return db.getAllAsync<PendingViewOnceConsumption>(
+    `SELECT message_id, conversation_id
+       FROM e2ee_view_once_consumed
+      WHERE server_hidden = 0
+      ORDER BY created_at ASC
+      LIMIT ?`,
+    limit,
+  );
+}
+
+/** Le serveur a confirmé le masquage : la tombstone n'a plus à être rejouée. */
+export async function markViewOnceServerHidden(
+  db: SQLiteDatabase,
+  messageId: string,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE e2ee_view_once_consumed SET server_hidden = 1 WHERE message_id = ?',
+    messageId,
+  );
 }
 
 /** Champs du cycle média durable que l'on peut mettre à jour séparément. */
@@ -737,6 +983,24 @@ export async function loadLocalMessage(
   id: string,
 ): Promise<StoredE2eeMessage | null> {
   return db.getFirstAsync<StoredE2eeMessage>('SELECT * FROM e2ee_messages WHERE id = ?', id);
+}
+
+/**
+ * Ligne locale encore en attente d'accusé. Après un succès partiel, son `id`
+ * peut déjà avoir été remplacé par l'identifiant serveur : `client_id` est donc
+ * le seul critère stable pour une reprise.
+ */
+export async function loadLocalMessageByClientId(
+  db: SQLiteDatabase,
+  clientId: string,
+): Promise<StoredE2eeMessage | null> {
+  return db.getFirstAsync<StoredE2eeMessage>(
+    `SELECT * FROM e2ee_messages
+      WHERE client_id = ?
+      ORDER BY CASE WHEN id = client_id THEN 0 ELSE 1 END
+      LIMIT 1`,
+    clientId,
+  );
 }
 
 /**

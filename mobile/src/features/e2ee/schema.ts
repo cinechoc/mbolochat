@@ -22,7 +22,7 @@ export type E2eeSchemaDb = Pick<
 >;
 
 /** Version de schéma attendue par ce code. */
-export const E2EE_SCHEMA_VERSION = 13;
+export const E2EE_SCHEMA_VERSION = 15;
 
 const META_TABLE = 'e2ee_schema_meta';
 
@@ -409,6 +409,8 @@ const STEPS: { version: number; run: (db: E2eeSchemaDb) => Promise<void> }[] = [
   { version: 11, run: migrateToV11 },
   { version: 12, run: migrateToV12 },
   { version: 13, run: migrateToV13 },
+  { version: 14, run: migrateToV14 },
+  { version: 15, run: migrateToV15 },
 ];
 
 async function readVersion(db: E2eeSchemaDb): Promise<number> {
@@ -418,6 +420,40 @@ async function readVersion(db: E2eeSchemaDb): Promise<number> {
   const parsed = Number.parseInt(row?.value ?? '0', 10);
   return Number.isFinite(parsed) ? parsed : 0;
 }
+
+async function tableExists(db: E2eeSchemaDb, table: string): Promise<boolean> {
+  const row = await db.getFirstAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`,
+    table,
+  );
+  return row?.name === table;
+}
+
+/**
+ * Tables attendues et version qui les introduit. Sert à détecter une base
+ * marquée à jour mais dont le schéma est incomplet (migration interrompue,
+ * fichier restauré) : le marqueur ne doit jamais faire sauter la réparation.
+ */
+const REQUIRED_TABLES: [string, number][] = [
+  ['e2ee_account', 1],
+  ['e2ee_sessions', 1],
+  ['e2ee_peer_keys', 1],
+  ['e2ee_messages', 1],
+  ['e2ee_drafts', 1],
+  ['e2ee_outbox', 2],
+  ['e2ee_bundles', 2],
+  ['e2ee_media_prep', 4],
+  ['e2ee_deletions', 8],
+  ['e2ee_identity_verifications', 9],
+  ['e2ee_conversation_state', 10],
+  ['e2ee_voice_transcriptions', 13],
+  ['e2ee_view_once_consumed', 15],
+];
+
+/** Colonnes indispensables dont l'absence doit aussi annuler le marqueur. */
+const REQUIRED_COLUMNS: [string, string, number][] = [
+  ['e2ee_account', 'user_id', 14],
+];
 
 /**
  * Version 3 : identité des enveloppes de l'outbox.
@@ -670,6 +706,45 @@ async function migrateToV13(db: E2eeSchemaDb): Promise<void> {
 }
 
 /**
+ * Version 14 : propriétaire de l'identité locale.
+ *
+ * Une installation qui change de compte ne doit jamais publier l'identité du
+ * compte précédent. La colonne reste nullable pour les bases existantes : le
+ * premier bootstrap la renseigne avec l'utilisateur connecté, sans régénérer
+ * les clés ni perdre les sessions du même compte.
+ */
+async function migrateToV14(db: E2eeSchemaDb): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await addMissingColumns(db, 'e2ee_account', [['user_id', 'TEXT']]);
+    await stampVersion(db, 14);
+  });
+}
+
+/**
+ * Version 15 : consommation locale des messages à vue unique.
+ *
+ * La tombstone est écrite **avant** le retrait de la bulle. Elle empêche un
+ * message déjà consommé de réapparaître si la synchronisation le renvoie après
+ * une coupure réseau. `server_hidden = 0` indique qu'il reste à confirmer au
+ * serveur que ce compte ne veut plus le voir.
+ */
+async function migrateToV15(db: E2eeSchemaDb): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS e2ee_view_once_consumed (
+        message_id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        server_hidden INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS e2ee_view_once_pending_idx
+        ON e2ee_view_once_consumed (server_hidden, created_at);
+    `);
+    await stampVersion(db, 15);
+  });
+}
+
+/**
  * Amène la base à `E2EE_SCHEMA_VERSION`. Sans effet si elle y est déjà, ce qui
  * rend l'appel sûr à chaque ouverture.
  *
@@ -687,10 +762,41 @@ export async function migrateE2eeSchema(
 ): Promise<number> {
   await db.execAsync(META_DDL);
   let version = await readVersion(db);
+  // Un marqueur de version supérieur au schéma réel peut venir d'une migration
+  // interrompue entre deux connexions. Les étapes sont idempotentes : repartir
+  // de zéro répare les tables manquantes sans toucher aux données présentes.
+  let incomplete = false;
+  for (const [table, introduced] of REQUIRED_TABLES) {
+    if (introduced > version) continue;
+    if (!(await tableExists(db, table))) {
+      incomplete = true;
+      break;
+    }
+  }
+  if (!incomplete) {
+    for (const [table, column, introduced] of REQUIRED_COLUMNS) {
+      if (introduced > version || !(await tableExists(db, table))) continue;
+      const columns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+      if (!columns.some((entry) => entry.name === column)) {
+        incomplete = true;
+        break;
+      }
+    }
+  }
+  if (incomplete) {
+    await db.execAsync(`DELETE FROM ${META_TABLE} WHERE key = 'schema_version'`);
+    version = 0;
+  }
   for (const step of STEPS) {
     if (step.version <= version || step.version > target) continue;
     await step.run(db);
     version = await readVersion(db);
+  }
+  for (const [table, introduced] of REQUIRED_TABLES) {
+    if (introduced > target) continue;
+    if (!(await tableExists(db, table))) {
+      throw new Error(`e2ee_schema: table ${table} manquante après migration`);
+    }
   }
   return version;
 }

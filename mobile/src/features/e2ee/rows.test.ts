@@ -27,7 +27,7 @@ function message(
 
 describe('buildMessageRows — même grammaire que la conversation claire', () => {
   it('ouvre la liste par la date du premier message', () => {
-    const rows = buildMessageRows([message('a', '2026-01-02T10:00:00.000Z')]);
+    const rows = buildMessageRows([message('a', '2026-01-02T10:00:00.000Z')], 'me');
     expect(rows[0]).toMatchObject({ type: 'date' });
     expect(rows[1]).toMatchObject({ type: 'message', continuation: false });
   });
@@ -38,7 +38,7 @@ describe('buildMessageRows — même grammaire que la conversation claire', () =
       message('a', new Date(base).toISOString(), 0),
       message('b', new Date(base + 60_000).toISOString(), 0),
       message('c', new Date(base + 60_000 + CHAT_TIME_GAP_MS + 1000).toISOString(), 1),
-    ]);
+    ], 'me');
     expect(rows.map((row) => row.type)).toEqual(['date', 'message', 'message', 'time', 'message']);
     expect(rows[2]).toMatchObject({ type: 'message', continuation: true });
     expect(rows[4]).toMatchObject({ type: 'message', continuation: false });
@@ -49,7 +49,7 @@ describe('buildMessageRows — même grammaire que la conversation claire', () =
     const rows = buildMessageRows([
       message('a', new Date(base).toISOString(), 0),
       message('b', new Date(base + 1000).toISOString(), 1),
-    ]);
+    ], 'me');
     expect(rows[1]).toMatchObject({ type: 'message', continuation: false });
     expect(rows[2]).toMatchObject({ type: 'message', continuation: false });
   });
@@ -59,7 +59,7 @@ describe('buildMessageRows — même grammaire que la conversation claire', () =
     const messages = [0, 1, 2, 3].map((index) =>
       message(`m${index}`, new Date(base + index * 1000).toISOString(), index % 2 ? 1 : 0),
     );
-    const rows = buildMessageRows(messages).filter((row) => row.type === 'message');
+    const rows = buildMessageRows(messages, 'me').filter((row) => row.type === 'message');
     expect(rows.map((row) => (row.type === 'message' ? row.message.id : ''))).toEqual([
       'm0',
       'm1',
@@ -69,12 +69,15 @@ describe('buildMessageRows — même grammaire que la conversation claire', () =
   });
 
   it('tolère une date illisible sans casser la liste', () => {
-    const rows = buildMessageRows([message('a', 'pas-une-date'), message('b', 'pas-une-date')]);
+    const rows = buildMessageRows(
+      [message('a', 'pas-une-date'), message('b', 'pas-une-date')],
+      'me',
+    );
     expect(rows.filter((row) => row.type === 'message')).toHaveLength(2);
     expect(rows[1]).toMatchObject({ type: 'message' });
   });
 
   it('liste vide : aucune ligne', () => {
-    expect(buildMessageRows([])).toEqual([]);
+    expect(buildMessageRows([], 'me')).toEqual([]);
   });
 });

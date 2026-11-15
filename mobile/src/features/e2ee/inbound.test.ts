@@ -299,6 +299,25 @@ describe('déchiffrement entrant — sérialisation par session', () => {
     ]);
   });
 
+  it('migre la session quand la reconnexion change seulement l’identifiant d’appareil', async () => {
+    const fixture = await seeded([{ peer: 'peer-1', device: 'dev-1', pickle: 'S0' }]);
+    cryptoMock.secureDecrypt.mockResolvedValueOnce(decrypted('S1', 'après reconnexion') as never);
+
+    const result = await decrypt(
+      fixture,
+      incoming({ id: 'm-reconnect', senderDeviceId: 'dev-2' }),
+    );
+
+    expect(result.text).toBe('après reconnexion');
+    expect(cryptoMock.secureDecrypt).toHaveBeenCalledWith('S0', 'normal', 'ENV');
+    expect(
+      read(fixture, 'SELECT peer_device_id, session_pickle FROM e2ee_sessions'),
+    ).toEqual([{ peer_device_id: 'dev-2', session_pickle: 'S1' }]);
+    expect(read(fixture, 'SELECT body FROM e2ee_messages WHERE id = ?', 'm-reconnect')).toEqual([
+      { body: 'après reconnexion' },
+    ]);
+  });
+
   it('laisse deux pairs distincts indépendants', async () => {
     const fixture = await seeded([
       { peer: 'peer-1', device: 'dev-1', pickle: 'A0' },
@@ -1326,6 +1345,33 @@ describe('message authentifié mais illisible — le ratchet avance quand même'
     ]);
     // Le point capital : la session a bien avancé.
     expect(sessionPickle(fixture)).toEqual([{ session_pickle: 'S1' }]);
+  });
+
+  it('conserve la latéralité d’un message illisible venu d’un autre appareil du même compte', async () => {
+    const fixture = await seeded([{ peer: 'me', device: 'dev-1', pickle: 'S0' }]);
+    cryptoMock.secureDecrypt.mockResolvedValue(
+      unreadableOf('S1', plainOf({ v: 10 })) as never,
+    );
+
+    const result = await decrypt(
+      fixture,
+      incoming({
+        id: 'm-other-device',
+        sender: {
+          id: 'me',
+          username: 'me',
+          displayName: 'Moi',
+          avatarUrl: null,
+          gender: null,
+          genderCustom: null,
+        },
+      }),
+    );
+
+    expect(result.stored.mine).toBe(1);
+    expect(
+      read(fixture, 'SELECT sender_id, mine FROM e2ee_messages WHERE id = ?', 'm-other-device'),
+    ).toEqual([{ sender_id: 'me', mine: 1 }]);
   });
 
   it('classe un JSON invalide en invalid_payload', async () => {

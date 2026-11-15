@@ -75,11 +75,12 @@ export function mergeReceipts(
  * vient d'envoyer, ni pour un message seulement connu du serveur).
  */
 export function deliveredIds(
-  messages: readonly { id: string; mine: number }[],
+  messages: readonly { id: string; sender_id: string }[],
+  currentUserId: string,
 ): string[] {
   const ids: string[] = [];
   for (const message of messages) {
-    if (message.mine !== 0) continue;
+    if (message.sender_id === currentUserId) continue;
     if (typeof message.id !== 'string' || message.id.length === 0) continue;
     if (!ids.includes(message.id)) ids.push(message.id);
   }

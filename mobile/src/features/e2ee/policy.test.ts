@@ -13,8 +13,9 @@ const appConfig = JSON.parse(
 };
 
 describe('drapeau E2EE et sauvegarde Android', () => {
-  it('est désactivé par défaut', () => {
-    expect(isE2eeEnabled(undefined)).toBe(false);
+  it('est activé par défaut, avec désactivation explicite', () => {
+    expect(isE2eeEnabled(undefined)).toBe(true);
+    expect(isE2eeEnabled('')).toBe(true);
     expect(isE2eeEnabled('0')).toBe(false);
     expect(isE2eeEnabled('1')).toBe(true);
   });

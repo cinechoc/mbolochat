@@ -80,7 +80,7 @@ describe('runE2eeInit — l’échec n’est jamais silencieux', () => {
       registered: true,
     });
     const { runE2eeInit } = await import('./initRunner');
-    await runE2eeInit('t');
+    await runE2eeInit('t', 'user-a');
     expect(getE2eeInitState()).toEqual({ status: 'ready' });
   });
 
@@ -93,7 +93,7 @@ describe('runE2eeInit — l’échec n’est jamais silencieux', () => {
       error: 'Network request failed',
     });
     const { runE2eeInit } = await import('./initRunner');
-    await runE2eeInit('t');
+    await runE2eeInit('t', 'user-a');
     expect(getE2eeInitState()).toEqual({ status: 'degraded', failure: 'network' });
   });
 
@@ -101,7 +101,7 @@ describe('runE2eeInit — l’échec n’est jamais silencieux', () => {
     const { bootstrapE2ee } = await import('./bootstrap');
     vi.mocked(bootstrapE2ee).mockRejectedValue(new Error('file is not a database'));
     const { runE2eeInit } = await import('./initRunner');
-    await runE2eeInit('t');
+    await runE2eeInit('t', 'user-a');
     expect(getE2eeInitState()).toEqual({ status: 'failed', failure: 'storage' });
   });
 
@@ -113,7 +113,33 @@ describe('runE2eeInit — l’échec n’est jamais silencieux', () => {
       registered: true,
     });
     const { runE2eeInit } = await import('./initRunner');
-    await Promise.all([runE2eeInit('t'), runE2eeInit('t')]);
+    await Promise.all([runE2eeInit('t', 'user-a'), runE2eeInit('t', 'user-a')]);
     expect(vi.mocked(bootstrapE2ee)).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignore le résultat d’un compte précédent après changement de jeton', async () => {
+    const { bootstrapE2ee } = await import('./bootstrap');
+    let finishFirst: (() => void) | null = null;
+    vi.mocked(bootstrapE2ee).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFirst = () =>
+            resolve({ disabled: false, recovered: false, registered: true });
+        }),
+    );
+    vi.mocked(bootstrapE2ee).mockResolvedValueOnce({
+      disabled: false,
+      recovered: false,
+      registered: true,
+    });
+    const { runE2eeInit } = await import('./initRunner');
+
+    const first = runE2eeInit('jeton-a', 'compte-a');
+    await runE2eeInit('jeton-b', 'compte-b');
+    finishFirst!();
+    await first;
+
+    expect(getE2eeInitState()).toEqual({ status: 'ready' });
+    expect(vi.mocked(bootstrapE2ee)).toHaveBeenCalledTimes(2);
   });
 });

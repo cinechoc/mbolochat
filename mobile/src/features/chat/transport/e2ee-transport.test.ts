@@ -59,8 +59,8 @@ const stored = (
 ): StoredE2eeMessage => ({
   id,
   conversation_id: 'conversation-1',
-  sender_id: 'peer',
-  sender_name: 'Pair',
+  sender_id: input.mine === 1 ? 'me' : 'peer',
+  sender_name: input.mine === 1 ? 'me' : 'Pair',
   body: id,
   created_at: createdAt,
   client_id: null,
@@ -128,8 +128,13 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
     saveDraft: vi.fn(async () => undefined),
     loadDraft: vi.fn(async () => 'brouillon chiffré'),
     deleteLocalMessage: vi.fn(async () => undefined),
+    consumeLocalViewOnce: vi.fn(async () => undefined),
+    markViewOnceServerHidden: vi.fn(async () => undefined),
     loadReactionSummaries: vi.fn(async () => new Map()),
     loadConversationEphemeral: vi.fn(async () => null),
+    loadLocalMessageByClientId: vi.fn(
+      async (_db: unknown, _clientId: string): Promise<StoredE2eeMessage | null> => null,
+    ),
   };
   const crypto = {
     sendEncryptedText: vi.fn(async () => ({
@@ -237,6 +242,7 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
   };
 
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+  const missedListeners = new Set<(messages: Message[]) => void>();
   const socket = {
     connected: true,
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
@@ -274,6 +280,12 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
     cleanupDeletedMedia: vi.fn(async () => undefined),
   };
   const cache = { patchConversation: vi.fn() };
+  const sync = {
+    onMissedMessages: vi.fn((listener: (messages: Message[]) => void) => {
+      missedListeners.add(listener);
+      return () => missedListeners.delete(listener);
+    }),
+  };
   const scheduled = {
     enqueueScheduledText: vi.fn(async () => stored('scheduled-1', '2026-01-01T00:00:13.000Z', {
       mine: 1,
@@ -285,15 +297,27 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
     wakeScheduledQueue: vi.fn(),
     onScheduledEvent: vi.fn(() => () => undefined),
   };
+  const outboxRecovery = {
+    onE2eeOutboxEvent: vi.fn(() => () => undefined),
+    retryE2eeOutboxMessage: vi.fn(async () => undefined),
+    wakeE2eeOutboxRecovery: vi.fn(),
+    discardPendingEnvelope: vi.fn(async () => undefined),
+  };
+  const mediaPrep = {
+    discardMediaPreparation: vi.fn(async () => false),
+  };
   const deps: E2eeTransportDeps = {
     api: api as unknown as E2eeTransportDeps['api'],
+    sync: sync as unknown as E2eeTransportDeps['sync'],
     socket: socketDeps as unknown as E2eeTransportDeps['socket'],
     db: db as unknown as E2eeTransportDeps['db'],
     crypto: crypto as unknown as E2eeTransportDeps['crypto'],
     receipts: receipts as unknown as E2eeTransportDeps['receipts'],
     deletion: deletion as unknown as E2eeTransportDeps['deletion'],
     ephemeral: { purgeExpiredMessages: vi.fn(async () => []) },
+    mediaPrep,
     scheduled: scheduled as unknown as E2eeTransportDeps['scheduled'],
+    outboxRecovery: outboxRecovery as unknown as E2eeTransportDeps['outboxRecovery'],
     cache: cache as unknown as E2eeTransportDeps['cache'],
     clock: () => 0,
   };
@@ -302,7 +326,25 @@ function createFakes(seed: StoredE2eeMessage[], history: Message[] = []) {
       handler(...args);
     }
   };
-  return { deps, db, crypto, api, socket, socketDeps, deletion, cache, scheduled, emitEvent, fakeDb };
+  const emitMissed = (messages: Message[]) => {
+    for (const listener of missedListeners) listener(messages);
+  };
+  return {
+    deps,
+    db,
+    crypto,
+    api,
+    socket,
+    socketDeps,
+    deletion,
+    cache,
+    sync,
+    scheduled,
+    mediaPrep,
+    emitEvent,
+    emitMissed,
+    fakeDb,
+  };
 }
 
 runTransportContract({
@@ -345,6 +387,34 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     await transport.dispose();
   });
 
+  it('place la bulle d’après sender_id même si mine est obsolète', async () => {
+    const fakes = createFakes([
+      stored('ancien-envoi-de-a', '2026-01-01T00:00:01.000Z', {
+        sender_id: 'peer',
+        sender_name: 'Pair',
+        mine: 1,
+      }),
+      stored('message-de-moi', '2026-01-01T00:00:02.000Z', {
+        sender_id: 'me',
+        sender_name: 'me',
+        mine: 0,
+      }),
+    ]);
+    const transport = new E2eeTransport(fakes.deps, options);
+    const snapshot = await transport.loadInitial();
+
+    expect(snapshot.messages.find((message) => message.id === 'ancien-envoi-de-a')).toMatchObject({
+      mine: false,
+      sender: { id: 'peer', displayName: 'Pair' },
+      state: 'none',
+    });
+    expect(snapshot.messages.find((message) => message.id === 'message-de-moi')).toMatchObject({
+      mine: true,
+      sender: { id: 'me' },
+    });
+    await transport.dispose();
+  });
+
   it('déchiffre les messages serveur inconnus au chargement', async () => {
     const unknown = serverMessage('c', '2026-01-01T00:00:03.000Z');
     const fakes = createFakes(SEED, [unknown]);
@@ -352,6 +422,79 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     const snapshot = await transport.loadInitial();
     expect(fakes.crypto.decryptIncoming).toHaveBeenCalledTimes(1);
     expect(snapshot.messages.map((message) => message.id)).toContain('c');
+    await transport.dispose();
+  });
+
+  it('rattrape et accuse un message manqué seulement après déchiffrement', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new E2eeTransport(fakes.deps, options);
+    await transport.loadInitial();
+    const received: string[] = [];
+    const off = transport.subscribe({
+      onMessage: (message) => received.push(message.id),
+      onMessageRemoved: () => undefined,
+      onReceipts: () => undefined,
+      onReaction: () => undefined,
+      onTyping: () => undefined,
+      onConnection: () => undefined,
+      onConversationUpdated: () => undefined,
+      onConversationRemoved: () => undefined,
+      onError: () => undefined,
+      onFatal: () => undefined,
+    });
+
+    const missed = serverMessage('manque', '2026-01-01T00:00:03.000Z');
+    fakes.emitMissed([
+      missed,
+      missed,
+      serverMessage('autre-conversation', '2026-01-01T00:00:04.000Z', {
+        conversationId: 'conversation-2',
+      }),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(fakes.crypto.decryptIncoming).toHaveBeenCalledTimes(1);
+    expect(received).toContain('manque');
+    expect(fakes.socketDeps.reportDelivered).toHaveBeenCalledWith(['manque']);
+    off();
+    await transport.dispose();
+  });
+
+  it('continue le déchiffrement après une erreur d’ouverture de base', async () => {
+    const fakes = createFakes(SEED);
+    // Premier rejet : balayage lancé par `subscribe`. Deuxième : première
+    // enveloppe. Le troisième accès doit réussir et traiter le message suivant.
+    fakes.db.openE2eeDatabase
+      .mockRejectedValueOnce(new Error('keystore indisponible'))
+      .mockRejectedValueOnce(new Error('keystore indisponible'));
+    const transport = new E2eeTransport(fakes.deps, options);
+    const received: string[] = [];
+    const off = transport.subscribe({
+      onMessage: (message) => received.push(message.id),
+      onMessageRemoved: () => undefined,
+      onReceipts: () => undefined,
+      onReaction: () => undefined,
+      onTyping: () => undefined,
+      onConnection: () => undefined,
+      onConversationUpdated: () => undefined,
+      onConversationRemoved: () => undefined,
+      onError: () => undefined,
+      onFatal: () => undefined,
+    });
+
+    fakes.emitEvent(
+      'message:new',
+      serverMessage('premier', '2026-01-01T00:00:03.000Z'),
+    );
+    fakes.emitEvent(
+      'message:new',
+      serverMessage('second', '2026-01-01T00:00:04.000Z'),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(fakes.crypto.decryptIncoming).toHaveBeenCalledTimes(1);
+    expect(received).toContain('second');
+    off();
     await transport.dispose();
   });
 
@@ -434,13 +577,58 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
       new Error('Connexion au serveur impossible. Vérifie ta connexion.'),
     );
     const transport = new E2eeTransport(fakes.deps, options);
+    const received: ChatMessageView[] = [];
+    const off = transport.subscribe({
+      onMessage: (message) => received.push(message),
+      onMessageRemoved: () => undefined,
+      onReceipts: () => undefined,
+      onReaction: () => undefined,
+      onTyping: () => undefined,
+      onConnection: () => undefined,
+      onConversationUpdated: () => undefined,
+      onConversationRemoved: () => undefined,
+      onError: () => undefined,
+      onFatal: () => undefined,
+    });
+    fakes.db.loadLocalMessageByClientId.mockImplementationOnce(async (_db, clientId) =>
+      stored(clientId, '2026-01-01T00:00:00.000Z', {
+        body: 'secret hors ligne',
+        client_id: clientId,
+        mine: 1,
+        sender_id: 'me',
+        sender_name: 'me',
+        send_error: 'send_failed',
+      }),
+    );
     await expect(transport.sendText('secret hors ligne', null)).rejects.toThrow(
       'Connexion au serveur impossible',
     );
     expect(fakes.crypto.sendEncryptedText).toHaveBeenCalledTimes(1);
+    expect(received.at(-1)).toMatchObject({ body: 'secret hors ligne', state: 'failed' });
     expect(fakes.db.saveDraft).not.toHaveBeenCalled();
     expect(transport.mode).toBe('e2ee');
+    off();
     await transport.dispose();
+  });
+
+  it('abandonne aussi la préparation média quand une bulle est supprimée', async () => {
+    const fakes = createFakes([
+      stored('local-media', '2026-01-01T00:00:01.000Z', {
+        mine: 1,
+        sender_id: 'me',
+        sender_name: 'me',
+        client_id: 'local-media',
+      }),
+    ]);
+    const transport = new E2eeTransport(fakes.deps, options);
+    await transport.loadInitial();
+
+    await transport.discard('local-media');
+
+    expect(fakes.mediaPrep.discardMediaPreparation).toHaveBeenCalledWith(
+      fakes.fakeDb,
+      'local-media',
+    );
   });
 
   it('envoie un média par le chiffrement, avec sa description intacte', async () => {
@@ -554,6 +742,28 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     expect(removed).toContainEqual({ id: 'a', forEveryone: true });
     expect(fakes.socketDeps.deleteMessage).not.toHaveBeenCalled();
     off();
+    await transport.dispose();
+  });
+
+  it('consomme une vue unique localement puis masque le message serveur', async () => {
+    const fakes = createFakes(SEED);
+    const transport = new E2eeTransport(fakes.deps, options);
+    await transport.loadInitial();
+
+    await transport.consumeViewOnce('b');
+
+    expect(fakes.db.consumeLocalViewOnce).toHaveBeenCalledWith(
+      expect.anything(),
+      'b',
+      'conversation-1',
+    );
+    expect(fakes.socketDeps.deleteMessage).toHaveBeenCalledWith(
+      'token',
+      'conversation-1',
+      'b',
+      false,
+    );
+    expect(fakes.db.markViewOnceServerHidden).toHaveBeenCalledWith(expect.anything(), 'b');
     await transport.dispose();
   });
 
@@ -675,6 +885,46 @@ describe('E2eeTransport — anti-downgrade et sécurité', () => {
     expect(fakes.api.markMessagesRead).not.toHaveBeenCalled();
     await transport.markRead(['a']);
     expect(fakes.api.markMessagesRead).toHaveBeenCalledWith('token', 'conversation-1', ['a']);
+    await transport.dispose();
+  });
+
+  it('rejoue un accusé de lecture après une coupure sans rejet non géré', async () => {
+    const fakes = createFakes(SEED);
+    let changeConnection: ((online: boolean) => void) | undefined;
+    fakes.socketDeps.onConnection.mockImplementationOnce((listener) => {
+      changeConnection = listener;
+      listener(true);
+      return () => undefined;
+    });
+    fakes.api.markMessagesRead.mockRejectedValueOnce(new Error('réseau indisponible'));
+    const transport = new E2eeTransport(fakes.deps, options);
+    const off = transport.subscribe({
+      onMessage: () => undefined,
+      onMessageRemoved: () => undefined,
+      onReceipts: () => undefined,
+      onReaction: () => undefined,
+      onTyping: () => undefined,
+      onConnection: () => undefined,
+      onConversationUpdated: () => undefined,
+      onConversationRemoved: () => undefined,
+      onError: () => undefined,
+      onFatal: () => undefined,
+    });
+
+    await expect(transport.markRead(['a', 'b'])).resolves.toBeUndefined();
+    expect(fakes.api.markMessagesRead).toHaveBeenCalledWith('token', 'conversation-1', ['a', 'b']);
+
+    changeConnection?.(false);
+    changeConnection?.(true);
+    await vi.waitFor(() => {
+      expect(fakes.api.markMessagesRead).toHaveBeenCalledTimes(2);
+    });
+    expect(fakes.api.markMessagesRead).toHaveBeenLastCalledWith('token', 'conversation-1', [
+      'a',
+      'b',
+    ]);
+
+    off();
     await transport.dispose();
   });
 

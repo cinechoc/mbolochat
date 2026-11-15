@@ -30,6 +30,7 @@ import {
 import { MessageEventsService } from '../message-events/message-events.service.js';
 import { ConversationEventsService } from './conversation-events.service.js';
 import { MAX_GROUP_MEMBERS } from './group-limits.js';
+import { isE2eeEnabled } from '../e2ee/enabled.js';
 
 /** Plafond de l'image décodée (photo de groupe, aligné sur l'avatar). */
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -534,10 +535,7 @@ export class ConversationsService {
     conversationId: string,
     memberIds: string[],
   ): Promise<void> {
-    const e2eeEnabled = ['1', 'true'].includes(
-      (process.env.E2EE_ENABLED ?? '').toLowerCase(),
-    );
-    if (!e2eeEnabled) return;
+    if (!isE2eeEnabled()) return;
     const rows = await this.db
       .select({ userId: e2eeDevices.userId })
       .from(e2eeDevices)
@@ -1887,11 +1885,8 @@ export class ConversationsService {
     if (!permissions) {
       throw new NotFoundException('Conversation not found');
     }
-    const e2eeEnabled = ['1', 'true'].includes(
-      (process.env.E2EE_ENABLED ?? '').toLowerCase(),
-    );
     if (encryption === 'v1') {
-      if (!e2eeEnabled) {
+      if (!isE2eeEnabled()) {
         throw new BadRequestException('Chiffrement indisponible');
       }
       if (!permissions.e2eeSince) {

@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { loadDraft, saveDraft, searchLocalMessages, updateLocalMessageMedia } from './db';
+import {
+  consumeLocalViewOnce,
+  listPendingViewOnceConsumptions,
+  loadDraft,
+  markViewOnceServerHidden,
+  saveDraft,
+  saveLocalMessage,
+  searchLocalMessages,
+  updateLocalMessageMedia,
+} from './db';
 
 vi.mock('expo-sqlite', () => ({
   deleteDatabaseAsync: vi.fn(),
@@ -56,6 +65,86 @@ describe('brouillons E2EE — toujours dans la base chiffrée', () => {
   it('loadDraft renvoie une chaîne vide sans ligne', async () => {
     const getFirstAsync = vi.fn().mockResolvedValue(null);
     await expect(loadDraft({ getFirstAsync } as never, 'conv-1')).resolves.toBe('');
+  });
+});
+
+describe('saveLocalMessage — répare l’identité lors d’un conflit', () => {
+  it('réécrit sender_id et mine quand le même identifiant existe déjà', async () => {
+    const runAsync = vi.fn().mockResolvedValue({ changes: 1 });
+    await saveLocalMessage({ runAsync } as never, {
+      id: 'message-partage',
+      conversation_id: 'conv-1',
+      sender_id: 'peer',
+      sender_name: 'Pair',
+      body: 'reçu',
+      created_at: '2026-01-01T00:00:01.000Z',
+      client_id: null,
+      mine: 0,
+      media_meta: null,
+      quote_id: null,
+    });
+    const [sql] = runAsync.mock.calls[0] as [string, ...unknown[]];
+    expect(sql).toMatch(/sender_id = excluded\.sender_id/);
+    expect(sql).toMatch(/sender_name = excluded\.sender_name/);
+    expect(sql).toMatch(/mine = excluded\.mine/);
+  });
+
+  it('réapplique une tombstone de lecture unique lors d’une réinsertion', async () => {
+    const runAsync = vi.fn().mockResolvedValue({ changes: 1 });
+    await saveLocalMessage({ runAsync } as never, {
+      id: 'view-once-1',
+      conversation_id: 'conv-1',
+      sender_id: 'peer',
+      sender_name: 'Pair',
+      body: 'ne doit jamais réapparaître',
+      created_at: '2026-01-01T00:00:01.000Z',
+      client_id: null,
+      mine: 0,
+      media_meta: null,
+      quote_id: null,
+      view_once: 1,
+    });
+    const [sql, ...params] = runAsync.mock.calls[1] as [string, ...string[]];
+    expect(sql).toMatch(/EXISTS \(\s*SELECT 1 FROM e2ee_view_once_consumed/);
+    expect(sql).toMatch(/hidden = 1/);
+    expect(params).toEqual(['view-once-1', 'view-once-1']);
+  });
+});
+
+describe('consommation durable des lectures uniques', () => {
+  it('écrit la tombstone puis vide la copie locale', async () => {
+    const runAsync = vi.fn().mockResolvedValue({ changes: 1 });
+    await consumeLocalViewOnce(
+      { runAsync } as never,
+      'view-once-1',
+      'conv-1',
+      '2026-01-01T00:00:00Z',
+    );
+
+    const [insertSql, ...insertParams] = runAsync.mock.calls[0] as [string, ...string[]];
+    expect(insertSql).toMatch(/INSERT INTO e2ee_view_once_consumed/);
+    expect(insertParams).toEqual(['view-once-1', 'conv-1', '2026-01-01T00:00:00Z']);
+    const [updateSql, ...updateParams] = runAsync.mock.calls[1] as [string, ...string[]];
+    expect(updateSql).toMatch(/body = ''[\s\S]*media_meta = NULL[\s\S]*hidden = 1/);
+    expect(updateParams).toEqual(['view-once-1', 'conv-1']);
+  });
+
+  it('liste les masquages serveur en attente puis les acquitte', async () => {
+    const getAllAsync = vi
+      .fn()
+      .mockResolvedValue([{ message_id: 'view-once-1', conversation_id: 'conv-1' }]);
+    const runAsync = vi.fn().mockResolvedValue({ changes: 1 });
+
+    await expect(
+      listPendingViewOnceConsumptions({ getAllAsync } as never),
+    ).resolves.toEqual([{ message_id: 'view-once-1', conversation_id: 'conv-1' }]);
+    await markViewOnceServerHidden({ runAsync } as never, 'view-once-1');
+
+    expect(getAllAsync.mock.calls[0][0]).toMatch(/server_hidden = 0/);
+    expect(runAsync).toHaveBeenCalledWith(
+      'UPDATE e2ee_view_once_consumed SET server_hidden = 1 WHERE message_id = ?',
+      'view-once-1',
+    );
   });
 });
 

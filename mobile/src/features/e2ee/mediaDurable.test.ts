@@ -18,9 +18,9 @@ import type { ConversationSummary } from '@/lib/types';
 import { loadOutboxMediaRefs } from './atomic';
 import { loadMessageMediaRefs, saveLocalMessage, updateLocalMessageMedia } from './db';
 import {
-  abandonMediaPreparation,
   advanceMediaPreparation,
   createMediaPreparation,
+  discardMediaPreparation,
   finalizeSentMediaPreparation,
   listIncompleteMediaPreparations,
   mediaUploadKey,
@@ -562,7 +562,7 @@ describe('média chiffré durable', () => {
     expect(result.serverMessage).toMatchObject({ id: 'srv-1' });
   });
 
-  it('un échec réseau conserve le ciphertext, le journal, et retire la bulle provisoire', async () => {
+  it('un échec réseau conserve le ciphertext, le journal et la bulle en échec', async () => {
     socketError = 'réseau';
     await expect(send()).rejects.toThrow('réseau');
 
@@ -570,9 +570,12 @@ describe('média chiffré durable', () => {
     const outbox = await loadOutboxMediaRefs(db as never, clientId);
     expect(outbox).toMatchObject({ state: 'pending', attachmentId: 'up-1' });
     expect(durableMediaUri(clientId)).not.toBeNull();
-    // Aucune ligne de message : rien ne se prétend envoyé ni visible.
-    const count = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM e2ee_messages');
-    expect(count!.n).toBe(0);
+    // La bulle reste visible en échec : la reprise automatique la renommera
+    // après l'accusé, sans perdre sa légende.
+    const row = await db.getFirstAsync<{ send_error: string | null }>(
+      'SELECT send_error FROM e2ee_messages',
+    );
+    expect(row).toEqual({ send_error: 'send_failed' });
   });
 
   it('la reprise réutilise l enveloppe journalisée, sans rechiffrer ni retéléverser', async () => {
@@ -1169,10 +1172,9 @@ describe('journal de préparation média', () => {
     expect(await removeDurableMediaIfUnreferenced(db as never, preparation.clientId)).toBe(false);
     expect(readdirSync(root)).toEqual(['cipher.bin']);
 
-    await abandonMediaPreparation(db as never, preparation.clientId, 'test');
+    expect(await discardMediaPreparation(db as never, preparation.clientId)).toBe(true);
     const after = await loadMediaPreparation(db as never, preparation.clientId);
     expect(after!.outcome).toEqual({ kind: 'abandoned' });
-    expect(await removeDurableMediaIfUnreferenced(db as never, preparation.clientId)).toBe(true);
     expect(durableIds()).not.toContain(preparation.clientId);
   });
 

@@ -38,7 +38,7 @@ export interface ChatInputBarProps {
   onSendGif: (gif: RecentGif) => void;
   onSendVoice: (note: VoiceNote) => void;
   onPickPhotos: () => void;
-  onPickCamera: () => void;
+  onPickCamera: (mode: 'photo' | 'video') => void;
   onPickDocuments: () => void;
   onVoicePermissionDenied: () => void;
   onVoiceError: (error: unknown) => void;

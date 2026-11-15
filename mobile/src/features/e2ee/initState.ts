@@ -53,12 +53,24 @@ export function describeE2eeFailure(failure: E2eeInitFailure): { title: string; 
 
 let state: E2eeInitState = { status: 'idle' };
 const listeners = new Set<() => void>();
+let generation = 0;
+
+/**
+ * Ouvre une nouvelle génération d'initialisation. Toute promesse issue d'une
+ * génération précédente devient obsolète : elle ne peut plus publier `ready`
+ * après une déconnexion ou le passage à un autre compte.
+ */
+export function beginE2eeInit(): number {
+  generation += 1;
+  return generation;
+}
 
 export function getE2eeInitState(): E2eeInitState {
   return state;
 }
 
-export function setE2eeInitState(next: E2eeInitState): void {
+export function setE2eeInitState(next: E2eeInitState, expectedGeneration?: number): void {
+  if (expectedGeneration !== undefined && expectedGeneration !== generation) return;
   state = next;
   for (const listener of listeners) listener();
 }
@@ -84,6 +96,7 @@ export function claimKeysLostNotice(recovered: boolean | undefined): boolean {
 
 /** Remise à zéro (déconnexion, tests) : ne laisse aucun état « prêt » hérité. */
 export function resetE2eeInitState(): void {
+  generation += 1;
   keysLostNotified = false;
   setE2eeInitState({ status: 'idle' });
 }

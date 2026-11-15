@@ -11,14 +11,21 @@
         "buildType": "apk"
       },
       "env": {
+        "EXPO_PUBLIC_E2EE_ENABLED": "1",
         "EXPO_PUBLIC_E2EE_DEV_TOOLS": "1"
       }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_E2EE_ENABLED": "1"
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_E2EE_ENABLED": "1"
+      }
     }
   },
   "submit": {

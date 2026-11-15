@@ -6,7 +6,7 @@ import { isReactionRef } from '@/features/stickers/reactionRules';
 import { isEphemeralTtl } from '@/features/e2ee/payload';
 import type { Message, MessageReceipt, ReactionSummary } from '@/lib/types';
 import { MessageIndex } from '../model/message-index';
-import { storedMessageToView } from '../model/message-view';
+import { isOwnStoredMessage, storedMessageToView } from '../model/message-view';
 import { normalizedSendOptions, type TextSendOptions } from '../model/send-options';
 import type { E2eeTransportDeps, E2eeTransportOptions } from './deps';
 import {
@@ -25,6 +25,10 @@ const LOCAL_PAGE_SIZE = 50;
 const TYPING_REFRESH_MS = 2_500;
 const TYPING_EXPIRY_MS = 4_000;
 const EXPIRY_SWEEP_MS = 30_000;
+
+function newClientId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 const E2EE_CAPABILITIES: ChatCapabilities = {
   replies: true,
@@ -81,7 +85,10 @@ export class E2eeTransport implements ChatTransport {
   private cleanups: (() => void)[] = [];
   private ready = false;
   private pendingAcks: string[] = [];
+  private readonly pendingReads = new Set<string>();
+  private readChain: Promise<void> = Promise.resolve();
   private decryptChain: Promise<unknown> = Promise.resolve();
+  private readonly queuedDecrypts = new Set<string>();
   private typingTimer: ReturnType<typeof setTimeout> | null = null;
   private lastTypingSentAt = Number.NEGATIVE_INFINITY;
   private lastTypingState: boolean | null = null;
@@ -204,6 +211,18 @@ export class E2eeTransport implements ChatTransport {
       }
       void this.queueDecrypt(message);
     };
+    const onMissed = (messages: Message[]) => {
+      for (const message of messages) {
+        if (
+          message.conversationId !== this.conversationId ||
+          message.sender.id === this.currentUser.id ||
+          message.encryption !== 'v1'
+        ) {
+          continue;
+        }
+        void this.queueDecrypt(message);
+      }
+    };
     const onReceipt = (payload: ReceiptPayload) => {
       if (!Array.isArray(payload?.receipts) || payload.receipts.length === 0) return;
       this.receipts = this.deps.receipts.mergeReceipts(this.receipts, payload.receipts);
@@ -248,9 +267,11 @@ export class E2eeTransport implements ChatTransport {
     socket.on('message:new', onMessage);
     socket.on('receipt', onReceipt);
     socket.on('typing', onTyping);
-    const offConnection = this.deps.socket.onConnection((online) =>
-      this.handlers?.onConnection(online),
-    );
+    const offMissed = this.deps.sync.onMissedMessages(onMissed);
+    const offConnection = this.deps.socket.onConnection((online) => {
+      this.handlers?.onConnection(online);
+      if (online) void this.flushReads();
+    });
     void this.sweepExpired();
     const expiryTimer = setInterval(() => {
       void this.sweepExpired();
@@ -260,6 +281,7 @@ export class E2eeTransport implements ChatTransport {
       socket.off('message:new', onMessage);
       socket.off('receipt', onReceipt);
       socket.off('typing', onTyping);
+      offMissed();
       offConnection();
       clearInterval(expiryTimer);
     });
@@ -278,6 +300,26 @@ export class E2eeTransport implements ChatTransport {
         }
       }),
     );
+    this.cleanups.push(
+      this.deps.outboxRecovery.onE2eeOutboxEvent((event) => {
+        if (event.conversationId !== this.conversationId) return;
+        const existed = this.stored.has(event.previousId);
+        if (event.type === 'sent' && event.stored) {
+          if (event.stored.id !== event.previousId) {
+            this.stored.delete(event.previousId);
+            this.index.remove(event.previousId);
+            if (existed) this.handlers?.onMessageRemoved(event.previousId, false);
+          }
+          this.absorb(event.stored, true);
+          return;
+        }
+        if (event.type === 'failed' && event.stored) {
+          this.stored.set(event.previousId, event.stored);
+          this.handlers?.onMessage(this.render(event.stored));
+        }
+      }),
+    );
+    this.deps.outboxRecovery.wakeE2eeOutboxRecovery();
     return () => this.unsubscribe();
   }
 
@@ -318,21 +360,28 @@ export class E2eeTransport implements ChatTransport {
       void this.deps.db.saveDraft(db, this.conversationId, '').catch(() => undefined);
       return;
     }
-    const result = await this.deps.crypto.sendEncryptedText({
-      token: this.token,
-      db,
-      account,
-      conversation: this.summary,
-      currentUserId: this.currentUser.id,
-      currentUserName: this.currentUser.displayName,
-      text,
-      replyToId,
-      silent: normalized?.silent,
-      viewOnce: normalized?.viewOnce,
-      preview,
-    });
-    this.absorb(result.stored, true);
-    void this.deps.db.saveDraft(db, this.conversationId, '').catch(() => undefined);
+    const clientId = newClientId();
+    try {
+      const result = await this.deps.crypto.sendEncryptedText({
+        token: this.token,
+        db,
+        account,
+        conversation: this.summary,
+        currentUserId: this.currentUser.id,
+        currentUserName: this.currentUser.displayName,
+        text,
+        replyToId,
+        silent: normalized?.silent,
+        viewOnce: normalized?.viewOnce,
+        preview,
+        clientId,
+      });
+      this.absorb(result.stored, true);
+      void this.deps.db.saveDraft(db, this.conversationId, '').catch(() => undefined);
+    } catch (cause) {
+      await this.revealFailedPending(db, clientId);
+      throw cause;
+    }
   }
 
   async editMessage(id: string, text: string): Promise<void> {
@@ -342,7 +391,7 @@ export class E2eeTransport implements ChatTransport {
     const target = this.stored.get(id);
     if (
       !target ||
-      target.mine !== 1 ||
+      !isOwnStoredMessage(target, this.currentUser.id) ||
       target.id === target.client_id ||
       target.deleted === 1 ||
       target.hidden === 1 ||
@@ -381,29 +430,37 @@ export class E2eeTransport implements ChatTransport {
     replyToId: string | null,
   ): Promise<void> {
     const { db, account } = await this.credentials();
-    const result = await this.deps.crypto.sendEncryptedMedia({
-      token: this.token,
-      db,
-      account,
-      conversation: this.summary,
-      currentUserId: this.currentUser.id,
-      currentUserName: this.currentUser.displayName,
-      asset: {
-        uri: asset.uri,
-        kind: asset.kind,
-        mime: asset.mime ?? 'application/octet-stream',
-        name: asset.name ?? '',
-        size: asset.size,
-        width: asset.width ?? undefined,
-        height: asset.height ?? undefined,
-        durationMs: asset.durationMs ?? undefined,
-        waveform: asset.waveform,
-        viewOnce: asset.viewOnce,
-      },
-      caption,
-      replyToId,
-    });
-    this.absorb(result.stored, true);
+    const clientId = newClientId();
+    try {
+      const result = await this.deps.crypto.sendEncryptedMedia({
+        token: this.token,
+        db,
+        account,
+        conversation: this.summary,
+        currentUserId: this.currentUser.id,
+        currentUserName: this.currentUser.displayName,
+        asset: {
+          uri: asset.uri,
+          kind: asset.kind,
+          mime: asset.mime ?? 'application/octet-stream',
+          name: asset.name ?? '',
+          size: asset.size,
+          width: asset.width ?? undefined,
+          height: asset.height ?? undefined,
+          durationMs: asset.durationMs ?? undefined,
+          waveform: asset.waveform,
+          hd: asset.hd,
+          viewOnce: asset.viewOnce,
+        },
+        caption,
+        replyToId,
+        clientId,
+      });
+      this.absorb(result.stored, true);
+    } catch (cause) {
+      await this.revealFailedPending(db, clientId);
+      throw cause;
+    }
   }
 
   async sendVoice(note: VoiceNote): Promise<void> {
@@ -433,16 +490,23 @@ export class E2eeTransport implements ChatTransport {
       throw new UnsupportedCapabilityError('stickers');
     }
     const { db, account } = await this.credentials();
-    const result = await this.deps.crypto.sendEncryptedSticker({
-      token: this.token,
-      db,
-      account,
-      conversation: this.summary,
-      currentUserId: this.currentUser.id,
-      currentUserName: this.currentUser.displayName,
-      stickerRef: ref,
-    });
-    this.absorb(result.stored, true);
+    const clientId = newClientId();
+    try {
+      const result = await this.deps.crypto.sendEncryptedSticker({
+        token: this.token,
+        db,
+        account,
+        conversation: this.summary,
+        currentUserId: this.currentUser.id,
+        currentUserName: this.currentUser.displayName,
+        stickerRef: ref,
+        clientId,
+      });
+      this.absorb(result.stored, true);
+    } catch (cause) {
+      await this.revealFailedPending(db, clientId);
+      throw cause;
+    }
   }
 
   async sendPersonalSticker(_sticker: PersonalSticker): Promise<void> {
@@ -491,7 +555,7 @@ export class E2eeTransport implements ChatTransport {
       const target = this.stored.get(id);
       if (
         !target ||
-        target.mine !== 1 ||
+        !isOwnStoredMessage(target, this.currentUser.id) ||
         target.id === target.client_id ||
         target.deleted === 1 ||
         target.hidden === 1
@@ -556,12 +620,16 @@ export class E2eeTransport implements ChatTransport {
     const pending = target !== undefined && target.client_id === target.id;
     this.stored.delete(id);
     this.index.remove(id);
-    await this.deps.db.deleteLocalMessage(db, id).catch(() => undefined);
+    await this.deps.db.consumeLocalViewOnce(db, id, this.conversationId).catch(() => undefined);
     this.handlers?.onMessageRemoved(id, false);
     if (!pending) {
-      void this.deps.socket
-        .deleteMessage(this.token, this.conversationId, id, false)
-        .catch(() => undefined);
+      try {
+        await this.deps.socket.deleteMessage(this.token, this.conversationId, id, false);
+        await this.deps.db.markViewOnceServerHidden(db, id).catch(() => undefined);
+      } catch {
+        // Le serveur rejouera ce masquage à la prochaine connexion : la
+        // tombstone locale empêche déjà le message de réapparaître.
+      }
     }
   }
 
@@ -603,7 +671,9 @@ export class E2eeTransport implements ChatTransport {
 
   async markRead(ids?: string[]): Promise<void> {
     if (!ids || ids.length === 0) return;
-    await this.deps.api.markMessagesRead(this.token, this.conversationId, ids);
+    for (const id of ids) this.pendingReads.add(id);
+    this.readChain = this.readChain.then(() => this.flushReads());
+    await this.readChain;
   }
 
   reportDelivered(ids: string[]): void {
@@ -671,7 +741,14 @@ export class E2eeTransport implements ChatTransport {
   }
 
   private async sweepExpired(): Promise<void> {
-    const { db } = await this.credentials();
+    let db: E2eeDatabase['db'];
+    try {
+      ({ db } = await this.credentials());
+    } catch {
+      // Le balayage est opportuniste : une base momentanément indisponible ne
+      // doit produire ni rejet non géré ni perte de la file de déchiffrement.
+      return;
+    }
     const purged = await this.deps.ephemeral.purgeExpiredMessages(db).catch(() => []);
     for (const item of purged) {
       const target = this.stored.get(item.id);
@@ -703,6 +780,19 @@ export class E2eeTransport implements ChatTransport {
     }
   }
 
+  /** Rend visible une bulle dont l'envoi vient d'échouer, sans quitter SQLCipher. */
+  private async revealFailedPending(
+    db: E2eeDatabase['db'],
+    clientId: string,
+  ): Promise<void> {
+    const stored = await this.deps.db
+      .loadLocalMessageByClientId(db, clientId)
+      .catch(() => null);
+    if (!stored) return;
+    this.stored.set(stored.id, stored);
+    this.handlers?.onMessage(this.render(stored));
+  }
+
   saveDraft(text: string): void {
     void this.credentials()
       .then(({ db }) => this.deps.db.saveDraft(db, this.conversationId, text))
@@ -710,7 +800,12 @@ export class E2eeTransport implements ChatTransport {
   }
 
   retry(id: string): void {
-    void this.retryScheduled(id);
+    const row = this.stored.get(id);
+    if (row?.scheduled_at) {
+      void this.retryScheduled(id);
+      return;
+    }
+    void this.deps.outboxRecovery.retryE2eeOutboxMessage(id, this.currentUser.id);
   }
 
   async discard(id: string): Promise<void> {
@@ -722,7 +817,9 @@ export class E2eeTransport implements ChatTransport {
 
   private async removePendingMessage(id: string): Promise<void> {
     const { db } = await this.credentials();
+    await this.deps.outboxRecovery.discardPendingEnvelope(db, id).catch(() => undefined);
     await this.deps.db.deleteLocalMessage(db, id).catch(() => undefined);
+    await this.deps.mediaPrep.discardMediaPreparation(db, id).catch(() => undefined);
     this.stored.delete(id);
     this.index.remove(id);
     this.handlers?.onMessageRemoved(id, false);
@@ -747,7 +844,7 @@ export class E2eeTransport implements ChatTransport {
     account: E2eeAccountRow;
   }> {
     if (!this.db) {
-      const opened = await this.deps.db.openE2eeDatabase();
+      const opened = await this.deps.db.openE2eeDatabase(this.currentUser.id);
       this.db = opened.db;
     }
     if (!this.account) {
@@ -806,7 +903,7 @@ export class E2eeTransport implements ChatTransport {
   }
 
   private deliveryOf(stored: StoredE2eeMessage): ChatMessageView['state'] {
-    if (stored.mine !== 1) return 'none';
+    if (!isOwnStoredMessage(stored, this.currentUser.id)) return 'none';
     if (stored.send_error) return 'failed';
     if (stored.client_id && stored.client_id === stored.id && stored.scheduled_at) {
       return 'pending';
@@ -822,9 +919,11 @@ export class E2eeTransport implements ChatTransport {
   }
 
   private queueDecrypt(message: Message): Promise<unknown> {
-    this.decryptChain = this.decryptChain.then(async () => {
-      const { db, account } = await this.credentials();
+    if (this.queuedDecrypts.has(message.id)) return Promise.resolve();
+    this.queuedDecrypts.add(message.id);
+    const task = this.decryptChain.then(async () => {
       try {
+        const { db, account } = await this.credentials();
         const result = await this.deps.crypto.decryptIncoming({
           token: this.token,
           db,
@@ -874,14 +973,21 @@ export class E2eeTransport implements ChatTransport {
         if (deletedRefs) {
           await this.deps.deletion.cleanupDeletedMedia(db, deletedRefs);
         }
-        const acked = this.deps.receipts.deliveredIds([result.stored]);
+        const acked = this.deps.receipts.deliveredIds([result.stored], this.currentUser.id);
         if (acked.length > 0) this.reportDelivered(acked);
       } catch {
         // Un message illisible est déjà persisté avec son motif par le noyau :
-        // l'écran affiche le libellé normalisé, jamais l'exception.
+        // l'écran affiche le libellé normalisé, jamais l'exception. Une erreur
+        // d'ouverture de base ou de clé ne doit pas empoisonner la file : les
+        // messages suivants gardent le droit d'être traités.
+      } finally {
+        this.queuedDecrypts.delete(message.id);
       }
     });
-    return this.decryptChain;
+    // La queue ne porte jamais le rejet d'une tâche : elle sert uniquement de
+    // jeton d'ordre pour le déchiffrement suivant.
+    this.decryptChain = task.catch(() => undefined);
+    return task;
   }
 
   private flushAcks(): void {
@@ -896,6 +1002,19 @@ export class E2eeTransport implements ChatTransport {
     }
     const ids = this.pendingAcks.splice(0);
     this.deps.socket.reportDelivered(ids);
+  }
+
+  /** Une coupure REST ne doit ni perdre l'accusé ni produire de rejet non géré :
+   *  les identifiants restent en attente jusqu'à la prochaine connexion. */
+  private async flushReads(): Promise<void> {
+    if (this.pendingReads.size === 0) return;
+    const ids = [...this.pendingReads];
+    try {
+      await this.deps.api.markMessagesRead(this.token, this.conversationId, ids);
+      for (const id of ids) this.pendingReads.delete(id);
+    } catch {
+      // La reconnexion relancera la même liste ; rien n'est marqué lu à tort.
+    }
   }
 
   private unsubscribe(): void {

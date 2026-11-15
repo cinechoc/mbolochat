@@ -9,6 +9,7 @@ import type { ConversationSummary, Message } from '@/lib/types';
 import {
   loadConversationEphemeral,
   loadLocalMessage,
+  markLocalMessageSendError,
   renameLocalMessage,
   saveLocalMessage,
   updateLocalMessageMedia,
@@ -76,6 +77,8 @@ export interface E2eeMediaAsset {
   durationMs?: number;
   /** Note vocale : forme d'onde, hors chiffrement, comme en clair. */
   waveform?: number[];
+  /** Photo conservée en pleine résolution, ré-encodée en JPEG sans EXIF. */
+  hd?: boolean;
   /** Lecture unique : l'enveloppe part en v:9 et la copie locale est marquée. */
   viewOnce?: boolean;
 }
@@ -105,12 +108,25 @@ function sizeOf(uri: string): number | null {
   }
 }
 
-/** Ré-encode une photo en JPEG ≤ 1600 px : réduit la taille et **retire EXIF/GPS**. */
-async function reducePhoto(uri: string, output: File): Promise<{ uri: string; width: number; height: number }> {
-  const context = ImageManipulator.manipulate(uri, { maxWidth: PHOTO_MAX_EDGE });
+/**
+ * Ré-encode la photo en JPEG et **retire EXIF/GPS**.
+ *
+ * Le mode HD conserve les dimensions d'origine ; le mode normal borne le plus
+ * grand côté à `PHOTO_MAX_EDGE`. Dans les deux cas le passage par
+ * ImageManipulator est nécessaire pour ne pas transmettre les métadonnées de
+ * l'appareil avec la photo.
+ */
+async function preparePhoto(
+  uri: string,
+  output: File,
+  hd: boolean,
+): Promise<{ uri: string; width: number; height: number }> {
+  const context = hd
+    ? ImageManipulator.manipulate(uri)
+    : ImageManipulator.manipulate(uri, { maxWidth: PHOTO_MAX_EDGE });
   const rendered = await context.renderAsync();
   const saved = await rendered.saveAsync({
-    compress: 0.8,
+    compress: hd ? 0.95 : 0.8,
     format: SaveFormat.JPEG,
   });
   const file = new File(saved.uri);
@@ -175,6 +191,8 @@ export interface SendEncryptedMediaInput {
   allowKeyChange?: boolean;
   /** Id du message cité par cette réponse, chiffré dans l'enveloppe Olm. */
   replyToId?: string | null;
+  /** Identité préparée par l'appelant pour pouvoir afficher un échec local. */
+  clientId?: string;
 }
 
 export interface SendEncryptedMediaResult {
@@ -190,6 +208,7 @@ async function emitMediaMessage(input: {
   envelope: OutgoingEnvelope;
   attachmentId: string;
   clientId: string;
+  viewOnce: boolean;
 }): Promise<Message> {
   const socket = await ensureSocket(input.token);
   const result = (await socket.timeout(60000).emitWithAck('message:send', {
@@ -200,6 +219,7 @@ async function emitMediaMessage(input: {
     payloadType: input.envelope.payloadType,
     attachmentId: input.attachmentId,
     clientId: input.clientId,
+    viewOnce: input.viewOnce,
   })) as Message | { error?: string };
   if ('error' in result && result.error) {
     throw new Error(result.error);
@@ -265,7 +285,7 @@ export async function sendEncryptedMedia(
   // Même valeur pour le message, pour le média durable et pour la préparation :
   // journal, ligne SQLCipher et fichier se retrouvent sans table de
   // correspondance.
-  const clientId = newClientId();
+  const clientId = input.clientId ?? newClientId();
   let preparationCreated = false;
   try {
     const limit = MAX_PLAINTEXT_BYTES[input.asset.kind];
@@ -279,10 +299,14 @@ export async function sendEncryptedMedia(
     let width = input.asset.width;
     let height = input.asset.height;
     if (input.asset.kind === 'image') {
-      const reduced = await reducePhoto(input.asset.uri, new File(stage, 'photo.jpg'));
-      plainUri = reduced.uri;
-      width = reduced.width;
-      height = reduced.height;
+      const prepared = await preparePhoto(
+        input.asset.uri,
+        new File(stage, 'photo.jpg'),
+        input.asset.hd === true,
+      );
+      plainUri = prepared.uri;
+      width = prepared.width;
+      height = prepared.height;
     }
     const plainSize = sizeOf(plainUri);
     if (plainSize === null) {
@@ -440,6 +464,7 @@ export async function sendEncryptedMedia(
       envelope,
       attachmentId: mediaUpload.id,
       clientId,
+      viewOnce: input.asset.viewOnce === true,
     });
     await renameLocalMessage(input.db, clientId, serverMessage.id);
     await markEnvelopeSent(input.db, clientId, serverMessage.id);
@@ -469,10 +494,10 @@ export async function sendEncryptedMedia(
 /**
  * Nettoyage d'un envoi qui a échoué, quelle qu'en soit l'étape.
  *
- * La bulle provisoire est **toujours** retirée : elle ne doit jamais rester
- * visible alors que rien ne garantit qu'elle sera envoyée. C'est
- * particulièrement vrai pour un échec de `encryptEnvelope`, qui laissait avant
- * cette étape une bulle sans enveloppe ni journal.
+ * Une bulle dont l'enveloppe a déjà été journalisée reste visible en échec :
+ * la reprise automatique dispose alors de tout pour l'envoyer sans perdre la
+ * légende. Une bulle sans enveloppe est retirée, car rien ne garantirait sa
+ * reprise.
  *
  * Le ciphertext durable et le journal de préparation ne sont **jamais** touchés
  * ici : ils sont la reprise. Seul `abandonMediaPreparation` les libère.
@@ -484,12 +509,17 @@ async function cleanUpFailedSend(
   cause: unknown,
 ): Promise<void> {
   try {
-    // `client_id` couvre le cas où la ligne a déjà été renommée côté serveur.
-    await db.runAsync(
-      'DELETE FROM e2ee_messages WHERE id = ? OR client_id = ?',
-      clientId,
-      clientId,
-    );
+    const outbox = await loadOutboxMediaRefs(db, clientId);
+    if (outbox && outbox.state !== 'sent') {
+      await markLocalMessageSendError(db, clientId);
+    } else if (!outbox) {
+      // `client_id` couvre le cas où la ligne a déjà été renommée côté serveur.
+      await db.runAsync(
+        'DELETE FROM e2ee_messages WHERE id = ? OR client_id = ?',
+        clientId,
+        clientId,
+      );
+    }
   } catch {
     // Base indisponible : rien de plus à tenter, l'erreur d'origine prime.
   }
@@ -595,6 +625,7 @@ export async function resumeEncryptedMedia(
     envelope,
     attachmentId: refs.attachmentId,
     clientId: input.clientId,
+    viewOnce: previous?.view_once === 1,
   });
 
   const resumedAt = new Date().toISOString();

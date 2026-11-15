@@ -30,7 +30,7 @@ function formatMegabytes(bytes: number): string {
 export function E2eeSpikeScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [report, setReport] = useState<SelfTestReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -64,7 +64,7 @@ export function E2eeSpikeScreen() {
     setStorageError(null);
     setStorage(null);
     try {
-      const opened = await openE2eeDatabase();
+      const opened = await openE2eeDatabase(user?.id);
       const rawPath = opened.db.databasePath;
       const directory = String(defaultDatabaseDirectory).replace(/\/+$/, '');
       const path = rawPath.startsWith('file://')
@@ -88,11 +88,11 @@ export function E2eeSpikeScreen() {
   };
 
   const runBootstrap = async () => {
-    if (!token || bootstrapRunning) return;
+    if (!token || !user || bootstrapRunning) return;
     setBootstrapRunning(true);
     setBootstrap(null);
     try {
-      setBootstrap(await bootstrapE2ee(token));
+      setBootstrap(await bootstrapE2ee(token, user.id));
     } finally {
       setBootstrapRunning(false);
     }

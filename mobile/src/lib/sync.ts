@@ -77,7 +77,10 @@ export function runSync(token: string, myId: string): Promise<Message[]> {
       if (missed.length > 0) {
         await settleOwn(missed, myId);
         await advanceCursor(missed);
-        const foreign = missed.filter((message) => message.sender.id !== myId).map((message) => message.id);
+        // E2EE : l'accusé part du transport après déchiffrement et persistance.
+        const foreign = missed
+          .filter((message) => message.sender.id !== myId && message.encryption !== 'v1')
+          .map((message) => message.id);
         reportDelivered(foreign);
         for (const listener of listeners) {
           listener(missed);
@@ -117,7 +120,11 @@ export function startReliability(token: string, myId: string): () => void {
       }
       return;
     }
-    reportDelivered([message.id]);
+    // Pour E2EE, seul le transport de conversation connaît l'état réel de
+    // déchiffrement et de persistance. L'accusé est émis par lui après succès.
+    if (message.encryption !== 'v1') {
+      reportDelivered([message.id]);
+    }
   };
 
   const socket = connectSocket(token);

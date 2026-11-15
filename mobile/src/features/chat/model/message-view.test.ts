@@ -36,7 +36,7 @@ const message = (input: Partial<Message> & Pick<Message, 'id'>): Message => ({
 
 const stored = (input: Partial<StoredE2eeMessage> & Pick<StoredE2eeMessage, 'id'>): StoredE2eeMessage => ({
   conversation_id: 'conversation-1',
-  sender_id: 'peer',
+  sender_id: input.mine === 1 ? 'me' : 'peer',
   sender_name: 'Pair',
   body: '',
   created_at: '2026-01-01T00:00:00.000Z',
@@ -164,6 +164,23 @@ describe('storedMessageToView', () => {
     });
     expect(view.sender.displayName).toBe('Pair');
     expect(view.attachment).toBeNull();
+  });
+
+  it('déduit la latéralité de sender_id, pas de la colonne mine persistée', () => {
+    const received = storedMessageToView(
+      stored({ id: 'ancien-envoi-de-a', sender_id: 'peer', mine: 1 }),
+      { currentUser: me, peer },
+    );
+    expect(received.mine).toBe(false);
+    expect(received.sender.id).toBe('peer');
+    expect(received.sender.displayName).toBe('Pair');
+
+    const own = storedMessageToView(
+      stored({ id: 'autre-appareil', sender_id: 'me', mine: 0 }),
+      { currentUser: me, peer },
+    );
+    expect(own.mine).toBe(true);
+    expect(own.sender.id).toBe('me');
   });
 
   it('mappe un média chiffré sans exposer d’URL claire', () => {

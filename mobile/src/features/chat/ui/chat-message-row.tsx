@@ -295,6 +295,12 @@ function MessageBody({
   );
 
   if (message.viewOnce) {
+    const viewOnceLabel =
+      attachment?.type === 'VIDEO'
+        ? fr.chat.viewOnce.video
+        : attachment?.type === 'AUDIO'
+          ? fr.chat.viewOnce.voice
+          : fr.chat.viewOnce.photo;
     return swipe(
       <View style={[styles.viewOnceBlock, message.mine ? styles.alignEnd : null]}>
         <Pressable
@@ -308,7 +314,7 @@ function MessageBody({
           ]}>
           <Bomb size={20} strokeWidth={2.1} color={chat.primaryText} />
           <ThemedText type="smallBold" style={{ color: chat.primaryText }}>
-            {fr.chat.viewOnce.opening}
+            {viewOnceLabel}
           </ThemedText>
         </Pressable>
         {meta}

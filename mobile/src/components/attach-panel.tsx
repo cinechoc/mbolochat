@@ -1,17 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
-import { type ComponentProps, memo } from 'react';
+import { type ComponentProps, memo, useRef } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { useChatColors } from '@/constants/chat-theme';
 import { Spacing, Radii } from '@/constants/theme';
+import { fr } from '@/i18n/fr';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
 interface AttachPanelProps {
   onPhotos: () => void;
-  onCamera: () => void;
+  onCamera: (mode: 'photo' | 'video') => void;
   onDocuments: () => void;
 }
 
@@ -21,6 +22,8 @@ interface PanelAction {
   icon: IoniconName;
   tint: string;
   onPress: () => void;
+  onLongPress?: () => void;
+  hint?: string;
 }
 
 /**
@@ -35,24 +38,27 @@ export const AttachPanel = memo(function AttachPanel({
 }: AttachPanelProps) {
   const chat = useChatColors();
   const insets = useSafeAreaInsets();
+  const longPressUntil = useRef<Record<string, number>>({});
   const actions: PanelAction[] = [
     {
       key: 'photos',
-      label: 'Photos/Vidéos',
+      label: fr.chat.attach.photos,
       icon: 'images-outline',
       tint: '#2F9E62',
       onPress: onPhotos,
     },
     {
       key: 'camera',
-      label: 'Appareil photo',
+      label: fr.chat.attach.camera,
       icon: 'camera-outline',
       tint: '#3C87F7',
-      onPress: onCamera,
+      onPress: () => onCamera('photo'),
+      onLongPress: () => onCamera('video'),
+      hint: fr.chat.attach.cameraVideoHint,
     },
     {
       key: 'documents',
-      label: 'Fichier',
+      label: fr.chat.attach.documents,
       icon: 'document-text-outline',
       tint: '#C77C2B',
       onPress: onDocuments,
@@ -70,7 +76,7 @@ export const AttachPanel = memo(function AttachPanel({
         },
       ]}>
       <ThemedText type="small" style={[styles.caption, { color: chat.secondaryText }]}>
-        Ajouter au message
+        {fr.chat.attach.title}
       </ThemedText>
       <View style={styles.grid}>
         {actions.map((action) => (
@@ -78,7 +84,20 @@ export const AttachPanel = memo(function AttachPanel({
             key={action.key}
             accessibilityRole="button"
             accessibilityLabel={action.label}
-            onPress={action.onPress}
+            accessibilityHint={action.hint}
+            onLongPress={
+              action.onLongPress
+                ? () => {
+                    longPressUntil.current[action.key] = Date.now() + 1500;
+                    action.onLongPress?.();
+                  }
+                : undefined
+            }
+            delayLongPress={380}
+            onPress={() => {
+              if ((longPressUntil.current[action.key] ?? 0) > Date.now()) return;
+              action.onPress();
+            }}
             style={({ pressed }) => [styles.item, pressed && styles.pressed]}>
             <View style={[styles.iconTile, { backgroundColor: `${action.tint}22` }]}>
               <Ionicons name={action.icon} size={27} color={action.tint} />

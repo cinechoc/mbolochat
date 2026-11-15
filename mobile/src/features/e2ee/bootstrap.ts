@@ -1,7 +1,13 @@
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import { isE2eeEnabled } from './policy';
-import { loadE2eeAccount, openE2eeDatabase, saveE2eeAccount, type E2eeAccountRow } from './db';
+import { claimLegacyOutboxEnvelopes } from './atomic';
+import {
+  loadE2eeAccount,
+  openE2eeDatabase,
+  saveE2eeAccount,
+  type E2eeAccountRow,
+} from './db';
 import { purgeExpiredMessages } from './ephemeral';
 import { withAccountLock } from './locks';
 import { sweepDurablePartials, sweepSecureMedia } from './mediaStore';
@@ -18,7 +24,21 @@ export interface BootstrapResult {
  * identité Olm et publication des clés publiques. Aucun secret ne sort de
  * l'appareil, hormis les clés publiques.
  */
-export async function bootstrapE2ee(token: string): Promise<BootstrapResult> {
+let bootstrapGate: Promise<unknown> = Promise.resolve();
+
+export function bootstrapE2ee(token: string, userId: string): Promise<BootstrapResult> {
+  const next = bootstrapGate.then(
+    () => bootstrapE2eeUnlocked(token, userId),
+    () => bootstrapE2eeUnlocked(token, userId),
+  );
+  bootstrapGate = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+async function bootstrapE2eeUnlocked(token: string, userId: string): Promise<BootstrapResult> {
   if (!isE2eeEnabled()) {
     return { disabled: true, recovered: false, registered: false };
   }
@@ -29,11 +49,17 @@ export async function bootstrapE2ee(token: string): Promise<BootstrapResult> {
   // d'une écriture interrompue le sont. Le balayage s'abstient de lui-même si
   // une écriture est en cours dans ce processus.
   sweepDurablePartials();
-  const { db, recovered } = await openE2eeDatabase();
+  const { db, recovered } = await openE2eeDatabase(userId);
   try {
     // L'échéance peut avoir expiré pendant que l'application était fermée.
     await purgeExpiredMessages(db).catch(() => undefined);
     let account = await loadE2eeAccount(db);
+    if (account?.user_id && account.user_id !== userId) {
+      // Le routage par compte doit avoir choisi la bonne base. Une base mal
+      // attribuée est une erreur d'intégrité : on refuse de l'utiliser ou de
+      // la supprimer, car elle contient peut-être l'historique de l'autre compte.
+      throw new Error('e2ee_account_mismatch');
+    }
     let createdNow = false;
     if (!account) {
       createdNow = true;
@@ -43,6 +69,7 @@ export async function bootstrapE2ee(token: string): Promise<BootstrapResult> {
       account = {
         account_pickle: fallback.account_pickle,
         device_id: null,
+        user_id: userId,
         identity_key: identity.curve25519,
         signing_key: identity.ed25519,
         fallback_key: fallback.key,
@@ -50,12 +77,46 @@ export async function bootstrapE2ee(token: string): Promise<BootstrapResult> {
         fallback_key_id: fallback.key_id,
       };
       await saveE2eeAccount(db, account);
+    } else if (!account.user_id) {
+      // Base antérieure à la migration : le compte connecté devient propriétaire.
+      account = { ...account, user_id: userId };
+      await saveE2eeAccount(db, account);
     }
     // Copie non nulle et stable : le compte est lu puis remplacé dans les
     // sections verrouillées ci-dessous.
     const base: E2eeAccountRow = account;
+    // Une identité existante est forcément celle du compte courant : la base
+    // aurait été supprimée par la branche précédente sinon. Les enveloppes
+    // antérieures à la colonne `account_id` peuvent donc être rattachées sans
+    // risque et redevenir reprenables. On ne le fait pas après une perte de
+    // clés (`createdNow`) : ces anciennes enveloppes ne seraient plus
+    // déchiffrables par les correspondants.
+    if (!createdNow) {
+      await claimLegacyOutboxEnvelopes(db, base.identity_key);
+    }
 
-    const status = await api.getE2eeStatus(token).catch(() => null);
+    // Ne jamais confondre « le serveur ne connaît pas cet appareil » avec
+    // « le statut est momentanément indisponible ». Une panne réseau ne doit
+    // pas déclencher une réinscription ni régénérer des prekeys : on laisse
+    // l'état `degraded` et la reprise automatique republiera plus tard.
+    let status: Awaited<ReturnType<typeof api.getE2eeStatus>>;
+    try {
+      status = await api.getE2eeStatus(token);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        throw new Error('e2ee_unavailable');
+      }
+      if (
+        error instanceof ApiError &&
+        error.status !== 0 &&
+        error.status < 500 &&
+        error.status !== 408 &&
+        error.status !== 429
+      ) {
+        throw error;
+      }
+      throw new Error('e2ee_status_network');
+    }
     // Compte recréé localement (perte de clés) : le serveur garde l'ancienne
     // identité sous le même deviceId — il faut republier, même si « registered ».
     const needsRegistration = createdNow || !status?.registered || !status?.fallbackAvailable;

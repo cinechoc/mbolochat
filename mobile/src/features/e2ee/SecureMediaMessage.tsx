@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,9 +10,11 @@ import {
   View,
 } from 'react-native';
 
+import { BlurOverlay } from '@/components/blur-overlay';
+import { BlurTarget } from '@/components/blur-target';
 import { ThemedText } from '@/components/themed-text';
 import { useChatColors } from '@/constants/chat-theme';
-import { Radii, Spacing } from '@/constants/theme';
+import { MediaSurface, Radii, Spacing } from '@/constants/theme';
 import {
   formatFileSize,
   formatMediaDuration,
@@ -56,7 +58,9 @@ export function SecureMediaMessage({ token, media, mine, caption, onOpen, onLong
   const [cellular] = useAppPreference('mediaAutoDownloadCellular');
   const network = useNetworkClass();
   const [thumbnail, setThumbnail] = useState<string | null>(null);
+  const [thumbFailed, setThumbFailed] = useState(false);
   const [state, setState] = useState<State>('idle');
+  const blurTargetRef = useRef<ComponentRef<typeof View>>(null);
   const id = media.blob.uploadId;
 
   // Au démontage — fermeture de la conversation, navigation, rechargement de la
@@ -73,7 +77,15 @@ export function SecureMediaMessage({ token, media, mine, caption, onOpen, onLong
       .then((dataUrl) => {
         if (active) setThumbnail(dataUrl);
       })
-      .catch(() => undefined);
+      .catch((cause) => {
+        if (__DEV__) {
+          console.warn(
+            '[e2ee-media] vignette indisponible',
+            cause instanceof Error ? cause.message : String(cause),
+          );
+        }
+        if (active) setThumbFailed(true);
+      });
     return () => {
       active = false;
     };
@@ -142,6 +154,11 @@ export function SecureMediaMessage({ token, media, mine, caption, onOpen, onLong
 
   const size = mediaDisplaySize({ width: media.width, height: media.height }, windowWidth);
   const duration = formatMediaDuration(media.duration);
+  const waitingForThumbnail =
+    Boolean(thumb) &&
+    !thumbnail &&
+    !thumbFailed &&
+    shouldAutoLoadThumbnail(network, { wifi, cellular });
   // Métadonnées réelles uniquement : une dimension ou un poids absent n'est
   // jamais remplacé par une valeur plausible.
   const metadata = [
@@ -158,16 +175,39 @@ export function SecureMediaMessage({ token, media, mine, caption, onOpen, onLong
         accessibilityRole="button"
         accessibilityLabel={fr.e2eeMedia.openLabel}
         style={[styles.frame, { width: size.width, height: size.height }]}>
-        {thumbnail ? (
-          <Image source={{ uri: thumbnail }} style={StyleSheet.absoluteFill} contentFit="cover" />
-        ) : (
-          <View style={[StyleSheet.absoluteFill, styles.placeholder]}>
-            <Ionicons name="lock-closed-outline" size={26} color="#ffffff" />
-          </View>
-        )}
+        <BlurTarget ref={blurTargetRef} style={StyleSheet.absoluteFill}>
+          {thumbnail ? (
+            <Image source={{ uri: thumbnail }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, styles.placeholder]} />
+          )}
+        </BlurTarget>
+        {!thumbnail ? (
+          <BlurOverlay
+            intensity={50}
+            blurTarget={blurTargetRef}
+            fallbackColor={MediaSurface.overlay}>
+            <View style={styles.centerFill}>
+              {waitingForThumbnail ? (
+                <>
+                  <ActivityIndicator color={MediaSurface.onSurface} />
+                  <ThemedText type="micro" style={styles.overlayText}>
+                    {fr.e2eeMedia.preparing}
+                  </ThemedText>
+                </>
+              ) : (
+                <Ionicons
+                  name={media.type === 'VIDEO' ? 'videocam-outline' : 'image-outline'}
+                  size={28}
+                  color={MediaSurface.onSurface}
+                />
+              )}
+            </View>
+          </BlurOverlay>
+        ) : null}
         {media.type === 'VIDEO' ? (
           <View style={styles.playBadge}>
-            <Ionicons name="play" size={22} color="#ffffff" />
+            <Ionicons name="play" size={22} color={MediaSurface.onSurface} />
           </View>
         ) : null}
         {duration ? (
@@ -178,12 +218,18 @@ export function SecureMediaMessage({ token, media, mine, caption, onOpen, onLong
           </View>
         ) : null}
         {state === 'loading' ? (
-          <View style={[StyleSheet.absoluteFill, styles.overlay]}>
-            <ActivityIndicator color="#ffffff" />
-            <ThemedText type="small" style={styles.overlayText}>
-              {fr.e2eeMedia.opening}
-            </ThemedText>
-          </View>
+          <BlurOverlay
+            intensity={50}
+            blurTarget={blurTargetRef}
+            fallbackColor={MediaSurface.overlay}
+            style={styles.overlay}>
+            <View style={styles.centerFill}>
+              <ActivityIndicator size="large" color={MediaSurface.onSurface} />
+              <ThemedText type="small" style={styles.overlayText}>
+                {fr.e2eeMedia.opening}
+              </ThemedText>
+            </View>
+          </BlurOverlay>
         ) : null}
       </Pressable>
       {metadata.length > 0 ? (
@@ -207,27 +253,25 @@ const styles = StyleSheet.create({
   frame: {
     borderRadius: Radii.md,
     overflow: 'hidden',
-    backgroundColor: '#1c1c1e',
+    backgroundColor: MediaSurface.background,
   },
   placeholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2c2c2e',
+    backgroundColor: MediaSurface.background,
   },
   overlay: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.35)',
   },
+  centerFill: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.one },
   metadata: { paddingTop: 2, textAlign: 'right' },
-  overlayText: { color: '#ffffff' },
+  overlayText: { color: MediaSurface.onSurface },
   playBadge: {
     position: 'absolute',
     alignSelf: 'center',
     top: '42%',
     padding: 10,
     borderRadius: Radii.full,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: MediaSurface.overlay,
   },
   durationPill: {
     position: 'absolute',
@@ -236,9 +280,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: Radii.sm,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: MediaSurface.overlay,
   },
-  durationText: { color: '#ffffff' },
+  durationText: { color: MediaSurface.onSurface },
   captionBox: { marginTop: Spacing.one, maxWidth: 280 },
   caption: { lineHeight: 18 },
   closeRow: { marginTop: Spacing.one },

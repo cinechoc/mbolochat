@@ -21,7 +21,10 @@ function timeOf(message: StoredE2eeMessage): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export function buildMessageRows(messages: StoredE2eeMessage[]): E2eeListRow[] {
+export function buildMessageRows(
+  messages: StoredE2eeMessage[],
+  currentUserId: string,
+): E2eeListRow[] {
   const rows: E2eeListRow[] = [];
   let lastLabel = '';
   let lastMs: number | null = null;
@@ -31,7 +34,7 @@ export function buildMessageRows(messages: StoredE2eeMessage[]): E2eeListRow[] {
     const ms = timeOf(message);
     const iso = new Date(ms).toISOString();
     const label = formatDateLabel(iso);
-    const sender = message.mine === 1 ? 'me' : 'peer';
+    const sender = message.sender_id === currentUserId ? 'me' : 'peer';
 
     if (label !== lastLabel) {
       rows.push({ key: `date-${message.id}`, type: 'date', label });

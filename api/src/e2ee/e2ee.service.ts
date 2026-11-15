@@ -17,6 +17,7 @@ import {
   refreshTokens,
 } from '../db/schema.js';
 import type { JwtPayload } from '../auth/jwt-payload.js';
+import { isE2eeEnabled } from './enabled.js';
 
 export interface PublicPrekey {
   keyId: string;
@@ -67,8 +68,7 @@ export class E2eeService {
   constructor(@Inject(DRIZZLE) private readonly db: Database) {}
 
   assertEnabled(): void {
-    const value = process.env.E2EE_ENABLED;
-    if (value !== '1' && value?.toLowerCase() !== 'true') {
+    if (!isE2eeEnabled()) {
       throw new NotFoundException('Chiffrement de bout en bout indisponible');
     }
   }

@@ -140,6 +140,7 @@ describe('migrateE2eeSchema — base neuve', () => {
         'e2ee_drafts',
         'e2ee_outbox',
         'e2ee_bundles',
+        'e2ee_view_once_consumed',
         'e2ee_schema_meta',
       ]),
     );
@@ -934,5 +935,50 @@ describe('migrateE2eeSchema — v8 : suppression pour tous', () => {
     )).toEqual([
       { target_id: 'future', author_id: 'peer-1', event_message_id: 'event-1' },
     ]);
+  });
+});
+
+describe('migrateE2eeSchema — v15 : lectures uniques consommées', () => {
+  it('crée une tombstone idempotente et son index de reprise', async () => {
+    const db = adapter(new DatabaseSync(':memory:'));
+    await migrateE2eeSchema(db);
+
+    await db.runAsync(
+      `INSERT INTO e2ee_view_once_consumed
+         (message_id, conversation_id, server_hidden, created_at)
+       VALUES ('message-1', 'conv-1', 0, '2026-01-01T00:00:00Z')
+       ON CONFLICT(message_id) DO NOTHING`,
+    );
+    await db.runAsync(
+      `INSERT INTO e2ee_view_once_consumed
+         (message_id, conversation_id, server_hidden, created_at)
+       VALUES ('message-1', 'conv-1', 1, '2026-01-02T00:00:00Z')
+       ON CONFLICT(message_id) DO NOTHING`,
+    );
+
+    expect(
+      await db.getAllAsync<Record<string, unknown>>(
+        'SELECT message_id, conversation_id, server_hidden FROM e2ee_view_once_consumed',
+      ),
+    ).toEqual([
+      { message_id: 'message-1', conversation_id: 'conv-1', server_hidden: 0 },
+    ]);
+  });
+});
+
+describe('migrateE2eeSchema — réparation d’un schéma partiel', () => {
+  it('recrée les tables manquantes quand le marqueur de version est en avance', async () => {
+    const db = adapter(legacyDatabase());
+    expect(await migrateE2eeSchema(db)).toBe(E2EE_SCHEMA_VERSION);
+
+    // État observé après une migration interrompue par deux connexions
+    // concurrentes : la version est écrite mais les tables de base manquent.
+    await db.execAsync('DROP TABLE e2ee_account');
+    expect(await migrateE2eeSchema(db)).toBe(E2EE_SCHEMA_VERSION);
+
+    const repaired = await db.getFirstAsync<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'e2ee_account'`,
+    );
+    expect(repaired?.name).toBe('e2ee_account');
   });
 });

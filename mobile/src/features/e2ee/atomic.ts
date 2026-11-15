@@ -273,6 +273,140 @@ export async function markEnvelopeSent(
   );
 }
 
+/** Enveloppe encore en vol, telle que le journal la conserve. */
+export interface PendingOutboxEnvelope {
+  clientId: string;
+  conversationId: string;
+  accountId: string | null;
+  envelope: OutgoingEnvelope;
+  state: 'pending' | 'sending';
+  attempts: number;
+}
+
+/**
+ * Enveloppes déjà chiffrées à rejouer après une coupure.
+ *
+ * Aucun chiffrement n'est nécessaire : l'enveloppe et la session ont été
+ * écrites ensemble avant le premier envoi. Le filtre par compte empêche une
+ * enveloppe de l'ancien utilisateur de partir avec le jeton du nouveau.
+ */
+export async function listPendingEnvelopes(
+  db: SQLiteDatabase,
+  accountId: string,
+  limit = 20,
+): Promise<PendingOutboxEnvelope[]> {
+  const rows = await db.getAllAsync<{
+    client_id: string;
+    conversation_id: string;
+    account_id: string | null;
+    envelope: string;
+    envelope_type: string;
+    state: 'pending' | 'sending';
+    attempts: number;
+  }>(
+    `SELECT o.client_id, o.conversation_id, o.account_id, o.envelope,
+            o.envelope_type, o.state, o.attempts
+       FROM e2ee_outbox o
+       LEFT JOIN e2ee_messages m ON m.client_id = o.client_id
+      WHERE o.state IN ('pending', 'sending') AND o.account_id = ?
+        AND o.attachment_id IS NULL
+        AND (m.id IS NULL OR m.scheduled_at IS NULL)
+      ORDER BY o.created_at ASC
+      LIMIT ?`,
+    accountId,
+    limit,
+  );
+  return rows.map((row) => ({
+    clientId: row.client_id,
+    conversationId: row.conversation_id,
+    accountId: row.account_id,
+    envelope: {
+      payload: row.envelope,
+      payloadType: row.envelope_type as OutgoingEnvelope['payloadType'],
+    },
+    state: row.state,
+    attempts: row.attempts,
+  }));
+}
+
+/**
+ * Rattache les enveloppes antérieures à la v3 à l'identité locale courante.
+ *
+ * Ces lignes ont été écrites avant que l'outbox ne mémorise son compte. Une
+ * base dont l'identité est déjà connue ne peut appartenir qu'au compte
+ * propriétaire (le bootstrap supprime la base lors d'un changement de compte) :
+ * les laisser à `NULL` les rendrait définitivement invisibles à la reprise.
+ * Les lignes déjà envoyées gardent leur trace inchangée.
+ */
+export async function claimLegacyOutboxEnvelopes(
+  db: SQLiteDatabase,
+  accountId: string,
+): Promise<number> {
+  const result = await db.runAsync(
+    `UPDATE e2ee_outbox
+        SET account_id = ?, updated_at = ?
+      WHERE account_id IS NULL AND state != 'sent'`,
+    accountId,
+    new Date().toISOString(),
+  );
+  return result.changes;
+}
+
+/**
+ * Transition d'état d'une enveloppe. `lastError` ne reçoit qu'un code fermé
+ * (`network`, `server_refused`) : jamais le texte brut d'une exception.
+ */
+export async function setEnvelopeState(
+  db: SQLiteDatabase,
+  clientId: string,
+  state: 'pending' | 'sending' | 'sent' | 'failed',
+  options: { error?: string | null; incrementAttempts?: boolean } = {},
+): Promise<void> {
+  const increment = options.incrementAttempts ? 1 : 0;
+  await db.runAsync(
+    `UPDATE e2ee_outbox
+        SET state = ?, last_error = ?, attempts = attempts + ?, updated_at = ?
+      WHERE client_id = ?`,
+    state,
+    options.error ?? null,
+    increment,
+    new Date().toISOString(),
+    clientId,
+  );
+}
+
+/** Reprise explicite d'un envoi en échec : l'enveloppe et le `clientId` restent. */
+export async function resetEnvelopeForRetry(
+  db: SQLiteDatabase,
+  clientId: string,
+): Promise<void> {
+  await setEnvelopeState(db, clientId, 'pending', { error: null });
+}
+
+/**
+ * Abandon local d'une enveloppe non acquittée. Une ligne `sent` est conservée
+ * comme trace d'idempotence ; elle ne sera jamais rejouée.
+ */
+export async function discardPendingEnvelope(
+  db: SQLiteDatabase,
+  clientId: string,
+): Promise<void> {
+  await db.runAsync(
+    `DELETE FROM e2ee_outbox WHERE client_id = ? AND state != 'sent'`,
+    clientId,
+  );
+  // La préparation média retient le ciphertext durable. Sans cette transition,
+  // une enveloppe abandonnée pourrait laisser croire qu'un média reste à
+  // reprendre après la suppression de la bulle.
+  await db.runAsync(
+    `UPDATE e2ee_media_prep
+        SET state = 'abandoned', last_error = 'discarded', updated_at = ?
+      WHERE client_id = ? AND state != 'abandoned'`,
+    new Date().toISOString(),
+    clientId,
+  );
+}
+
 /**
  * Écriture atomique d'un message entrant déchiffré.
  *
@@ -286,6 +420,11 @@ export interface PersistIncomingInput {
   db: SQLiteDatabase;
   /** S1 : état après déchiffrement. */
   session: E2eeSessionRow;
+  /**
+   * Clé de session précédente à retirer atomiquement quand le serveur a changé
+   * l'identifiant d'appareil d'une session Olm existante après reconnexion.
+   */
+  replacesSessionDeviceId?: string;
   /**
    * Compte après consommation d'une éventuelle prekey, ou `null` quand le
    * déchiffrement n'a pas touché au pickle global : l'écrire quand même
@@ -387,6 +526,16 @@ export async function persistIncoming(
         input.deletion.targetId,
         input.deletion.authorId,
         input.message.conversation_id,
+      );
+    }
+    if (
+      input.replacesSessionDeviceId &&
+      input.replacesSessionDeviceId !== input.session.peer_device_id
+    ) {
+      await tx.runAsync(
+        'DELETE FROM e2ee_sessions WHERE peer_user_id = ? AND peer_device_id = ?',
+        input.session.peer_user_id,
+        input.replacesSessionDeviceId,
       );
     }
     await saveSessionWith(tx, input.session);

@@ -3,6 +3,9 @@ import * as e2eeDeletion from '@/features/e2ee/deletion';
 import * as e2eeDeletionFiles from '@/features/e2ee/deletionFiles';
 import * as e2eeEphemeral from '@/features/e2ee/ephemeral';
 import * as e2eeMedia from '@/features/e2ee/media';
+import * as e2eeMediaPrep from '@/features/e2ee/mediaPrep';
+import * as e2eeAtomic from '@/features/e2ee/atomic';
+import * as e2eeOutboxRecovery from '@/features/e2ee/outboxRecovery';
 import * as e2eeReceipts from '@/features/e2ee/receipts';
 import * as e2eeScheduled from '@/features/e2ee/scheduledQueue';
 import * as e2eeText from '@/features/e2ee/text';
@@ -26,6 +29,7 @@ export const CLASSIC_DEPS: ClassicTransportDeps = {
 export const E2EE_DEPS: E2eeTransportDeps = {
   api,
   cache,
+  sync,
   socket,
   db: e2eeDb,
   crypto: {
@@ -40,7 +44,9 @@ export const E2EE_DEPS: E2eeTransportDeps = {
   },
   deletion: { ...e2eeDeletion, ...e2eeDeletionFiles },
   ephemeral: e2eeEphemeral,
+  mediaPrep: e2eeMediaPrep,
   scheduled: e2eeScheduled,
+  outboxRecovery: { ...e2eeOutboxRecovery, ...e2eeAtomic },
   receipts: e2eeReceipts,
   clock: () => Date.now(),
 };

@@ -36,7 +36,8 @@ export function SecurityCodeScreen() {
     peerId?: string;
     conversationId?: string;
   }>();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const userId = user?.id;
   const router = useRouter();
   const theme = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
@@ -48,12 +49,12 @@ export function SecurityCodeScreen() {
   const [scanResult, setScanResult] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token || !peerId) return;
+    if (!token || !userId || !peerId) return;
     let cancelled = false;
     void (async () => {
       let database: Awaited<ReturnType<typeof openE2eeDatabase>> | null = null;
       try {
-        database = await openE2eeDatabase();
+        database = await openE2eeDatabase(userId);
         const local = await loadE2eeAccount(database.db);
         if (!local) throw new Error('missing_account');
         const session = await loadSession(database.db, peerId);
@@ -77,13 +78,13 @@ export function SecurityCodeScreen() {
     return () => {
       cancelled = true;
     };
-  }, [peerId, token]);
+  }, [peerId, token, userId]);
 
   const markVerified = useCallback(async () => {
-    if (!peerId || !peerIdentityKey || !code) return;
+    if (!userId || !peerId || !peerIdentityKey || !code) return;
     let database: Awaited<ReturnType<typeof openE2eeDatabase>> | null = null;
     try {
-      database = await openE2eeDatabase();
+      database = await openE2eeDatabase(userId);
       await markIdentityVerified(database.db, peerId, peerIdentityKey, code);
       setVerification(await loadIdentityVerification(database.db, peerId));
     } catch {
@@ -91,7 +92,7 @@ export function SecurityCodeScreen() {
     } finally {
       await database?.db.closeAsync().catch(() => undefined);
     }
-  }, [code, peerId, peerIdentityKey]);
+  }, [code, peerId, peerIdentityKey, userId]);
 
   const openScanner = useCallback(async () => {
     if (!permission?.granted) {

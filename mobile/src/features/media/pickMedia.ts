@@ -33,6 +33,16 @@ export interface PickedMediaResult {
   rejected: RejectedMedia[];
 }
 
+export interface LocalMediaInput {
+  uri: string;
+  kind: 'image' | 'video';
+  mime?: string | null;
+  name?: string | null;
+  width?: number | null;
+  height?: number | null;
+  durationMs?: number | null;
+}
+
 const IMAGE_MIMES: Record<string, string> = {
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
@@ -131,6 +141,39 @@ export function normalizeImageAsset(
     width: asset.width > 0 ? Math.round(asset.width) : undefined,
     height: asset.height > 0 ? Math.round(asset.height) : undefined,
     durationMs: kind === 'video' && asset.duration && asset.duration > 0 ? Math.round(asset.duration) : undefined,
+  };
+}
+
+/** Normalise une capture locale (caméra) avec les mêmes plafonds que la galerie. */
+export function normalizeLocalMedia(input: LocalMediaInput): PickedAttachment | RejectedMedia {
+  const info = localFileInfo(input.uri);
+  const ext = extensionOf(input.name) || extensionOf(info.name) || extensionOf(input.uri);
+  const fallbackMime =
+    input.kind === 'video' ? VIDEO_MIMES[ext] ?? 'video/mp4' : IMAGE_MIMES[ext] ?? 'image/jpeg';
+  const mime = input.mime?.trim() || info.mime || fallbackMime;
+  const name =
+    cleanName(input.name) ||
+    info.name ||
+    (input.kind === 'video'
+      ? `video${ext ? `.${ext}` : '.mp4'}`
+      : `photo${ext ? `.${ext}` : '.jpg'}`);
+  const size = info.size;
+  const limit = input.kind === 'video' ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
+  if (size !== null && size > limit) {
+    return { name, reason: tooLargeReason(input.kind) };
+  }
+  return {
+    uri: input.uri,
+    kind: input.kind,
+    mime,
+    name,
+    size,
+    width: input.width && input.width > 0 ? Math.round(input.width) : undefined,
+    height: input.height && input.height > 0 ? Math.round(input.height) : undefined,
+    durationMs:
+      input.kind === 'video' && input.durationMs && input.durationMs > 0
+        ? Math.round(input.durationMs)
+        : undefined,
   };
 }
 

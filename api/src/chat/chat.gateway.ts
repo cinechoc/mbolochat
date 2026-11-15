@@ -36,6 +36,7 @@ import {
   type StickerAttachmentMeta,
 } from './sticker-attachment.js';
 import { isMessageType, isValidStickerRef, type MessageType } from './sticker-ref.js';
+import { isE2eeEnabled } from '../e2ee/enabled.js';
 
 const roomOf = (conversationId: string) => `conv:${conversationId}`;
 
@@ -450,13 +451,12 @@ export class ChatGateway
     if (author && !author.typingIndicator) return;
     // Avec E2EE, aucun brouillon ne traverse le serveur ; drapeau coupé, le
     // comportement historique (texte de saisie) est conservé.
-    const e2eeEnabled = ['1', 'true'].includes((process.env.E2EE_ENABLED ?? '').toLowerCase());
     const text = typeof body?.text === 'string' ? body.text.slice(0, 300) : '';
     client.to(roomOf(conversationId)).emit('typing', {
       conversationId,
       userId,
       typing: body?.typing !== false,
-      ...(e2eeEnabled ? {} : { text }),
+      ...(isE2eeEnabled() ? {} : { text }),
     });
   }
 

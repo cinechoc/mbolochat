@@ -67,12 +67,15 @@ export interface LocalStore {
   /** Ne recule jamais : le rattrapage repart du point le plus avancé. */
   advanceCursor(ms: number): Promise<void>;
   clear(): Promise<void>;
+  readOwner(): Promise<string | null>;
+  writeOwner(userId: string): Promise<void>;
 }
 
 // ————— Mémoire (repli) —————
 
 const memoryItems = new Map<string, OutboxItem>();
 let memoryCursor: number | null = null;
+let memoryOwner: string | null = null;
 
 const memoryStore: LocalStore = {
   async save(item) {
@@ -98,6 +101,12 @@ const memoryStore: LocalStore = {
   async clear() {
     memoryItems.clear();
     memoryCursor = null;
+  },
+  async readOwner() {
+    return memoryOwner;
+  },
+  async writeOwner(userId) {
+    memoryOwner = userId;
   },
 };
 
@@ -162,6 +171,10 @@ create index if not exists outbox_conversation_idx on outbox (conversation_id, c
 create table if not exists sync_state (
   id integer primary key,
   since_ms integer not null
+);
+create table if not exists store_meta (
+  id integer primary key check (id = 1),
+  user_id text not null
 );
 `;
 
@@ -339,6 +352,18 @@ function sqliteStore(db: Database): LocalStore {
     async clear() {
       await db.execAsync('delete from outbox; delete from sync_state;');
     },
+    async readOwner() {
+      const row = await db.getFirstAsync<{ user_id: string }>(
+        'select user_id from store_meta where id = 1',
+      );
+      return row?.user_id ?? null;
+    },
+    async writeOwner(userId) {
+      await db.runAsync(
+        'insert into store_meta (id, user_id) values (1, ?) on conflict (id) do update set user_id = excluded.user_id',
+        userId,
+      );
+    },
   };
 }
 
@@ -375,7 +400,23 @@ export function getStore(): Promise<LocalStore> {
   return opening;
 }
 
-/** Oublie file et curseur (déconnexion, changement de compte). */
-export async function resetLocalStore(): Promise<void> {
-  (await getStore()).clear();
+/**
+ * Rattache la file et le curseur au compte authentifié. Une reconnexion du
+ * même compte conserve ses messages en attente ; un autre compte ne peut ni
+ * les voir ni les envoyer, et repart d'une file vide.
+ */
+let activating: Promise<void> = Promise.resolve();
+
+export function activateLocalStore(userId: string): Promise<void> {
+  const run = async () => {
+    const current = await getStore();
+    const owner = await current.readOwner();
+    if (owner !== null && owner !== userId) {
+      await current.clear();
+    }
+    await current.writeOwner(userId);
+  };
+  const next = activating.then(run, run);
+  activating = next.catch(() => undefined);
+  return next;
 }

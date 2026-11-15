@@ -678,13 +678,20 @@ export const api = {
       fallbackPrekey?: string;
       fallbackPrekeySignature?: string;
       fallbackPrekeyKeyId?: string;
+      deviceName?: string;
+      platform?: string;
       oneTimeKeys: { keyId: string; key: string; signature: string }[];
     },
   ) {
     return request<{ deviceId: string; replaced: boolean }>('/e2ee/devices', {
       method: 'POST',
       token,
-      body,
+      body: {
+        ...body,
+        deviceName:
+          body.deviceName ?? (Device.modelName ?? Device.deviceName ?? 'Appareil').slice(0, 80),
+        platform: body.platform ?? Platform.OS,
+      },
     });
   },
 

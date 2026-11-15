@@ -74,7 +74,7 @@ const options: ClassicTransportOptions = {
 function createFakes(seed: Message[]) {
   const cache = {
     getConversation: vi.fn(() => null),
-    getMessages: vi.fn(() => null),
+    getMessages: vi.fn((): Message[] | null => null),
     setMessages: vi.fn(),
     setConversation: vi.fn(),
     getDraft: vi.fn(() => ''),
@@ -242,6 +242,72 @@ describe('ClassicTransport — anti-downgrade et outbox', () => {
     expect(fakes.socket.emit).toHaveBeenCalledWith('message:read', {
       conversationId: 'conversation-1',
     });
+    await transport.dispose();
+  });
+
+  it('ne perd pas un message socket arrivé pendant le chargement initial', async () => {
+    const fakes = createFakes(SEED);
+    let resolveHistory!: (rows: Message[]) => void;
+    fakes.api.listMessages.mockImplementationOnce(
+      () => new Promise<Message[]>((resolve) => {
+        resolveHistory = resolve;
+      }),
+    );
+    const transport = new ClassicTransport(fakes.deps, options);
+    const loading = transport.loadInitial();
+    const off = transport.subscribe({
+      onMessage: () => undefined,
+      onMessageRemoved: () => undefined,
+      onReceipts: () => undefined,
+      onReaction: () => undefined,
+      onTyping: () => undefined,
+      onConnection: () => undefined,
+      onConversationUpdated: () => undefined,
+      onConversationRemoved: () => undefined,
+      onError: () => undefined,
+      onFatal: () => undefined,
+    });
+
+    const live = message('live', '2026-01-01T00:00:03.000Z');
+    fakes.emitEvent('message:new', live);
+    resolveHistory(SEED);
+
+    const snapshot = await loading;
+    expect(snapshot.messages.map((entry) => entry.id)).toEqual(['a', 'b', 'live']);
+    expect(fakes.cache.setMessages).toHaveBeenLastCalledWith(
+      'conversation-1',
+      expect.arrayContaining([expect.objectContaining({ id: 'live' })]),
+    );
+    off();
+    await transport.dispose();
+  });
+
+  it('repart de l’historique local avant de fusionner la réponse du serveur', async () => {
+    const fakes = createFakes([message('server', '2026-01-01T00:00:04.000Z')]);
+    fakes.cache.getMessages.mockReturnValueOnce([
+      message('cached', '2026-01-01T00:00:01.000Z'),
+    ]);
+    const transport = new ClassicTransport(fakes.deps, options);
+
+    const snapshot = await transport.loadInitial();
+
+    expect(snapshot.messages.map((entry) => entry.id)).toEqual(['cached', 'server']);
+    expect(fakes.cache.getMessages).toHaveBeenCalledWith('conversation-1');
+    await transport.dispose();
+  });
+
+  it('garde les messages locaux quand le serveur est indisponible', async () => {
+    const fakes = createFakes(SEED);
+    fakes.api.getConversation.mockRejectedValueOnce(new Error('hors ligne'));
+    fakes.api.listMessages.mockRejectedValueOnce(new Error('hors ligne'));
+    fakes.api.listReceipts.mockRejectedValueOnce(new Error('hors ligne'));
+    fakes.cache.getMessages.mockReturnValueOnce(SEED);
+    const transport = new ClassicTransport(fakes.deps, options);
+
+    const snapshot = await transport.loadInitial();
+
+    expect(snapshot.messages.map((entry) => entry.id)).toEqual(['a', 'b']);
+    expect(fakes.socket.emit).not.toHaveBeenCalledWith('message:read', expect.anything());
     await transport.dispose();
   });
 

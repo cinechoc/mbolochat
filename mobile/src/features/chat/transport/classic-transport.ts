@@ -124,27 +124,50 @@ export class ClassicTransport implements ChatTransport {
   }
 
   async loadInitial(): Promise<ChatSnapshot> {
-    const [summary, history, receipts, queued] = await Promise.all([
+    // Le disque est lu avant toute requête : une coupure réseau ne doit pas
+    // vider une conversation déjà consultée sur cet appareil.
+    this.messages = mergeMessages(
+      this.messages,
+      this.deps.cache.getMessages(this.conversationId) ?? [],
+    );
+    const [summaryResult, historyResult, receiptsResult, queuedResult] = await Promise.allSettled([
       this.deps.api.getConversation(this.token, this.conversationId),
       this.deps.api.listMessages(this.token, this.conversationId, { limit: PAGE_SIZE }),
       this.deps.api.listReceipts(this.token, this.conversationId),
       this.deps.outbox.listOutbox(this.conversationId),
     ]);
-    this.summary = summary;
-    this.messages = history;
-    this.receipts = groupReceipts(receipts);
-    this.queued = queued;
-    this.deps.cache.setConversation(summary);
-    this.deps.cache.setMessages(this.conversationId, history);
-    void this.deps.sync.advanceCursor(history);
+    if (summaryResult.status === 'fulfilled') {
+      this.summary = summaryResult.value;
+      this.deps.cache.setConversation(this.summary);
+    }
+    // Un `message:new` a pu arriver pendant les requêtes ci-dessus. L'historique
+    // est un instantané : le fusionner avec l'état live évite de perdre le
+    // message dans la fenêtre entre la réponse REST et le rendu.
+    if (historyResult.status === 'fulfilled') {
+      this.messages = mergeMessages(this.messages, historyResult.value);
+    }
+    if (receiptsResult.status === 'fulfilled') {
+      this.receipts = groupReceipts(receiptsResult.value);
+    }
+    if (queuedResult.status === 'fulfilled') {
+      this.queued = queuedResult.value;
+    }
+    if (historyResult.status === 'rejected' && this.messages.length === 0) {
+      throw historyResult.reason;
+    }
+    this.deps.cache.setMessages(this.conversationId, this.messages);
+    void this.deps.sync.advanceCursor(this.messages);
     // Même déclencheur que l'ancien écran : la lecture est signalée une fois
     // l'historique chargé, jamais avant.
-    this.deps.socket.getSocket()?.emit('message:read', { conversationId: this.conversationId });
+    if (historyResult.status === 'fulfilled') {
+      this.deps.socket.getSocket()?.emit('message:read', { conversationId: this.conversationId });
+    }
     return {
       messages: this.views(),
       receipts: this.receipts,
-      hasMore: history.length >= PAGE_SIZE,
-      unreadCount: summary.unreadCount,
+      hasMore:
+        historyResult.status === 'fulfilled' && historyResult.value.length >= PAGE_SIZE,
+      unreadCount: this.summary.unreadCount,
       ephemeralSeconds: 0,
     };
   }

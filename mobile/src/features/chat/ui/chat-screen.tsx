@@ -1,4 +1,3 @@
-import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
 import {
   ChevronDown,
@@ -46,14 +45,19 @@ import { mediaUrl } from '@/features/media/mediaUrl';
 import { createMediaLeaseRegistry } from '../model/media-leases';
 import { canMarkEncryptedRead } from '../model/read-gate';
 import { ImageViewer, VideoViewer } from '@/features/media/MediaViewers';
+import { CameraCapture, type CameraCaptureMode } from '@/features/media/CameraCapture';
 import {
-  isRejectedMedia,
-  normalizeImageAsset,
+  MediaComposerModal,
+  type MediaComposerValue,
+} from '@/features/media/MediaComposerModal';
+import {
   pickDocuments,
   pickLibraryMedia,
+  type PickedAttachment,
 } from '@/features/media/pickMedia';
 import { closeMedia } from '@/features/e2ee/mediaStore';
 import { isE2eeEnabled } from '@/features/e2ee/policy';
+import { useE2eeInitState } from '@/features/e2ee/useE2eeInitState';
 import {
   READ_VISIBILITY_MIN_TIME_MS,
   READ_VISIBILITY_PERCENT,
@@ -89,6 +93,7 @@ import {
   savePinnedMessageIds,
   togglePinnedMessageId,
 } from '../model/pinned-messages';
+import { newForeignMessageIds } from '../model/messages-state';
 import type {
   ChatCapabilities,
   ChatMessageView,
@@ -163,6 +168,12 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   const [forwardTargets, setForwardTargets] = useState<ConversationSummary[]>([]);
   const [forwardLoading, setForwardLoading] = useState(false);
   const [viewOnceFor, setViewOnceFor] = useState<ChatMessageView | null>(null);
+  const [cameraMode, setCameraMode] = useState<CameraCaptureMode | null>(null);
+  const [mediaComposer, setMediaComposer] = useState<{
+    items: PickedAttachment[];
+    total: number;
+  } | null>(null);
+  const [composerSending, setComposerSending] = useState(false);
   const [chatAreaHeight, setChatAreaHeight] = useState(0);
   const media = useChatMedia();
   const { openImage, openVideo, closeImage, closeVideo } = media;
@@ -181,6 +192,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   });
   const resolution = conversation.resolution;
   const mode = resolution.kind;
+  const e2eeInit = useE2eeInitState();
   const summary =
     resolution.kind === 'classic' || resolution.kind === 'e2ee' ? resolution.summary : null;
   const currentUser = useMemo(() => (user ? identityOf(user) : null), [user]);
@@ -246,6 +258,30 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     unreadCount: summary?.unreadCount ?? 0,
   });
   const scroll = useChatScroll(rows);
+  const knownMessageIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const next = new Set(messages.map((message) => message.id));
+    const known = knownMessageIdsRef.current;
+    knownMessageIdsRef.current = next;
+    if (
+      !known ||
+      mode !== 'e2ee' ||
+      !transport ||
+      !ready ||
+      !focused ||
+      !appActiveRef.current ||
+      !scroll.atBottomRef.current
+    ) {
+      return;
+    }
+    const ids = newForeignMessageIds(messages, known);
+    if (ids.length === 0) return;
+    const timer = setTimeout(() => {
+      if (!focused || !appActiveRef.current || !scroll.atBottomRef.current) return;
+      void transport.markRead(ids);
+    }, READ_VISIBILITY_MIN_TIME_MS);
+    return () => clearTimeout(timer);
+  }, [messages, mode, transport, ready, focused, scroll.atBottomRef]);
   useChatSecurity(mode);
   const bubbleStyle = useMemo(
     () => ({ maxWidth: Math.round(windowWidth * 0.7) }),
@@ -753,7 +789,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
         setReplyTo(null);
       } catch (error) {
         Alert.alert(
-          fr.e2eeChat.error,
+          fr.e2eeChat.sendFailedTitle,
           editing ? fr.chat.unified.editFailed : fr.chat.unified.failedToSend,
         );
         throw error;
@@ -762,8 +798,8 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     [transport, replyToId, editing],
   );
 
-  const sendAttachments = useCallback(
-    async (files: Awaited<ReturnType<typeof pickLibraryMedia>>) => {
+  const sendDocuments = useCallback(
+    async (files: Awaited<ReturnType<typeof pickDocuments>>) => {
       if (!files || !transport) return;
       if (files.rejected.length > 0) {
         Alert.alert(fr.chat.picker.filesIgnored(files.rejected.length), files.rejected[0].reason);
@@ -773,7 +809,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
           await transport.sendMedia(
             {
               uri: file.uri,
-              kind: file.kind === 'video' ? 'video' : file.kind === 'file' ? 'file' : 'image',
+              kind: 'file',
               mime: file.mime,
               name: file.name,
               size: file.size,
@@ -796,47 +832,86 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
 
   const pickPhotos = useCallback(() => {
     void pickLibraryMedia()
-      .then((picked) => sendAttachments(picked))
-      .catch(() => undefined);
-  }, [sendAttachments]);
+      .then((picked) => {
+        if (!picked) return;
+        if (picked.rejected.length > 0) {
+          Alert.alert(
+            fr.chat.picker.filesIgnored(picked.rejected.length),
+            picked.rejected[0].reason,
+          );
+        }
+        if (picked.files.length > 0) {
+          setMediaComposer({ items: picked.files, total: picked.files.length });
+        }
+      })
+      .catch(() => Alert.alert(fr.e2eeChat.error, fr.e2eeChat.mediaSendFailed));
+  }, []);
 
-  const pickCamera = useCallback(() => {
-    void (async () => {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert(fr.chat.picker.cameraDeniedTitle, fr.chat.picker.cameraDeniedBody);
-        return;
+  const pickCamera = useCallback((mode: CameraCaptureMode) => {
+    setCameraMode(mode);
+  }, []);
+
+  const handleCameraCaptured = useCallback((asset: PickedAttachment) => {
+    setCameraMode(null);
+    setMediaComposer({ items: [asset], total: 1 });
+  }, []);
+
+  const closeMediaComposer = useCallback(() => {
+    if (composerSending) return;
+    setMediaComposer(null);
+  }, [composerSending]);
+
+  const sendComposedMedia = useCallback(
+    async (value: MediaComposerValue) => {
+      if (!transport || !mediaComposer || composerSending) return;
+      const file = mediaComposer.items[0];
+      if (!file) return;
+      setComposerSending(true);
+      try {
+        await transport.sendMedia(
+          {
+            uri: file.uri,
+            kind: file.kind === 'video' ? 'video' : 'image',
+            mime: file.mime,
+            name: file.name,
+            size: file.size,
+            width: file.width ?? null,
+            height: file.height ?? null,
+            durationMs: file.durationMs ?? null,
+            hd: value.hd,
+            viewOnce: value.viewOnce,
+          },
+          value.caption,
+          replyToId,
+        );
+        if (mediaComposer.items.length <= 1) {
+          setMediaComposer(null);
+          setReplyTo(null);
+        } else {
+          setMediaComposer({
+            items: mediaComposer.items.slice(1),
+            total: mediaComposer.total,
+          });
+        }
+      } catch (error) {
+        Alert.alert(
+          fr.e2eeChat.error,
+          value.hd && error instanceof Error && error.message === 'media_too_large'
+            ? fr.e2eeMedia.tooLargeHd
+            : fr.e2eeChat.mediaSendFailed,
+        );
+      } finally {
+        setComposerSending(false);
       }
-      const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 });
-      if (result.canceled || !result.assets[0] || !transport) return;
-      const normalized = normalizeImageAsset(result.assets[0]);
-      if (isRejectedMedia(normalized)) {
-        Alert.alert(fr.chat.picker.filesIgnored(1), normalized.reason);
-        return;
-      }
-      await transport.sendMedia(
-        {
-          uri: normalized.uri,
-          kind: 'image',
-          mime: normalized.mime,
-          name: normalized.name,
-          size: normalized.size,
-          width: normalized.width ?? null,
-          height: normalized.height ?? null,
-          durationMs: null,
-        },
-        '',
-        replyToId,
-      );
-      setReplyTo(null);
-    })().catch(() => Alert.alert(fr.e2eeChat.error, fr.e2eeChat.mediaSendFailed));
-  }, [transport, replyToId]);
+    },
+    [composerSending, mediaComposer, replyToId, transport],
+  );
 
   const pickFiles = useCallback(() => {
     void pickDocuments()
-      .then((picked) => sendAttachments(picked))
+      .then((picked) => sendDocuments(picked))
       .catch(() => undefined);
-  }, [sendAttachments]);
+  }, [sendDocuments]);
 
   const handleReply = useCallback((message: ChatMessageView) => {
     setReplyTo(quoteOfView(message));
@@ -982,6 +1057,13 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
     ? fr.chat.unified.blockedPeer
     : isGroup && summary?.whoCanSend === 'admins' && summary.myRole !== 'admin'
       ? fr.chat.unified.groupAdminsOnly
+      : mode === 'e2ee' &&
+          (e2eeInit.status === 'idle' ||
+            e2eeInit.status === 'pending' ||
+            e2eeInit.status === 'failed')
+        ? e2eeInit.status === 'idle' || e2eeInit.status === 'pending'
+          ? fr.e2ee.initPending
+          : fr.e2ee.initNotReady
       : null;
 
   return (
@@ -1224,6 +1306,30 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
       />
 
       <ViewOnceModal message={viewOnceFor} token={token} onClose={closeViewOnce} />
+
+      {cameraMode ? (
+        <CameraCapture
+          key={cameraMode}
+          visible
+          initialMode={cameraMode}
+          onClose={() => setCameraMode(null)}
+          onCaptured={handleCameraCaptured}
+        />
+      ) : null}
+
+      <MediaComposerModal
+        key={
+          mediaComposer
+            ? `${mediaComposer.total - mediaComposer.items.length + 1}:${mediaComposer.items[0]?.uri ?? ''}`
+            : 'closed'
+        }
+        media={mediaComposer?.items[0] ?? null}
+        index={mediaComposer ? mediaComposer.total - mediaComposer.items.length + 1 : 1}
+        total={mediaComposer?.total ?? 0}
+        sending={composerSending}
+        onClose={closeMediaComposer}
+        onSend={(value) => void sendComposedMedia(value)}
+      />
 
       <ActionSheet
         visible={seenFor !== null}

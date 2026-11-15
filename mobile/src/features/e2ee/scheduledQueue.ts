@@ -140,7 +140,7 @@ async function scheduleNext(): Promise<void> {
 
   let nextAt: string | null = null;
   try {
-    const { db } = await openE2eeDatabase();
+    const { db } = await openE2eeDatabase(active.currentUserId);
     nextAt = await nextScheduledMessageAt(db, active.currentUserId);
     await db.closeAsync().catch(() => undefined);
   } catch {
@@ -167,7 +167,7 @@ export function drainScheduledQueue(): Promise<void> {
   draining = (async () => {
     const active = config;
     if (!active) return;
-    const { db } = await openE2eeDatabase();
+    const { db } = await openE2eeDatabase(active.currentUserId);
     try {
       const account = await loadE2eeAccount(db);
       if (!account) {

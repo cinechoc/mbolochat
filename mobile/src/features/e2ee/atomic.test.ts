@@ -5,7 +5,12 @@ import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
 import { api } from '@/lib/api';
 import { ensureSocket } from '@/lib/socket';
 import type { ConversationSummary } from '@/lib/types';
-import { persistSessionAndEnvelope } from './atomic';
+import {
+  claimLegacyOutboxEnvelopes,
+  discardPendingEnvelope,
+  listPendingEnvelopes,
+  persistSessionAndEnvelope,
+} from './atomic';
 import type { E2eeAccountRow, E2eeSessionRow } from './db';
 import { migrateE2eeSchema } from './schema';
 import { encryptEnvelope, sendEncryptedText } from './text';
@@ -497,6 +502,9 @@ describe('sendEncryptedText — aucun envoi avant commit, reprise identique', ()
     expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([
       { session_pickle: 'S1' },
     ]);
+    expect(read(fixture, 'SELECT body, send_error FROM e2ee_messages')).toEqual([
+      { body: 'bonjour', send_error: 'send_failed' },
+    ]);
 
     // Reprise : mêmes identifiants, même enveloppe, aucune nouvelle avancée Olm.
     const resumed = socket(async () => ({ id: 'srv-9', createdAt: '2026-01-01T00:00:05Z' }));
@@ -511,6 +519,160 @@ describe('sendEncryptedText — aucun envoi avant commit, reprise identique', ()
     expect(failedPayload.payload).toBe('E1');
     expect(cryptoMock.secureEncrypt).toHaveBeenCalledTimes(1);
     expect(read(fixture, 'SELECT state FROM e2ee_outbox')).toEqual([{ state: 'sent' }]);
+  });
+
+  it('chiffre hors ligne avec la session locale et conserve la bulle', async () => {
+    const fixture = await seeded();
+    apiMock.getE2eeKeyBundle.mockRejectedValueOnce(new Error('network'));
+    cryptoMock.secureEncrypt.mockResolvedValue(seal('S1', 'E1') as never);
+    socket(async () => {
+      throw new Error('réseau coupé');
+    });
+
+    await expect(send(fixture, 'offline-1')).rejects.toThrow('réseau coupé');
+
+    expect(cryptoMock.secureEncrypt).toHaveBeenCalledWith('S0', expect.any(String));
+    expect(read(fixture, 'SELECT envelope, state FROM e2ee_outbox')).toEqual([
+      { envelope: 'E1', state: 'pending' },
+    ]);
+    expect(read(fixture, 'SELECT body, send_error FROM e2ee_messages')).toEqual([
+      { body: 'bonjour', send_error: 'send_failed' },
+    ]);
+    expect(read(fixture, 'SELECT session_pickle FROM e2ee_sessions')).toEqual([
+      { session_pickle: 'S1' },
+    ]);
+  });
+
+  it('marque la bulle en échec quand la connexion socket est refusée', async () => {
+    const fixture = await seeded();
+    apiMock.getE2eeKeyBundle.mockRejectedValueOnce(new Error('network'));
+    cryptoMock.secureEncrypt.mockResolvedValue(seal('S1', 'E1') as never);
+    socketMock.mockRejectedValueOnce(new Error('Connexion au serveur impossible'));
+
+    await expect(send(fixture, 'offline-socket')).rejects.toThrow(
+      'Connexion au serveur impossible',
+    );
+
+    expect(read(fixture, 'SELECT envelope, state FROM e2ee_outbox')).toEqual([
+      { envelope: 'E1', state: 'pending' },
+    ]);
+    expect(read(fixture, 'SELECT body, send_error FROM e2ee_messages')).toEqual([
+      { body: 'bonjour', send_error: 'send_failed' },
+    ]);
+  });
+});
+
+describe('listPendingEnvelopes — reprise automatique ciblée', () => {
+  async function insertOutbox(
+    fixture: Fixture,
+    input: {
+      clientId: string;
+      accountId: string;
+      state: string;
+      attachmentId?: string | null;
+    },
+  ) {
+    await fixture.handle.runAsync(
+      `INSERT INTO e2ee_outbox
+         (client_id, conversation_id, account_id, peer_user_id, peer_device_id,
+          message_id, envelope, envelope_type, session_pickle, attachment_id,
+          media_meta, quote_id, state, attempts, last_error, created_at, updated_at)
+       VALUES (?, 'conv-1', ?, 'peer-1', 'dev-1', NULL, 'E1', 'normal', '',
+               ?, NULL, NULL, ?, 0, NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+      input.clientId,
+      input.accountId,
+      input.attachmentId ?? null,
+      input.state,
+    );
+  }
+
+  it('ne retient que les textes du compte, hors programmés et médias', async () => {
+    const fixture = await seeded();
+    await insertOutbox(fixture, {
+      clientId: 'immediate',
+      accountId: 'local-identity',
+      state: 'pending',
+    });
+    await insertOutbox(fixture, {
+      clientId: 'scheduled',
+      accountId: 'local-identity',
+      state: 'pending',
+    });
+    await fixture.handle.runAsync(
+      `INSERT INTO e2ee_messages
+         (id, conversation_id, sender_id, sender_name, body, created_at, client_id, mine, scheduled_at)
+       VALUES ('scheduled', 'conv-1', 'me', 'Moi', 'plus tard', '2026-01-01T00:00:00Z',
+               'scheduled', 1, '2026-01-01T01:00:00Z')`,
+    );
+    await insertOutbox(fixture, {
+      clientId: 'media',
+      accountId: 'local-identity',
+      state: 'pending',
+      attachmentId: 'upload-1',
+    });
+    await insertOutbox(fixture, {
+      clientId: 'other-account',
+      accountId: 'other-identity',
+      state: 'pending',
+    });
+    await insertOutbox(fixture, {
+      clientId: 'sent',
+      accountId: 'local-identity',
+      state: 'sent',
+    });
+
+    const rows = await listPendingEnvelopes(fixture.db, 'local-identity');
+
+    expect(rows.map((row) => row.clientId)).toEqual(['immediate']);
+    expect(rows[0].envelope).toEqual({ payload: 'E1', payloadType: 'normal' });
+  });
+
+  it('abandonne une enveloppe non envoyée sans effacer la trace sent', async () => {
+    const fixture = await seeded();
+    await insertOutbox(fixture, {
+      clientId: 'pending',
+      accountId: 'local-identity',
+      state: 'pending',
+    });
+    await insertOutbox(fixture, {
+      clientId: 'sent',
+      accountId: 'local-identity',
+      state: 'sent',
+    });
+
+    await discardPendingEnvelope(fixture.db, 'pending');
+    await discardPendingEnvelope(fixture.db, 'sent');
+
+    expect(read(fixture, 'SELECT client_id FROM e2ee_outbox')).toEqual([{ client_id: 'sent' }]);
+  });
+
+  it('rattache les anciennes enveloppes sans compte à l’identité courante', async () => {
+    const fixture = await seeded();
+    await fixture.handle.runAsync(
+      `INSERT INTO e2ee_outbox
+         (client_id, conversation_id, envelope, envelope_type, session_pickle,
+          state, created_at, updated_at)
+       VALUES ('legacy-pending', 'conv-1', 'E1', 'normal', 'S1', 'pending',
+               '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+    );
+    await fixture.handle.runAsync(
+      `INSERT INTO e2ee_outbox
+         (client_id, conversation_id, envelope, envelope_type, session_pickle,
+          state, created_at, updated_at)
+       VALUES ('legacy-sent', 'conv-1', 'E2', 'normal', 'S2', 'sent',
+               '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+    );
+
+    expect(await claimLegacyOutboxEnvelopes(fixture.db, 'local-identity')).toBe(1);
+    expect(
+      read(fixture, 'SELECT client_id, account_id FROM e2ee_outbox ORDER BY client_id'),
+    ).toEqual([
+      { client_id: 'legacy-pending', account_id: 'local-identity' },
+      { client_id: 'legacy-sent', account_id: null },
+    ]);
+    expect((await listPendingEnvelopes(fixture.db, 'local-identity')).map((row) => row.clientId)).toEqual([
+      'legacy-pending',
+    ]);
   });
 });
 

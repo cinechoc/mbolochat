@@ -162,6 +162,18 @@ export const GlassColors = {
 /** Intensité de flou Android, sur l'échelle `expo-blur` (1 à 100). */
 export const BlurIntensity = 72;
 
+/** Surfaces sombres translucides de la caméra et de l’éditeur média. */
+export const MediaSurface = {
+  background: '#080A0D',
+  onSurface: '#FFFFFF',
+  onSurfaceSoft: 'rgba(255,255,255,0.76)',
+  overlay: 'rgba(8,10,13,0.52)',
+  glass: 'rgba(255,255,255,0.14)',
+  glassStrong: 'rgba(255,255,255,0.22)',
+  border: 'rgba(255,255,255,0.22)',
+  recording: '#FF453A',
+} as const;
+
 /**
  * Écran d'appel (1:1 et groupe) : surface bleutée sombre, indépendante du thème
  * clair/sombre de l'application. Les valeurs n'existent qu'ici.

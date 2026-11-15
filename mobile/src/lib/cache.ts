@@ -28,8 +28,13 @@ let storage: Storage | null | undefined;
 function getStorage(): Storage | null {
   if (storage === undefined) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const mod = require('@react-native-async-storage/async-storage') as {
+      // Le chargeur global est utilisé par les runtimes de test ; Metro fournit
+      // le `require` local de chaque module en production.
+      const loader = (globalThis as { require?: (id: string) => unknown }).require;
+      const mod = (loader
+        ? loader('@react-native-async-storage/async-storage')
+        : // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('@react-native-async-storage/async-storage')) as {
         default?: Storage;
       } & Storage;
       storage = mod.default ?? mod;
@@ -59,6 +64,7 @@ async function safe<T>(
 const PREFIX = 'mbolo:cache:v1:';
 /** Au-delà, la donnée est considérée comme trop ancienne et jetée. */
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const OWNER_KEY = 'owner';
 
 interface Entry<T> {
   value: T;
@@ -71,6 +77,8 @@ const messages = new Map<string, Entry<Message[]>>();
 const profiles = new Map<string, Entry<UserProfile>>();
 /** Brouillons par conversation : survivent à la fermeture de l'écran. */
 const drafts = new Map<string, string>();
+/** Compte propriétaire des données présentes dans le cache. */
+let ownerId: string | null = null;
 
 /** Écritures groupées : on évite d'écrire sur le disque à chaque message. */
 const pendingWrites = new Map<string, string>();
@@ -140,8 +148,32 @@ export const cache = {
         drafts.set(id.slice('draft:'.length), entry.value as string);
       } else if (id.startsWith('profiles:')) {
         profiles.set(id.slice('profiles:'.length), entry as Entry<UserProfile>);
+      } else if (id === OWNER_KEY) {
+        ownerId = typeof entry.value === 'string' ? entry.value : null;
       }
     }
+  },
+
+  /**
+   * Prépare le cache pour le compte authentifié. Les données d'un précédent
+   * compte sont supprimées ; celles du même compte sont conservées, y compris
+   * après une déconnexion volontaire.
+   */
+  async prepareForUser(userId: string): Promise<void> {
+    if (ownerId === userId) {
+      return;
+    }
+    if (ownerId !== null) {
+      await cache.clear();
+    }
+    ownerId = userId;
+    await safe(
+      (store) =>
+        store.multiSet([
+          [`${PREFIX}${OWNER_KEY}`, JSON.stringify({ value: userId, at: Date.now() })],
+        ]),
+      undefined,
+    );
   },
 
   setConversation(conversation: ConversationSummary) {
@@ -225,7 +257,10 @@ export const cache = {
 
   getMessages(conversationId: string): Message[] | null {
     const entry = messages.get(conversationId);
-    return isUsable(entry) ? entry.value : null;
+    // L'historique déjà chargé reste exploitable même après une longue
+    // coupure : le serveur reste l'autorité, mais une panne réseau ne doit pas
+    // faire disparaître les messages du disque.
+    return entry ? entry.value : null;
   },
 
   setProfile(profile: UserProfile) {
@@ -246,6 +281,7 @@ export const cache = {
     messages.clear();
     profiles.clear();
     pendingWrites.clear();
+    ownerId = null;
     if (writeTimer) {
       clearTimeout(writeTimer);
       writeTimer = null;
@@ -259,12 +295,12 @@ export const cache = {
   },
 
   /** Force l'écriture immédiate (utilisé à la déconnexion). */
-  flush(): void {
+  async flush(): Promise<void> {
     if (pendingWrites.size === 0) {
       return;
     }
     const entries = [...pendingWrites.entries()];
     pendingWrites.clear();
-    void safe((store) => store.multiSet(entries), undefined);
+    await safe((store) => store.multiSet(entries), undefined);
   },
 };

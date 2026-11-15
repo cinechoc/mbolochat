@@ -231,6 +231,26 @@ export async function abandonMediaPreparation(
   );
 }
 
+/**
+ * Abandon demandé par l'utilisateur : neutralise la reprise puis libère le
+ * ciphertext durable s'il n'est plus référencé par un message ou une enveloppe.
+ *
+ * L'appelant supprime d'abord l'outbox et la bulle locale. Cette fonction reste
+ * sans effet sur un identifiant qui n'a jamais eu de préparation média.
+ */
+export async function discardMediaPreparation(
+  db: SQLiteDatabase,
+  clientId: string,
+): Promise<boolean> {
+  const row = await db.getFirstAsync<{ state: MediaPreparationState }>(
+    'SELECT state FROM e2ee_media_prep WHERE client_id = ?',
+    clientId,
+  );
+  if (!row) return false;
+  await abandonMediaPreparation(db, clientId, 'discarded');
+  return removeDurableMediaIfUnreferenced(db, clientId);
+}
+
 /** Supprime la ligne : utilisé quand l'envoi est acquitté et rien ne reste. */
 /**
  * Achève le nettoyage d'une préparation dont l'envoi est **déjà acquitté**.

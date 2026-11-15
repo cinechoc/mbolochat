@@ -8,6 +8,18 @@ import type {
   ChatMessageView,
 } from '@/features/chat/transport/types';
 
+/**
+ * Source unique de la latéralité d'un message chiffré : l'identité de
+ * l'expéditeur authentifié, jamais une colonne `mine` qui peut dater d'un
+ * autre compte ou d'une ancienne session sur le même appareil.
+ */
+export function isOwnStoredMessage(
+  stored: Pick<StoredE2eeMessage, 'sender_id'>,
+  currentUserId: string,
+): boolean {
+  return stored.sender_id === currentUserId;
+}
+
 /** Identité normalisée, depuis un membre ou l'utilisateur courant. */
 export function identityOf(input: {
   id: string;
@@ -108,15 +120,25 @@ export function storedMessageToView(
     reactions?: ReactionSummary[];
   },
 ): ChatMessageView {
-  const mine = stored.mine === 1;
+  const mine = isOwnStoredMessage(stored, options.currentUser.id);
   const media = stored.media_meta ? decodeMediaMeta(stored.media_meta) : null;
   const deleted = stored.deleted === 1;
   const preview = deleted ? null : decodePreviewMeta(stored.preview_json);
+  const peerMatches = stored.sender_id === options.peer.id;
   const sender = mine
     ? options.currentUser
     : {
         ...options.peer,
-        displayName: stored.sender_name || options.peer.displayName,
+        // L'identifiant authentifié reste celui du message. Les autres
+        // métadonnées ne viennent du pair que si son identité correspond.
+        id: stored.sender_id,
+        username: peerMatches ? options.peer.username : '',
+        displayName:
+          stored.sender_name ||
+          (peerMatches ? options.peer.displayName : stored.sender_id),
+        avatarUrl: peerMatches ? options.peer.avatarUrl : null,
+        gender: peerMatches ? options.peer.gender : null,
+        genderCustom: peerMatches ? options.peer.genderCustom : null,
       };
   const attachment: ChatAttachmentView | null = media && !deleted
     ? {

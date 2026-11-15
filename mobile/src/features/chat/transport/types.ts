@@ -181,6 +181,8 @@ export interface OutgoingAsset {
   height: number | null;
   durationMs: number | null;
   waveform?: number[];
+  /** Photo conservée en pleine résolution, ré-encodée en JPEG sans EXIF. */
+  hd?: boolean;
   /** Lecture unique (vocal chiffré : enveloppe v:9 ; clair : drapeau serveur). */
   viewOnce?: boolean;
 }

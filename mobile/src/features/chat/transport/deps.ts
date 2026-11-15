@@ -62,7 +62,10 @@ type E2eeReceiptsModule = typeof import('@/features/e2ee/receipts');
 type E2eeDeletionModule = typeof import('@/features/e2ee/deletion');
 type E2eeDeletionFilesModule = typeof import('@/features/e2ee/deletionFiles');
 type E2eeEphemeralModule = typeof import('@/features/e2ee/ephemeral');
+type E2eeMediaPrepModule = typeof import('@/features/e2ee/mediaPrep');
 type E2eeScheduledModule = typeof import('@/features/e2ee/scheduledQueue');
+type E2eeOutboxRecoveryModule = typeof import('@/features/e2ee/outboxRecovery');
+type E2eeAtomicModule = typeof import('@/features/e2ee/atomic');
 
 /**
  * Dépendances injectables du transport chiffré. Les fonctions crypto sont
@@ -72,6 +75,7 @@ type E2eeScheduledModule = typeof import('@/features/e2ee/scheduledQueue');
 export interface E2eeTransportDeps {
   api: Pick<ApiModule['api'], 'listMessages' | 'listReceipts' | 'markMessagesRead'>;
   cache: Pick<CacheModule['cache'], 'patchConversation'>;
+  sync: Pick<SyncModule, 'onMissedMessages'>;
   socket: Pick<
     SocketModule,
     'connectSocket' | 'ensureSocket' | 'onConnection' | 'reportDelivered' | 'deleteMessage'
@@ -86,9 +90,12 @@ export interface E2eeTransportDeps {
     | 'saveDraft'
     | 'loadDraft'
     | 'deleteLocalMessage'
+    | 'consumeLocalViewOnce'
+    | 'markViewOnceServerHidden'
     | 'loadReactionSummaries'
     | 'loadConversationEphemeral'
     | 'loadLocalMessage'
+    | 'loadLocalMessageByClientId'
     | 'retryScheduledMessage'
   >;
   crypto: Pick<
@@ -105,10 +112,16 @@ export interface E2eeTransportDeps {
   deletion: Pick<E2eeDeletionModule, 'applyDeleteForAll'> &
     Pick<E2eeDeletionFilesModule, 'cleanupDeletedMedia'>;
   ephemeral: Pick<E2eeEphemeralModule, 'purgeExpiredMessages'>;
+  mediaPrep: Pick<E2eeMediaPrepModule, 'discardMediaPreparation'>;
   scheduled: Pick<
     E2eeScheduledModule,
     'enqueueScheduledText' | 'wakeScheduledQueue' | 'onScheduledEvent'
   >;
+  outboxRecovery: Pick<
+    E2eeOutboxRecoveryModule,
+    'onE2eeOutboxEvent' | 'retryE2eeOutboxMessage' | 'wakeE2eeOutboxRecovery'
+  > &
+    Pick<E2eeAtomicModule, 'discardPendingEnvelope'>;
   receipts: Pick<
     E2eeReceiptsModule,
     'mergeReceipts' | 'receiptState' | 'deliveredIds' | 'canReportDelivered'

@@ -1,8 +1,11 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
+import type { User } from './types';
+
 const ACCESS_KEY = 'mbolochat_access_token';
 const REFRESH_KEY = 'mbolochat_refresh_token';
+const CACHED_USER_KEY = 'mbolochat_cached_user';
 
 /**
  * Copie en mémoire du jeton d'accès : le stockage sécurisé est asynchrone,
@@ -51,6 +54,29 @@ export async function getStoredRefreshToken(): Promise<string | null> {
   return SecureStore.getItemAsync(REFRESH_KEY);
 }
 
+/** Identité publique minimale pour restaurer l'écran sans réseau. */
+export async function getCachedUser(): Promise<User | null> {
+  const raw =
+    Platform.OS === 'web'
+      ? (webStorage()?.getItem(CACHED_USER_KEY) ?? null)
+      : await SecureStore.getItemAsync(CACHED_USER_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as User;
+  } catch {
+    return null;
+  }
+}
+
+export async function storeCachedUser(user: User): Promise<void> {
+  const raw = JSON.stringify(user);
+  if (Platform.OS === 'web') {
+    webStorage()?.setItem(CACHED_USER_KEY, raw);
+    return;
+  }
+  await SecureStore.setItemAsync(CACHED_USER_KEY, raw);
+}
+
 export async function storeTokens(accessToken: string, refreshToken: string): Promise<void> {
   cachedAccessToken = accessToken;
   if (Platform.OS === 'web') {
@@ -77,8 +103,10 @@ export async function clearStoredTokens(): Promise<void> {
   if (Platform.OS === 'web') {
     webStorage()?.removeItem(ACCESS_KEY);
     webStorage()?.removeItem(REFRESH_KEY);
+    webStorage()?.removeItem(CACHED_USER_KEY);
     return;
   }
   await SecureStore.deleteItemAsync(ACCESS_KEY);
   await SecureStore.deleteItemAsync(REFRESH_KEY);
+  await SecureStore.deleteItemAsync(CACHED_USER_KEY);
 }

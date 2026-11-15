@@ -5,7 +5,6 @@ import { api } from '@/lib/api';
 import { ensureSocket } from '@/lib/socket';
 import type { ConversationSummary, Message } from '@/lib/types';
 import {
-  deleteLocalMessage,
   loadConversationEphemeral,
   loadE2eeAccount,
   loadLocalMessage,
@@ -164,22 +163,17 @@ export async function encryptEnvelope(input: {
   const peer = await peerOf(input.conversation, input.currentUserId);
   const clientId = input.clientId ?? null;
 
-  // Sonde non consommatrice, hors verrou : elle donne l'appareil du pair — donc
-  // la clé du verrou et l'identité de la ligne d'outbox — et détecte un
-  // changement de clé sans brûler de prekey.
-  let bundle = await api.getE2eeKeyBundle(input.token, peer.id, false);
   const now = () => new Date().toISOString();
 
-  /** Identité écrite avec chaque nouvelle enveloppe (v3) ; `bundle` peut avoir
-   * été relu entre-temps, d'où la fonction plutôt qu'une valeur figée. */
-  const outboxFor = (): OutboxRecord | undefined =>
+  /** Identité écrite avec chaque nouvelle enveloppe (v3). */
+  const outboxFor = (peerDeviceId: string): OutboxRecord | undefined =>
     clientId
       ? {
           clientId,
           conversationId: input.conversation.id,
           accountId: input.account.identity_key,
           peerUserId: peer.id,
-          peerDeviceId: bundle.deviceId,
+          peerDeviceId,
           attachmentId: input.attachmentId ?? null,
           mediaMeta: input.mediaMeta ?? null,
           quoteId: input.quoteId ?? null,
@@ -204,6 +198,77 @@ export async function encryptEnvelope(input: {
     // `pending`, `sending`, et `failed` explicitement autorisé : E fait foi.
     return stored.envelope;
   };
+
+  /**
+   * Chiffrement hors ligne avec la session Olm déjà négociée.
+   *
+   * Le bundle n'est indispensable qu'à l'ouverture d'une nouvelle session. Si
+   * une session existe, elle contient déjà l'identité et la clé de signature du
+   * pair : refuser d'envoyer sans réseau perdrait un message parfaitement
+   * chiffrable. Sans session, aucune prekey ne peut être vérifiée ici, donc
+   * l'erreur réseau d'origine est propagée.
+   */
+  const encryptWithLocalSession = async (bundleFailure: unknown): Promise<EncryptedEnvelope> => {
+    const latest = await loadSession(input.db, peer.id);
+    const peerDeviceId = latest?.peer_device_id ?? '';
+    return withOlmLock(
+      olmLockKey(input.account, peer.id, peerDeviceId),
+      async (): Promise<EncryptedEnvelope> => {
+        const reused = await reuse();
+        if (reused) {
+          return {
+            payload: reused.payload,
+            payloadType: reused.payloadType,
+            peerId: peer.id,
+            signingKey: latest?.peer_signing_key ?? '',
+            identityKey: latest?.peer_identity_key ?? '',
+            deviceId: peerDeviceId,
+          };
+        }
+        const session = latest
+          ? await loadSession(input.db, peer.id, peerDeviceId)
+          : null;
+        if (!session) throw bundleFailure;
+        const sealed = await MboloCrypto.secureEncrypt(
+          session.session_pickle,
+          input.plaintext,
+        );
+        const envelope: OutgoingEnvelope = {
+          payload: sealed.message,
+          payloadType: sealed.message_type as OutgoingEnvelope['payloadType'],
+        };
+        const stored = await persistSessionAndEnvelope({
+          db: input.db,
+          session: {
+            ...session,
+            session_pickle: sealed.session_pickle,
+            updated_at: now(),
+          },
+          envelope,
+          outbox: outboxFor(peerDeviceId),
+          clearPeerSessions: false,
+        });
+        return {
+          payload: (stored ?? envelope).payload,
+          payloadType: (stored ?? envelope).payloadType,
+          peerId: peer.id,
+          signingKey: session.peer_signing_key,
+          identityKey: session.peer_identity_key,
+          deviceId: peerDeviceId,
+        };
+      },
+    );
+  };
+
+  // Sonde non consommatrice, hors verrou : elle donne l'appareil du pair — donc
+  // la clé du verrou et l'identité de la ligne d'outbox — et détecte un
+  // changement de clé sans brûler de prekey.
+  let bundle: Awaited<ReturnType<typeof api.getE2eeKeyBundle>>;
+  try {
+    bundle = await api.getE2eeKeyBundle(input.token, peer.id, false);
+  } catch (cause) {
+    return encryptWithLocalSession(cause);
+  }
 
   type Prepared =
     | { kind: 'envelope'; envelope: OutgoingEnvelope }
@@ -252,7 +317,7 @@ export async function encryptEnvelope(input: {
           updated_at: now(),
         },
         envelope,
-        outbox: outboxFor(),
+        outbox: outboxFor(bundle.deviceId),
         clearPeerSessions: false,
       });
       await savePeerSigningKey(input.db, peer.id, bundle.signingKey, true, bundle.deviceId);
@@ -323,7 +388,7 @@ export async function encryptEnvelope(input: {
             updated_at: now(),
           },
           envelope,
-          outbox: outboxFor(),
+          outbox: outboxFor(bundle.deviceId),
           clearPeerSessions: clear,
         });
         await savePeerSigningKey(input.db, peer.id, bundle.signingKey, true, bundle.deviceId);
@@ -436,8 +501,10 @@ async function sendEncryptedContent(
   // La ligne provisoire est écrite avant l'envoi : un plantage entre les deux
   // ne doit pas rendre le message indéchiffrable et invisible.
   await saveLocalMessage(input.db, provisional);
-  const socket = await ensureSocket(input.token);
   try {
+    // La connexion fait partie du même échec récupérable : si elle est refusée
+    // hors ligne, la bulle doit être marquée en échec, jamais rester « Envoyé ».
+    const socket = await ensureSocket(input.token);
     const result = (await socket
       .timeout(15000)
       .emitWithAck('message:send', {
@@ -447,6 +514,7 @@ async function sendEncryptedContent(
         payload: encrypted.payload,
         payloadType: encrypted.payloadType,
         clientId,
+        viewOnce: content.viewOnce === true,
       })) as Message | { error?: string };
     if ('error' in result && result.error) {
       throw new Error(result.error);
@@ -459,16 +527,11 @@ async function sendEncryptedContent(
     const stored: StoredE2eeMessage = { ...provisional, id: serverMessage.id, created_at: serverMessage.createdAt };
     return { clientId, serverMessage, stored };
   } catch (cause) {
-    if (input.retainOnFailure) {
-      // Envoi programmé : la ligne et son clair restent dans SQLCipher pour un
-      // réessai explicite. Aucun message d'exception (potentiellement porteur
-      // de données) n'est persisté.
-      await markLocalMessageSendError(input.db, clientId).catch(() => undefined);
-    } else {
-      // Message local retiré, **enveloppe conservée** : une reprise avec le même
-      // clientId repartira exactement du même E, sans faire avancer l'état Olm.
-      await deleteLocalMessage(input.db, clientId).catch(() => undefined);
-    }
+    // La bulle et l'enveloppe restent toutes deux dans SQLCipher : la première
+    // rend l'échec visible et actionnable, la seconde permet une reprise
+    // idempotente avec le même `clientId`. Aucun texte d'exception n'est
+    // persisté, et le clair ne quitte jamais la base chiffrée.
+    await markLocalMessageSendError(input.db, clientId).catch(() => undefined);
     throw cause;
   }
 }
@@ -631,6 +694,12 @@ interface OpenedInbound {
   /** La clé publique d'identité du pair diffère de celle de la session connue. */
   identityChanged: boolean;
   knownKey: string | null;
+  /**
+   * Ancienne clé de session remplacée quand le serveur a fourni un nouvel
+   * identifiant d'appareil pour une session Olm déjà connue (reconnexion).
+   * La ligne est migrée dans la même transaction que l'avancée du ratchet.
+   */
+  replacesSessionDeviceId?: string;
 }
 
 /** Forme publique du résultat d'ouverture : clair codé + session avancée. */
@@ -764,12 +833,29 @@ async function runInbound<T>(
   const declared = message.senderDeviceId ?? '';
   // Lecture préalable : elle ne sert qu'à choisir la clé de verrou et à savoir
   // s'il existe une session. Aucun déchiffrement ne part d'ici.
-  const local = await loadSession(input.db, peerId, declared || undefined);
-  const deviceId = declared || local?.peer_device_id || '';
+  //
+  // Le JWT peut changer d'identifiant d'appareil après une reconnexion alors
+  // que la session Olm, elle, reste la même. Si l'identifiant déclaré est
+  // inconnu, on tente donc la session la plus récente du pair. Un message
+  // `normal` d'un véritable autre appareil ne pourra pas l'ouvrir : le
+  // déchiffrement authentifié échouera avant toute écriture.
+  const exact = await loadSession(input.db, peerId, declared || undefined);
+  const recent = declared && !exact ? await loadSession(input.db, peerId) : null;
+  const local = exact ?? recent;
+  const deviceId = local?.peer_device_id ?? declared;
   const lock = {
     accountId: input.account.identity_key,
     peerUserId: peerId,
     peerDeviceId: deviceId,
+  };
+
+  const normalizeDevice = (opened: OpenedInbound): OpenedInbound => {
+    if (!declared || opened.session.peer_device_id === declared) return opened;
+    return {
+      ...opened,
+      session: { ...opened.session, peer_device_id: declared },
+      replacesSessionDeviceId: opened.session.peer_device_id ?? undefined,
+    };
   };
 
   if (local) {
@@ -780,7 +866,10 @@ async function runInbound<T>(
       }
       const attempt = await attemptInbound(input, deviceId);
       if (attempt.kind === 'needs_bundle') return { kind: 'needs_bundle' as const };
-      return { kind: 'done' as const, value: await finalize(attempt.opened) };
+      return {
+        kind: 'done' as const,
+        value: await finalize(normalizeDevice(attempt.opened)),
+      };
     });
     if (first.kind !== 'needs_bundle') return first.value;
   } else if (message.payloadType !== 'prekey') {
@@ -799,13 +888,15 @@ async function runInbound<T>(
     // Une session a pu être ouverte pendant la récupération du bundle : elle
     // prime, sinon la prekey serait consommée deux fois.
     const attempt = await attemptInbound(input, bundle.deviceId);
-    if (attempt.kind === 'opened') return finalize(attempt.opened);
+    if (attempt.kind === 'opened') return finalize(normalizeDevice(attempt.opened));
     // Consommer une prekey fait avancer le pickle **global** du compte : la
     // lecture qui fait foi est donc reprise sous le verrou de compte, sinon
     // deux pairs simultanés partiraient du même état et l'un écraserait l'autre.
     return withAccountLock(input.account.identity_key, async () => {
       const current = (await loadE2eeAccount(input.db)) ?? input.account;
-      return finalize(await openWithBundle({ ...input, account: current }, bundle));
+      return finalize(
+        normalizeDevice(await openWithBundle({ ...input, account: current }, bundle)),
+      );
     });
   });
   return second;
@@ -840,6 +931,7 @@ async function finalizeUnreadable(
   message: Message,
   opened: OpenedInbound,
   reason: PayloadError,
+  currentUserId: string,
 ): Promise<DecryptIncomingResult> {
   const stored: StoredE2eeMessage = {
     id: message.id,
@@ -849,7 +941,7 @@ async function finalizeUnreadable(
     body: '',
     created_at: message.createdAt,
     client_id: message.clientId,
-    mine: 0,
+    mine: message.sender.id === currentUserId ? 1 : 0,
     media_meta: null,
     quote_id: null,
     sticker_ref: null,
@@ -864,6 +956,7 @@ async function finalizeUnreadable(
   await persistIncoming({
     db,
     session: opened.session,
+    replacesSessionDeviceId: opened.replacesSessionDeviceId,
     // `null` sur une session existante : le compte n'a pas bougé et l'écrire
     // écraserait l'avancée faite par un autre pair.
     account: opened.accountChanged ? opened.account : null,
@@ -1019,7 +1112,7 @@ export async function decryptIncoming(input: {
         // `InvalidPayloadError` et garde donc son traitement d'origine : rien
         // n'est persisté, le message n'est pas transformé en placeholder.
         if (!(error instanceof InvalidPayloadError)) throw error;
-        return finalizeUnreadable(input.db, message, opened, error.reason);
+        return finalizeUnreadable(input.db, message, opened, error.reason, input.currentUserId);
       }
       // Le corps affiché est le texte, ou la légende qui accompagne un média.
       // Un sticker n'a pas de corps : sa référence suffit à l'affichage, et le
@@ -1070,7 +1163,10 @@ export async function decryptIncoming(input: {
         body,
         created_at: message.createdAt,
         client_id: message.clientId,
-        mine: 0,
+        // Un message peut venir d'un autre appareil du même compte. La
+        // latéralité se déduit de l'expéditeur authentifié, jamais du seul
+        // fait qu'il soit arrivé par le socket.
+        mine: message.sender.id === input.currentUserId ? 1 : 0,
         // Les clés du média ne vivent que dans la base chiffrée : c'est ici, et
         // nulle part ailleurs, qu'elles sont conservées pour une lecture ultérieure.
         media_meta: parsed.kind === 'media' ? encodeMediaMeta(parsed.media) : null,
@@ -1107,6 +1203,7 @@ export async function decryptIncoming(input: {
       const persisted = await persistIncoming({
         db: input.db,
         session: opened.session,
+        replacesSessionDeviceId: opened.replacesSessionDeviceId,
         // `null` sur une session existante : le compte n'a pas bougé et une
         // écriture ici écraserait l'avancée faite par un autre pair.
         account: opened.accountChanged ? opened.account : null,

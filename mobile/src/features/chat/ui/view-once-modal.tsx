@@ -1,10 +1,21 @@
 import { Bomb, Eye } from 'lucide-react-native';
-import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { Radii, Spacing } from '@/constants/theme';
+import { MediaSurface, Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { fr } from '@/i18n/fr';
 import type { ChatMessageView } from '../transport/types';
@@ -12,6 +23,7 @@ import { MessageText } from '@/features/emoji/EmojiText';
 import { stopVoicePlayback, toggleVoicePlayback, useVoicePlayback } from '@/features/voice-notes/voicePlayback';
 import { closeMedia, openForView } from '@/features/e2ee/mediaStore';
 import { decodeMediaMeta } from '@/features/e2ee/payload';
+import { mediaUrl } from '@/features/media/mediaUrl';
 
 /** Lecteur éphémère d'un vocal à lecture unique : démarre à l'ouverture. */
 function VoiceOnceBody({ message }: { message: ChatMessageView }) {
@@ -170,6 +182,156 @@ function SecureVoiceOnceBody({ message, token }: { message: ChatMessageView; tok
   );
 }
 
+function OnceVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (instance) => {
+    instance.play();
+  });
+
+  useEffect(
+    () => () => {
+      player.pause();
+    },
+    [player],
+  );
+
+  return (
+    <VideoView
+      player={player}
+      style={StyleSheet.absoluteFill}
+      contentFit="contain"
+      nativeControls
+    />
+  );
+}
+
+function MediaOnceBody({ message, token }: { message: ChatMessageView; token: string | null }) {
+  const attachment = message.attachment;
+  const secure = useMemo(
+    () => (attachment?.encrypted ? decodeMediaMeta(attachment.mediaMeta ?? null) : null),
+    [attachment],
+  );
+  const secureKind =
+    secure?.type === 'IMAGE' || secure?.type === 'VIDEO' ? secure.type : null;
+  const classicKind =
+    !attachment?.encrypted &&
+    attachment?.url &&
+    (attachment.type === 'IMAGE' || attachment.type === 'VIDEO')
+      ? attachment.type
+      : null;
+  const kind = secureKind ?? classicKind;
+  const uploadId = secure?.blob.uploadId ?? null;
+  const [uri, setUri] = useState<string | null>(() =>
+    classicKind && attachment?.url ? mediaUrl(attachment.url) : null,
+  );
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!secure || !uploadId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (!token) throw new Error('view_once_token_missing');
+        const plain = await openForView({ token, blob: secure.blob, mime: secure.mime });
+        if (cancelled) {
+          closeMedia(uploadId);
+          return;
+        }
+        setUri(plain);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      closeMedia(uploadId);
+    };
+  }, [secure, token, uploadId]);
+
+  if (failed) {
+    return (
+      <View style={styles.mediaCenter}>
+        <ThemedText type="small" style={styles.mediaSoftText}>
+          {fr.e2eeMedia.unavailable}
+        </ThemedText>
+      </View>
+    );
+  }
+
+  if (!uri) {
+    return (
+      <View style={styles.mediaCenter}>
+        <ActivityIndicator size="large" color={MediaSurface.onSurface} />
+        <ThemedText type="small" style={styles.mediaSoftText}>
+          {fr.e2eeMedia.opening}
+        </ThemedText>
+      </View>
+    );
+  }
+
+  return kind === 'VIDEO' ? (
+    <OnceVideo uri={uri} />
+  ) : (
+    <Image source={{ uri }} style={StyleSheet.absoluteFill} contentFit="contain" />
+  );
+}
+
+function MediaViewOnceScreen({
+  message,
+  token,
+  onClose,
+}: {
+  message: ChatMessageView;
+  token: string | null;
+  onClose: () => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const label =
+    message.attachment?.type === 'VIDEO'
+      ? fr.chat.viewOnce.video
+      : fr.chat.viewOnce.photo;
+  return (
+    <View style={styles.mediaScreen}>
+      <MediaOnceBody message={message} token={token} />
+      <View style={[styles.mediaHeader, { paddingTop: insets.top + Spacing.two }]}>
+        <View style={styles.mediaTitlePill}>
+          <Eye size={16} strokeWidth={2.2} color={MediaSurface.onSurface} />
+          <ThemedText type="smallBold" style={styles.mediaText}>
+            {label}
+          </ThemedText>
+        </View>
+        <Pressable
+          onPress={onClose}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={fr.chat.viewOnce.close}
+          style={({ pressed }) => [styles.mediaClose, pressed && styles.mediaPressed]}>
+          <Ionicons name="close" size={25} color={MediaSurface.onSurface} />
+        </Pressable>
+      </View>
+      <View style={[styles.mediaFooter, { paddingBottom: Math.max(insets.bottom, Spacing.three) }]}>
+        {message.body ? (
+          <ThemedText type="small" numberOfLines={3} style={styles.mediaCaption}>
+            {message.body}
+          </ThemedText>
+        ) : null}
+        <ThemedText type="micro" style={styles.mediaSoftText}>
+          {fr.chat.viewOnce.warning}
+        </ThemedText>
+        <Pressable
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel={fr.chat.viewOnce.close}
+          style={({ pressed }) => [styles.mediaCloseButton, pressed && styles.mediaPressed]}>
+          <Bomb size={18} strokeWidth={2.2} color={MediaSurface.onSurface} />
+          <ThemedText type="smallBold" style={styles.mediaText}>
+            {fr.chat.viewOnce.close}
+          </ThemedText>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 export function ViewOnceModal({
   message,
   token,
@@ -189,6 +351,29 @@ export function ViewOnceModal({
     Boolean(token) &&
     message?.attachment?.encrypted === true &&
     decodeMediaMeta(message.attachment.mediaMeta ?? null)?.type === 'AUDIO';
+  const secureMedia = message?.attachment?.encrypted
+    ? decodeMediaMeta(message.attachment.mediaMeta ?? null)
+    : null;
+  const isMediaViewOnce =
+    Boolean(message) &&
+    ((secureMedia?.type === 'IMAGE' || secureMedia?.type === 'VIDEO') ||
+      (!message?.attachment?.encrypted &&
+        Boolean(message?.attachment?.url) &&
+        (message?.attachment?.type === 'IMAGE' || message?.attachment?.type === 'VIDEO')));
+
+  if (message && isMediaViewOnce) {
+    return (
+      <Modal
+        visible
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={onClose}>
+        <MediaViewOnceScreen message={message} token={token ?? null} onClose={onClose} />
+      </Modal>
+    );
+  }
+
   return (
     <Modal visible={message !== null} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
@@ -236,6 +421,70 @@ export function ViewOnceModal({
 }
 
 const styles = StyleSheet.create({
+  mediaScreen: {
+    flex: 1,
+    backgroundColor: MediaSurface.background,
+  },
+  mediaCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+  },
+  mediaHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.three,
+    paddingBottom: Spacing.two,
+    backgroundColor: MediaSurface.overlay,
+  },
+  mediaTitlePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.one,
+    borderRadius: Radii.full,
+    backgroundColor: MediaSurface.glass,
+  },
+  mediaClose: {
+    width: 42,
+    height: 42,
+    borderRadius: Radii.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: MediaSurface.glass,
+  },
+  mediaFooter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.three,
+    backgroundColor: MediaSurface.overlay,
+  },
+  mediaCaption: { color: MediaSurface.onSurface, textAlign: 'center' },
+  mediaCloseButton: {
+    alignSelf: 'stretch',
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    borderRadius: Radii.full,
+    backgroundColor: MediaSurface.glassStrong,
+  },
+  mediaText: { color: MediaSurface.onSurface },
+  mediaSoftText: { color: MediaSurface.onSurfaceSoft, textAlign: 'center' },
+  mediaPressed: { opacity: 0.72 },
   backdrop: {
     flex: 1,
     alignItems: 'center',

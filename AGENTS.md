@@ -24,7 +24,7 @@ npx expo start --dev-client
 - **Expo Go ne suffit pas** : le projet dépend de modules natifs absents d'Expo Go (`mbolo-crypto`, WebRTC/appels, SQLCipher, configuration FCM).
 - L'app déduit l'IP de l'API depuis Expo. Sinon : `EXPO_PUBLIC_API_URL=http://<ip>:3001 npx expo start --dev-client`.
 - `.env` est ignoré par Git. `api/.env` doit contenir `DATABASE_URL`, `JWT_SECRET`, `PORT`, `CORS_ORIGINS`.
-- `E2EE_ENABLED=false` par défaut : les routes `/e2ee` répondent 404 tant qu'il n'est pas à `true`.
+- E2EE est actif par défaut côté API et mobile ; seule une valeur explicite `false`/`0` le désactive (les routes `/e2ee` répondent alors 404).
 
 ## Vérifications
 

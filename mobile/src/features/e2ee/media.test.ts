@@ -206,7 +206,10 @@ beforeEach(() => {
   dbMock.saveLocalMessage.mockResolvedValue(undefined as never);
 });
 
-const send = () =>
+const send = (
+  asset: Partial<typeof imageAsset> & { hd?: boolean; viewOnce?: boolean } = {},
+  caption = 'ma photo',
+) =>
   sendEncryptedMedia({
     token: 'jeton',
     db: { runAsync: vi.fn().mockResolvedValue(undefined) } as never,
@@ -214,8 +217,8 @@ const send = () =>
     conversation,
     currentUserId: 'me',
     currentUserName: 'Moi',
-    asset: imageAsset,
-    caption: 'ma photo',
+    asset: { ...imageAsset, ...asset },
+    caption,
   });
 
 describe('envoi d un média chiffré', () => {
@@ -224,6 +227,13 @@ describe('envoi d un média chiffré', () => {
     // La photo passe par une réduction à 1600 px (retrait EXIF/GPS au passage),
     // la vignette à 320 px : deux manipulations distinctes.
     expect(manipulations.map((item) => item.maxWidth)).toEqual([PHOTO_MAX_EDGE, THUMB_MAX_EDGE]);
+    expect(manipulations[0].uri).toBe('file:///photos/original.jpg');
+  });
+
+  it('conserve la résolution en HD, mais ré-encode toujours sans EXIF', async () => {
+    await send({ hd: true });
+    // Pas de maxWidth pour le média HD ; la vignette reste bornée à 320 px.
+    expect(manipulations.map((item) => item.maxWidth)).toEqual([undefined, THUMB_MAX_EDGE]);
     expect(manipulations[0].uri).toBe('file:///photos/original.jpg');
   });
 
@@ -362,5 +372,26 @@ describe('envoi d un média chiffré', () => {
     const payload = JSON.parse(Buffer.from(envelopeInput.plaintext, 'base64').toString('utf8'));
     expect(payload.media.type).toBe('VIDEO');
     expect(payload.media.thumb).toBeDefined();
+  });
+
+  it('envoie une photo à vue unique en v:9 avec la légende dans le chiffré', async () => {
+    await send({ viewOnce: true }, '  regarde ceci  ');
+    // Le serveur doit aussi connaître le drapeau : il pilote l'aperçu et les
+    // notifications, même si la sémantique complète vit dans l'enveloppe.
+    expect(emitted[0].body.viewOnce).toBe(true);
+    const [envelopeInput] = envelopeMock.mock.calls[0] as unknown as [{ plaintext: string }];
+    const payload = JSON.parse(Buffer.from(envelopeInput.plaintext, 'base64').toString('utf8'));
+    expect(payload).toMatchObject({
+      v: 9,
+      kind: 'media',
+      caption: 'regarde ceci',
+      viewOnce: true,
+    });
+    expect(payload.media.type).toBe('IMAGE');
+  });
+
+  it('n envoie pas viewOnce pour un média normal', async () => {
+    await send();
+    expect(emitted[0].body.viewOnce).toBe(false);
   });
 });

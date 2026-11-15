@@ -10,6 +10,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import helmet from 'helmet';
 import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module.js';
+import { isE2eeEnabled } from './e2ee/enabled.js';
 import { allowedOriginsFromEnv, isAllowedOrigin } from './common/cors.js';
 import { DRIZZLE, type Database } from './db/db.module.js';
 
@@ -65,8 +66,7 @@ async function bootstrap() {
   const logger = new Logger('HTTP');
   app.use((req: Request, res: Response, next: NextFunction) => {
     res.on('finish', () => {
-      const e2eeEnabled = ['1', 'true'].includes((process.env.E2EE_ENABLED ?? '').toLowerCase());
-      const path = e2eeEnabled ? req.originalUrl.split('?')[0] : req.originalUrl;
+      const path = isE2eeEnabled() ? req.originalUrl.split('?')[0] : req.originalUrl;
       logger.log(`${req.method} ${path} -> ${res.statusCode}`);
     });
     next();

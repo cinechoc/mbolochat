@@ -1,6 +1,6 @@
 import type { MessageReceipt, ReactionSummary } from '@/lib/types';
 import type { ChatMessageView, ChatSnapshot } from '../transport/types';
-import { fullSort } from './merge';
+import { fullSort, mergeMessages } from './merge';
 
 /** État complet des messages, manipulé par des actions pures. */
 export interface MessagesState {
@@ -100,6 +100,18 @@ export function removeMessage(
   return [...messages.slice(0, index), ...messages.slice(index + 1)];
 }
 
+/** Messages étrangers ajoutés depuis le dernier rendu connu. */
+export function newForeignMessageIds(
+  messages: readonly ChatMessageView[],
+  knownIds: ReadonlySet<string>,
+): string[] {
+  return messages
+    .filter(
+      (message) => !message.mine && !message.deleted && !knownIds.has(message.id),
+    )
+    .map((message) => message.id);
+}
+
 /** « Supprimer pour tous » conserve la rangée, vidée. */
 export function markMessageDeleted(
   messages: readonly ChatMessageView[],
@@ -161,7 +173,12 @@ export function messagesReducer(state: MessagesState, action: MessagesAction): M
     case 'snapshot':
       return {
         ...state,
-        messages: fullSort(action.snapshot.messages),
+        // L'abonnement socket est actif pendant `loadInitial`. Un message reçu
+        // après la lecture serveur mais avant l'arrivée de l'instantané ne doit
+        // pas être effacé par ce dernier : on fusionne les deux vues.
+        messages: fullSort(
+          mergeMessages(state.messages, action.snapshot.messages),
+        ),
         receipts: action.snapshot.receipts,
         ready: true,
         hasMore: action.snapshot.hasMore,

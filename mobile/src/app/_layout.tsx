@@ -19,6 +19,10 @@ import {
   drainScheduledQueue,
   startE2eeScheduledQueue,
 } from '@/features/e2ee/scheduledQueue';
+import {
+  drainE2eeOutbox,
+  startE2eeOutboxRecovery,
+} from '@/features/e2ee/outboxRecovery';
 import { CityAutoDetector } from '@/features/location/CityAutoDetector';
 import { drain } from '@/lib/outbox';
 import { configureNotificationHandler, subscribeToNotificationOpens } from '@/lib/push';
@@ -133,6 +137,17 @@ function ReliabilityLoop() {
     if (loading || !token || !user) {
       return;
     }
+    return startE2eeOutboxRecovery({
+      token,
+      currentUserId: user.id,
+      currentUserName: user.displayName,
+    });
+  }, [loading, token, user]);
+
+  useEffect(() => {
+    if (loading || !token || !user) {
+      return;
+    }
     return startE2eeScheduledQueue({
       token,
       currentUserId: user.id,
@@ -148,6 +163,7 @@ function ReliabilityLoop() {
       if (state === 'active') {
         void runSync(token, user.id);
         void drain(token);
+        void drainE2eeOutbox();
         void drainScheduledQueue();
       }
     });

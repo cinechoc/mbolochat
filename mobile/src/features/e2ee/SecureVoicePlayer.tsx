@@ -8,6 +8,7 @@ import { VoiceMessageBubble, voiceBubbleWidth } from '@/features/voice-notes/Voi
 import { toWaveform } from '@/features/voice-notes/useVoiceRecorder';
 import { transcribeVoiceMessage } from '@/features/voice-notes/transcription';
 import { fr } from '@/i18n/fr';
+import { useAuth } from '@/lib/auth-context';
 import { openE2eeDatabase } from './db';
 import { openForView } from './mediaStore';
 import { voiceTranscriptionAvailable } from '@/features/voice-notes/transcription';
@@ -31,6 +32,7 @@ export function SecureVoicePlayer({
   mine: boolean;
   onLongPress?: () => void;
 }) {
+  const { user } = useAuth();
   const chat = useChatColors();
   const { width: screenW } = useWindowDimensions();
   const [uri, setUri] = useState<string | null>(null);
@@ -74,7 +76,8 @@ export function SecureVoicePlayer({
         // produit, le moteur tourne sur l'appareil, le cache vit en SQLCipher.
         transcribable={!mine && voiceTranscriptionAvailable()}
         onTranscribe={async () => {
-          const { db } = await openE2eeDatabase();
+          if (!user?.id) throw new Error('e2ee_account_missing');
+          const { db } = await openE2eeDatabase(user.id);
           return transcribeVoiceMessage(db, id, {
             uri,
             mimeType: media.mime,

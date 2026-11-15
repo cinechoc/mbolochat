@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { deleteDatabaseAsync } from 'expo-sqlite';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MboloCrypto } from '../../../modules/mbolo-crypto/src';
@@ -24,6 +25,15 @@ vi.mock('../../../modules/mbolo-crypto/src', () => ({
 }));
 
 vi.mock('@/lib/api', () => ({
+  ApiError: class ApiError extends Error {
+    constructor(
+      public readonly status: number,
+      message: string,
+    ) {
+      super(message);
+      this.name = 'ApiError';
+    }
+  },
   api: {
     getE2eeStatus: vi.fn(),
     registerE2eeDevice: vi.fn(),
@@ -100,14 +110,19 @@ function openDb(): { raw: DatabaseSync; handle: Handle; db: never } {
   return { raw, handle, db: handle as never };
 }
 
-const seedAccount = async (fixture: ReturnType<typeof openDb>, pickle = 'A0') => {
+const seedAccount = async (
+  fixture: ReturnType<typeof openDb>,
+  pickle = 'A0',
+  userId: string | null = null,
+) => {
   await fixture.handle.runAsync(
     `INSERT INTO e2ee_account
-       (id, account_pickle, device_id, identity_key, signing_key, fallback_key,
+       (id, account_pickle, device_id, user_id, identity_key, signing_key, fallback_key,
         fallback_signature, fallback_key_id, created_at)
-     VALUES (1, ?, 'dev-local', 'local-identity', 'local-signing', 'fb', 'fbsig', 'fb1',
+     VALUES (1, ?, 'dev-local', ?, 'local-identity', 'local-signing', 'fb', 'fbsig', 'fb1',
              '2026-01-01T00:00:00Z')`,
     pickle,
+    userId,
   );
 };
 
@@ -135,7 +150,7 @@ describe('bootstrapE2ee — pickle global du compte', () => {
     // Deux écrans qui s'ouvrent ensemble appellent bootstrap en parallèle.
     openMock.mockResolvedValue({ db: fixture.db, recovered: false } as never);
 
-    await Promise.all([bootstrapE2ee('t'), bootstrapE2ee('t')]);
+    await Promise.all([bootstrapE2ee('t', 'user-a'), bootstrapE2ee('t', 'user-a')]);
 
     // Chaque génération part de l'état écrit par la précédente : rien n'est
     // écrasé, donc aucune clé privée publiée ne manque au compte.
@@ -151,9 +166,81 @@ describe('bootstrapE2ee — pickle global du compte', () => {
     openMock.mockResolvedValue({ db: fixture.db, recovered: false } as never);
     cryptoMock.secureGenerateOneTimeKeysSigned.mockRejectedValueOnce(new Error('crypto') as never);
 
-    const result = await bootstrapE2ee('t');
+    const result = await bootstrapE2ee('t', 'user-a');
 
     expect(result.registered).toBe(false);
     expect((await loadE2eeAccount(fixture.db))?.account_pickle).toBe('A0');
+  });
+
+  it('ne réinscrit pas ni ne régénère les clés quand le statut est hors ligne', async () => {
+    const fixture = openDb();
+    await migrateE2eeSchema(fixture.db);
+    await seedAccount(fixture);
+    openMock.mockResolvedValue({ db: fixture.db, recovered: false } as never);
+    const { ApiError } = await import('@/lib/api');
+    apiMock.getE2eeStatus.mockRejectedValueOnce(
+      new ApiError(0, 'Impossible de contacter le serveur') as never,
+    );
+
+    const result = await bootstrapE2ee('t', 'user-a');
+
+    expect(result.registered).toBe(false);
+    expect(result.error).toBe('e2ee_status_network');
+    // Aucun appel réseau d'écriture et aucune prekey neuve : l'état local est
+    // intact et la reprise automatique republiera le même compte.
+    expect(apiMock.registerE2eeDevice).not.toHaveBeenCalled();
+    expect(apiMock.addE2eePrekeys).not.toHaveBeenCalled();
+    expect((await loadE2eeAccount(fixture.db))?.account_pickle).toBe('A0');
+  });
+
+  it('conserve les clés d’un même compte après reconnexion', async () => {
+    const fixture = openDb();
+    await migrateE2eeSchema(fixture.db);
+    await seedAccount(fixture, 'A0', 'user-a');
+    openMock.mockResolvedValue({ db: fixture.db, recovered: false } as never);
+
+    await bootstrapE2ee('t', 'user-a');
+
+    expect(deleteDatabaseAsync).not.toHaveBeenCalled();
+    expect((await loadE2eeAccount(fixture.db))?.account_pickle).toContain('A0');
+  });
+
+  it('rattache les enveloppes d’une base antérieure à l’identité existante', async () => {
+    const fixture = openDb();
+    await migrateE2eeSchema(fixture.db);
+    await seedAccount(fixture, 'A0', 'user-a');
+    await fixture.handle.runAsync(
+      `INSERT INTO e2ee_outbox
+         (client_id, conversation_id, envelope, envelope_type, session_pickle,
+          state, created_at, updated_at)
+       VALUES ('legacy', 'conv-1', 'E1', 'normal', 'S1', 'pending',
+               '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+    );
+    openMock.mockResolvedValue({ db: fixture.db, recovered: false } as never);
+
+    await bootstrapE2ee('t', 'user-a');
+
+    const row = await fixture.handle.getFirstAsync<{ account_id: string | null }>(
+      "SELECT account_id FROM e2ee_outbox WHERE client_id = 'legacy'",
+    );
+    expect(row).toEqual({ account_id: 'local-identity' });
+  });
+
+  it('refuse une base appartenant à un autre compte sans la détruire', async () => {
+    const fixture = openDb();
+    await migrateE2eeSchema(fixture.db);
+    await seedAccount(fixture, 'A0', 'user-a');
+    openMock.mockResolvedValue({ db: fixture.db, recovered: false } as never);
+
+    const result = await bootstrapE2ee('t', 'user-b');
+
+    expect(result).toMatchObject({ registered: false, error: 'e2ee_account_mismatch' });
+    expect(deleteDatabaseAsync).not.toHaveBeenCalled();
+    expect(cryptoMock.secureCreateAccount).not.toHaveBeenCalled();
+    expect(await loadE2eeAccount(fixture.db)).toMatchObject({
+      account_pickle: 'A0',
+      user_id: 'user-a',
+      identity_key: 'local-identity',
+    });
   });
 });

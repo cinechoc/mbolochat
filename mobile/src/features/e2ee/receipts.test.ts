@@ -99,14 +99,17 @@ describe('mergeReceipts — ordre et idempotence', () => {
 });
 
 describe('deliveredIds — ce que l’appareil a réellement reçu', () => {
-  it('ne retient que les messages des autres, sans doublon', () => {
+  it('ne retient que les messages des autres, d’après sender_id, sans doublon', () => {
     const ids = deliveredIds([
-      { id: 'a', mine: 0 },
-      { id: 'b', mine: 1 },
-      { id: 'a', mine: 0 },
-      { id: '', mine: 0 },
-    ]);
-    expect(ids).toEqual(['a']);
+      { id: 'a', sender_id: 'peer' },
+      { id: 'b', sender_id: 'me' },
+      { id: 'a', sender_id: 'peer' },
+      { id: '', sender_id: 'peer' },
+      // Colonne obsolète : l'expéditeur authentifié fait foi.
+      { id: 'c', sender_id: 'peer', mine: 1 } as never,
+      { id: 'd', sender_id: 'me', mine: 0 } as never,
+    ], 'me');
+    expect(ids).toEqual(['a', 'c']);
   });
 });
 
